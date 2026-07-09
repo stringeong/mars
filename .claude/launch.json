@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "server",
+      "runtimeExecutable": "/Users/hyunjeongkim/capstone/server/.venv/bin/uvicorn",
+      "runtimeArgs": [
+        "--app-dir",
+        "/Users/hyunjeongkim/capstone/server",
+        "app.main:app",
+        "--port",
+        "8000"
+      ],
+      "port": 8000
+    },
+    {
+      "name": "web",
+      "runtimeExecutable": "/usr/local/bin/npm",
+      "runtimeArgs": ["run", "dev", "--prefix", "/Users/hyunjeongkim/capstone/web"],
+      "port": 5173
+    }
+  ]
+}

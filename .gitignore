@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.db
+node_modules/
+dist/
+.env
+worker/agent_config.json
+.DS_Store
+.idea/
+*.tsbuildinfo
+demo_data/
