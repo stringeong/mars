@@ -63,10 +63,16 @@ def reclaim_stale_tasks(db: Session, user_id: int) -> None:
 
 
 def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | None:
-    """해당 기기(소유 사용자)의 ready 작업 하나를 할당한다."""
+    """해당 기기(소유 사용자)의 ready 작업 하나를 할당한다.
+
+    여러 기기가 동시에 폴링해도 같은 작업이 중복 할당되지 않도록,
+    조회 후 대입이 아니라 'status=ready인 행만 갱신'하는 원자적 UPDATE로 선점한다.
+    UPDATE가 0행이면 다른 기기가 먼저 가져간 것이므로 다음 후보로 넘어간다.
+    """
     reclaim_stale_tasks(db, device.user_id)
-    task = (
-        db.query(models.TaskRecord)
+    candidate_ids = [
+        row[0]
+        for row in db.query(models.TaskRecord.id)
         .join(models.Execution, models.TaskRecord.execution_id == models.Execution.id)
         .filter(
             models.Execution.user_id == device.user_id,
@@ -74,13 +80,32 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
             models.TaskRecord.status == "ready",
         )
         .order_by(models.TaskRecord.id)
-        .first()
-    )
+        .limit(10)
+        .all()
+    ]
+    task = None
+    for tid in candidate_ids:
+        claimed = (
+            db.query(models.TaskRecord)
+            .filter(
+                models.TaskRecord.id == tid,
+                models.TaskRecord.status == "ready",
+            )
+            .update(
+                {
+                    "status": "running",
+                    "assigned_device_id": device.id,
+                    "started_at": models.utcnow(),
+                },
+                synchronize_session=False,
+            )
+        )
+        if claimed:
+            db.flush()
+            task = db.get(models.TaskRecord, tid)
+            break
     if task is None:
         return None
-    task.status = "running"
-    task.assigned_device_id = device.id
-    task.started_at = models.utcnow()
     # 실행 프롬프트 + 선행 출력들을 입력 컨텍스트로 구성
     execution = db.get(models.Execution, task.execution_id)
     parents = dag.parents_of(execution.graph_snapshot).get(task.node_id, [])

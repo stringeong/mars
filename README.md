@@ -19,13 +19,25 @@
 cd server
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 - API 문서: http://localhost:8000/docs
 - DB는 `server/mars.db` (SQLite) 에 자동 생성됩니다.
 - 프롬프트→워크플로우 생성에 Ollama를 사용합니다. Ollama가 없으면 규칙 기반 폴백으로 동작합니다.
-  - `OLLAMA_URL` (기본 `http://localhost:11434`), `MARS_DEFAULT_MODEL` (기본 `qwen3:4b`) 환경변수로 변경 가능.
+  - `OLLAMA_URL` (기본 `http://localhost:11434`), `MARS_DEFAULT_MODEL` (기본 `gemma3:4b`) 환경변수로 변경 가능.
+- `--host 0.0.0.0` 은 같은 네트워크의 다른 기기(팀원 노트북 등)가 Worker로 접속할 수 있게 합니다.
+  로컬에서만 쓸 거면 생략해도 됩니다.
+
+#### 여러 기기로 분산 실행하기 (데모 구성)
+
+1. 서버 기기에서 위처럼 `--host 0.0.0.0` 으로 서버를 켜고, 서버 기기의 LAN IP를 확인합니다
+   (`ipconfig getifaddr en0` → 예: `192.168.0.10`).
+2. 다른 기기(팀원 노트북)에서 Worker를 설치하고 서버 IP로 등록합니다:
+   `python -m agent register --server http://192.168.0.10:8000`
+3. 각 기기에서 `python -m agent run` 을 켜두면, 워크플로우의 병렬 단계가
+   서로 다른 기기에 분배되어 동시에 실행됩니다.
+4. 같은 공유기(사설 IP 대역) 안에서만 동작하도록 CORS가 설정되어 있습니다.
 
 ### 2. Worker Agent (작업을 실행할 기기마다)
 

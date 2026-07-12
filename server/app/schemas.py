@@ -1,6 +1,16 @@
-from datetime import datetime
+from datetime import datetime, timezone
+from typing import Annotated
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, PlainSerializer
+
+# DB에는 UTC를 tz 정보 없이 저장하므로, 응답 직렬화 시 UTC임을 명시해야
+# 브라우저가 사용자 로컬 시간대로 올바르게 변환한다.
+UTCDateTime = Annotated[
+    datetime,
+    PlainSerializer(
+        lambda v: v.replace(tzinfo=timezone.utc).isoformat(), return_type=str
+    ),
+]
 
 # ---------- Auth ----------
 
@@ -40,7 +50,7 @@ class DeviceOut(BaseModel):
     name: str
     specs: dict
     allowed_folders: list
-    last_heartbeat: datetime | None
+    last_heartbeat: UTCDateTime | None
     online: bool = False
 
     model_config = {"from_attributes": True}
@@ -97,8 +107,8 @@ class ServiceOut(BaseModel):
     name: str
     description: str
     graph: dict
-    created_at: datetime
-    updated_at: datetime
+    created_at: UTCDateTime
+    updated_at: UTCDateTime
 
     model_config = {"from_attributes": True}
 
@@ -118,8 +128,8 @@ class TaskOut(BaseModel):
     assigned_device_id: int | None
     output: str | None
     error: str | None
-    started_at: datetime | None
-    finished_at: datetime | None
+    started_at: UTCDateTime | None
+    finished_at: UTCDateTime | None
 
     model_config = {"from_attributes": True}
 
@@ -131,8 +141,8 @@ class ExecutionOut(BaseModel):
     status: str
     result: str | None
     error: str | None
-    created_at: datetime
-    finished_at: datetime | None
+    created_at: UTCDateTime
+    finished_at: UTCDateTime | None
     progress: float = 0.0
     tasks: list[TaskOut] = Field(default_factory=list)
 
@@ -145,8 +155,8 @@ class ExecutionListItem(BaseModel):
     service_name: str = ""
     run_prompt: str
     status: str
-    created_at: datetime
-    finished_at: datetime | None
+    created_at: UTCDateTime
+    finished_at: UTCDateTime | None
 
     model_config = {"from_attributes": True}
 
