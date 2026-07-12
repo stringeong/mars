@@ -17,6 +17,9 @@ SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.
 규칙:
 - 에이전트는 2~6개. 각 에이전트는 한 가지 역할만 담당한다.
 - edges는 방향성 비순환 그래프(DAG)여야 한다. 병렬 분기가 자연스러우면 사용한다.
+- 연결은 반드시 앞 단계에서 뒤 단계로 한 방향으로만 흐른다. 검토·첨삭·개선처럼
+  앞 단계 결과를 다듬는 작업도 뒤에 새 에이전트를 두어 처리하고, 이전 에이전트로
+  되돌아가는 연결(피드백 루프)은 절대 만들지 않는다.
 - role_prompt는 해당 에이전트에게 줄 시스템 프롬프트로, 한국어로 구체적으로 작성한다.
 - 반드시 아래 JSON 형식만 출력한다. 다른 텍스트는 출력하지 않는다.
 
@@ -81,60 +84,76 @@ def _fallback_graph(prompt: str) -> dict:
     }
 
 
-async def generate_workflow(prompt: str) -> tuple[dict, str]:
-    """(graph_dict, source) 반환. source는 'llm' 또는 'fallback'."""
-    try:
-        async with httpx.AsyncClient(timeout=120) as client:
-            resp = await client.post(
-                f"{OLLAMA_URL}/api/chat",
-                json={
-                    "model": DEFAULT_MODEL,
-                    "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    "stream": False,
-                    "options": {"temperature": 0.3},
-                },
-            )
-            resp.raise_for_status()
-            content = resp.json()["message"]["content"]
-            data = _extract_json(content)
+async def _generate_once(prompt: str, temperature: float) -> dict:
+    """LLM을 1회 호출해 그래프를 만들고 DAG 검증까지 통과시킨다. 실패 시 예외."""
+    from . import dag
 
-        nodes = data.get("nodes") or []
-        if not nodes:
-            raise ValueError("에이전트가 비어 있음")
-        graph = {
-            "name": data.get("name") or "새 서비스",
-            "description": data.get("description") or prompt,
-            "nodes": [
-                {
-                    "id": str(n.get("id") or f"agent{i}"),
-                    "name": n.get("name") or f"에이전트 {i + 1}",
-                    "role_prompt": n.get("role_prompt") or "",
-                    "model": "",
-                    "allowed_folders": [],
-                }
-                for i, n in enumerate(nodes)
-            ],
-            "edges": [
-                {"source": str(e["source"]), "target": str(e["target"])}
-                for e in (data.get("edges") or [])
-                if e.get("source") and e.get("target")
-            ],
-        }
-        return graph, "llm"
-    except Exception:
-        fb = _fallback_graph(prompt)
-        graph = {
-            "name": fb["name"],
-            "description": fb["description"],
-            "nodes": [
-                {**n, "model": "", "allowed_folders": []} for n in fb["nodes"]
-            ],
-            "edges": fb["edges"],
-        }
-        return graph, "fallback"
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(
+            f"{OLLAMA_URL}/api/chat",
+            json={
+                "model": DEFAULT_MODEL,
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                "stream": False,
+                "options": {"temperature": temperature},
+            },
+        )
+        resp.raise_for_status()
+        content = resp.json()["message"]["content"]
+        data = _extract_json(content)
+
+    nodes = data.get("nodes") or []
+    if not nodes:
+        raise ValueError("에이전트가 비어 있음")
+    graph = {
+        "name": data.get("name") or "새 서비스",
+        "description": data.get("description") or prompt,
+        "nodes": [
+            {
+                "id": str(n.get("id") or f"agent{i}"),
+                "name": n.get("name") or f"에이전트 {i + 1}",
+                "role_prompt": n.get("role_prompt") or "",
+                "model": "",
+                "allowed_folders": [],
+            }
+            for i, n in enumerate(nodes)
+        ],
+        "edges": [
+            {"source": str(e["source"]), "target": str(e["target"])}
+            for e in (data.get("edges") or [])
+            if e.get("source") and e.get("target")
+        ],
+    }
+    # LLM이 순환 그래프 등 실행 불가능한 구성을 제안하면 여기서 예외 발생
+    dag.validate_graph(graph)
+    return graph
+
+
+async def generate_workflow(prompt: str) -> tuple[dict, str]:
+    """(graph_dict, source) 반환. source는 'llm' 또는 'fallback'.
+
+    LLM 출력이 잘못되면(JSON 파싱 실패, 순환 그래프 등) 온도를 낮춰 1회 재시도하고,
+    그래도 실패하면 규칙 기반 폴백으로 항상 유효한 그래프를 보장한다 —
+    사용자에게 '생성 실패'를 돌려주는 일이 없도록 한다.
+    """
+    for temperature in (0.3, 0.1):
+        try:
+            return await _generate_once(prompt, temperature), "llm"
+        except Exception:
+            continue
+    fb = _fallback_graph(prompt)
+    graph = {
+        "name": fb["name"],
+        "description": fb["description"],
+        "nodes": [
+            {**n, "model": "", "allowed_folders": []} for n in fb["nodes"]
+        ],
+        "edges": fb["edges"],
+    }
+    return graph, "fallback"
 
 
 REVISE_SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.
