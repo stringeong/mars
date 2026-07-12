@@ -135,3 +135,88 @@ async def generate_workflow(prompt: str) -> tuple[dict, str]:
             "edges": fb["edges"],
         }
         return graph, "fallback"
+
+
+REVISE_SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.
+'현재 워크플로우' JSON과 사용자의 수정 지시를 읽고, 지시를 반영한 새 워크플로우 JSON을 출력하세요.
+
+규칙:
+- 수정 지시와 무관한 에이전트는 id, name, role_prompt를 그대로 유지한다.
+- 기존 에이전트를 유지할 때는 반드시 같은 id를 사용한다.
+- edges는 방향성 비순환 그래프(DAG)여야 한다.
+- 반드시 아래 JSON 형식만 출력한다. 다른 텍스트는 출력하지 않는다.
+
+{
+  "name": "서비스 이름",
+  "description": "서비스 한 줄 설명",
+  "nodes": [
+    {"id": "agent1", "name": "에이전트 이름", "role_prompt": "..."}
+  ],
+  "edges": [
+    {"source": "agent1", "target": "agent2"}
+  ]
+}"""
+
+
+async def revise_workflow(graph: dict, instruction: str) -> dict:
+    """현재 그래프에 자연어 수정 지시를 반영한 새 그래프를 반환한다.
+
+    생성과 달리 폴백이 없다 — 실패하면 예외를 던져 사용자의 기존 그래프를 보존한다.
+    """
+    current = {
+        "nodes": [
+            {"id": n["id"], "name": n.get("name", ""), "role_prompt": n.get("role_prompt", "")}
+            for n in graph.get("nodes", [])
+        ],
+        "edges": graph.get("edges", []),
+    }
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(
+            f"{OLLAMA_URL}/api/chat",
+            json={
+                "model": DEFAULT_MODEL,
+                "messages": [
+                    {"role": "system", "content": REVISE_SYSTEM_PROMPT},
+                    {
+                        "role": "user",
+                        "content": (
+                            "현재 워크플로우:\n" + json.dumps(current, ensure_ascii=False)
+                            + "\n\n수정 지시: " + instruction
+                        ),
+                    },
+                ],
+                "stream": False,
+                "options": {"temperature": 0.2},
+            },
+        )
+        resp.raise_for_status()
+        data = _extract_json(resp.json()["message"]["content"])
+
+    nodes = data.get("nodes") or []
+    if not nodes:
+        raise ValueError("수정 결과에 에이전트가 없습니다.")
+
+    # 기존 노드의 모델·허용 폴더·좌표는 LLM 출력에 없으므로 id 기준으로 보존한다
+    old = {n["id"]: n for n in graph.get("nodes", [])}
+    merged_nodes = []
+    for i, n in enumerate(nodes):
+        nid = str(n.get("id") or f"agent{i}")
+        prev = old.get(nid, {})
+        merged_nodes.append({
+            "id": nid,
+            "name": n.get("name") or prev.get("name") or f"에이전트 {i + 1}",
+            "role_prompt": n.get("role_prompt") or prev.get("role_prompt") or "",
+            "model": prev.get("model", ""),
+            "allowed_folders": prev.get("allowed_folders", []),
+            "position": prev.get("position"),
+        })
+    return {
+        "name": data.get("name"),
+        "description": data.get("description"),
+        "nodes": merged_nodes,
+        "edges": [
+            {"source": str(e["source"]), "target": str(e["target"])}
+            for e in (data.get("edges") or [])
+            if e.get("source") and e.get("target")
+        ],
+    }

@@ -82,6 +82,10 @@ class ServiceGenerate(BaseModel):
     prompt: str = Field(min_length=5, description="만들고자 하는 서비스를 설명하는 자연어")
 
 
+class ServiceRevise(BaseModel):
+    instruction: str = Field(min_length=2, description="워크플로우를 어떻게 고칠지 설명하는 자연어")
+
+
 class ServiceUpdate(BaseModel):
     name: str | None = None
     description: str | None = None

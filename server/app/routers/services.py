@@ -7,7 +7,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..security import get_current_user
 from ..services import dag
-from ..services.generator import generate_workflow
+from ..services.generator import generate_workflow, revise_workflow
 
 router = APIRouter(prefix="/services", tags=["services"])
 
@@ -87,6 +87,30 @@ def update_service(
     db.commit()
     db.refresh(service)
     return service
+
+
+@router.post("/{service_id}/revise")
+async def revise_service(
+    service_id: int,
+    body: schemas.ServiceRevise,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """자연어 지시로 워크플로우 수정안을 생성한다. 저장하지 않고 수정안만 반환 —
+    사용자가 캔버스에서 확인 후 직접 저장한다."""
+    service = _get_owned(service_id, user, db)
+    try:
+        revised = await revise_workflow(service.graph, body.instruction.strip())
+    except Exception:
+        raise HTTPException(
+            503, "AI 수정에 실패했습니다. 로컬 LLM(Ollama)이 실행 중인지 확인해 주세요."
+        )
+    graph = {"nodes": revised["nodes"], "edges": revised["edges"]}
+    try:
+        dag.validate_graph(graph)
+    except dag.DagError as e:
+        raise HTTPException(422, f"AI가 실행 불가능한 구성을 제안했습니다. 다시 시도해 주세요: {e}")
+    return {"graph": graph, "name": revised.get("name"), "description": revised.get("description")}
 
 
 @router.post("/{service_id}/validate")
