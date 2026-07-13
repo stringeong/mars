@@ -1,0 +1,65 @@
+services:
+  server:
+    build:
+      context: ./server
+    container_name: mars-server-test
+    restart: unless-stopped
+    environment:
+      MARS_SECRET_KEY: ${MARS_SECRET_KEY:-dev-secret-key-change-me}
+      MARS_DATABASE_URL: sqlite:////data/mars.db
+      OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
+      MARS_DEFAULT_MODEL: ${MARS_DEFAULT_MODEL:-gemma3:4b}
+      MARS_TOKEN_EXPIRE_MIN: ${MARS_TOKEN_EXPIRE_MIN:-720}
+      MARS_HEARTBEAT_TIMEOUT: ${MARS_HEARTBEAT_TIMEOUT:-30}
+    volumes:
+      - mars-data:/data
+    ports:
+      - "${MARS_SERVER_PORT:-8000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/', timeout=3)"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  web:
+    build:
+      context: ./web
+    container_name: mars-web
+    restart: unless-stopped
+    environment:
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
+    ports:
+      - "${MARS_WEB_PORT:-5173}:5173"
+    depends_on:
+      server:
+        condition: service_healthy
+
+  worker:
+    profiles: ["worker"]
+    build:
+      context: ./worker
+    container_name: mars-worker
+    restart: unless-stopped
+    environment:
+      PYTHONUNBUFFERED: "1"
+    volumes:
+      - ./worker/agent_config.json:/app/agent_config.json
+      - ${MARS_WORKER_SHARED_DIR:-./worker/shared}:/shared
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      server:
+        condition: service_healthy
+
+volumes:
+  mars-data:
+

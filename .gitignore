@@ -13,3 +13,10 @@ worker/agent_config.json
 .idea/
 *.tsbuildinfo
 demo_data/
+*.un~
+*.swp
+*.swo
+
+# Docker/local runtime
+worker/shared/*
+!worker/shared/.gitkeep
