@@ -1,5 +1,10 @@
 """테스트 공용 fixture — 인메모리 SQLite 세션과 모델 팩토리."""
 
+import os
+
+# app.main 임포트 시 실제 mars.db 파일이 만들어지지 않도록 앱 모듈보다 먼저 설정한다
+os.environ.setdefault("MARS_DATABASE_URL", "sqlite://")
+
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

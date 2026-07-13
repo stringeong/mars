@@ -73,12 +73,12 @@ npm run dev
 서버/워커 테스트와 웹 타입체크·빌드가 실행된다.
 
 ```bash
-# 서버 (DAG 검증, 오케스트레이터, 생성기 파싱)
+# 서버 (DAG 검증, 오케스트레이터, 생성기, 인증/JWT, API 통합)
 cd server
 pip install -r requirements-dev.txt
 pytest
 
-# 워커 (폴더 화이트리스트 sandbox)
+# 워커 (폴더 화이트리스트 sandbox, 실행기)
 cd worker
 pip install -r requirements-dev.txt
 pytest
