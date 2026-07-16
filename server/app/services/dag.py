@@ -5,8 +5,6 @@
 
 from collections import defaultdict, deque
 
-from asyncio import graph
-
 
 class DagError(ValueError):
     pass
@@ -214,3 +212,44 @@ def terminal_nodes(graph: dict) -> list[str]:
         for node in agent_nodes
         if node["id"] not in workflow_sources
     ]
+
+
+# directory_ids_by_agent : 각 에이전트에 연결된 SharedDirectory ID 목록을 반환
+def directory_ids_by_agent(graph: dict) -> dict[str, list[int]]:
+
+    nodes = graph.get("nodes", [])
+    edges = graph.get("edges", [])
+
+    directory_node_map = {
+        node["id"]: node
+        for node in nodes
+        if node.get("type") == "directory"
+    }
+
+    result: dict[str, list[int]] = {
+        node["id"]: []
+        for node in nodes
+        if node.get("type", "agent") == "agent"
+    }
+
+    for edge in edges:
+        if edge.get("relation") != "directory":
+            continue
+
+        agent_node_id = edge["source"]
+        directory_node_id = edge["target"]
+
+        directory_node = directory_node_map.get(directory_node_id)
+
+        if directory_node is None:
+            continue
+
+        directory_id = directory_node.get("directory_id")
+
+        if directory_id is None:
+            continue
+
+        if directory_id not in result[agent_node_id]:
+            result[agent_node_id].append(directory_id)
+
+    return result

@@ -65,6 +65,36 @@ class DeviceUpdate(BaseModel):
     allowed_folders: list[str] | None = None
 
 
+#----------- SharedDirectory ----------
+
+class SharedDirectoryCreate(BaseModel):
+    alias: str
+    local_path: str
+    permission: Literal["read", "read_write"] = "read"
+
+
+class SharedDirectoryUpdate(BaseModel):
+    alias: str | None = None
+    local_path: str | None = None
+    permission: Literal["read", "read_write"] | None = None
+    is_active: bool | None = None
+
+
+class SharedDirectoryResponse(BaseModel):
+    id: int
+    user_id: int
+    device_id: int
+    alias: str
+    local_path: str
+    permission: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {
+        "from_attributes": True,
+    }
+
 # ---------- Service / Workflow ----------
 
 
@@ -75,13 +105,8 @@ class AgentNode(BaseModel):
     role_prompt: str = ""
     model: str = ""
     allowed_folders: list[str] = Field(default_factory=list)
-    # React Flow 배치용 좌표 (없으면 프론트에서 자동 배치)
     position: dict | None = None
 
-WorkflowNode = Annotated[
-    AgentNode | DirectoryNode,
-    Field(discriminator="type"),
-]
 
 class DirectoryNode(BaseModel):
     id: str
@@ -90,6 +115,12 @@ class DirectoryNode(BaseModel):
     name: str
     device_id: int
     position: dict | None = None
+
+    
+WorkflowNode = Annotated[
+    AgentNode | DirectoryNode,
+    Field(discriminator="type"),
+]
 
 
 class Edge(BaseModel):
@@ -100,7 +131,7 @@ class Edge(BaseModel):
 
 
 class Graph(BaseModel):
-    nodes: list[AgentNode | DirectoryNode] = Field(default_factory=list)
+    nodes: list[WorkflowNode] = Field(default_factory=list)
     edges: list[Edge] = Field(default_factory=list)
 
 
