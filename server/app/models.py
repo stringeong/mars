@@ -1,7 +1,19 @@
 import secrets
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+
+)
+
+
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -23,6 +35,11 @@ class User(Base):
     devices: Mapped[list["Device"]] = relationship(back_populates="owner")
     services: Mapped[list["Service"]] = relationship(back_populates="owner")
 
+    shared_directories: Mapped[list["SharedDirectory"]] = relationship(
+        back_populates="owner",
+        cascade="all, delete-orphan",
+    )
+
 
 class Device(Base):
     """사용자가 등록한 Worker Node."""
@@ -42,6 +59,78 @@ class Device(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     owner: Mapped[User] = relationship(back_populates="devices")
+    
+    shared_directories: Mapped[list["SharedDirectory"]] = relationship(
+        back_populates="device",
+        cascade="all, delete-orphan",
+    )
+    
+
+class SharedDirectory(Base):
+
+    __tablename__ = "shared_directories"
+
+    __table_args__ = (
+    UniqueConstraint(
+        "user_id",
+        "alias",
+        name="uq_shared_directory_user_alias",
+    ),
+    UniqueConstraint(
+        "device_id",
+        "local_path",
+        name="uq_shared_directory_device_path",
+    ),
+)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"),
+        index=True,
+    )
+
+    device_id: Mapped[int] = mapped_column(
+        ForeignKey("devices.id"),
+        index=True,
+    )
+
+    # 화면과 워크플로우에서 사용하는 이름
+    alias: Mapped[str] = mapped_column(String(128))
+
+    # 해당 기기 내부의 실제 절대경로
+    local_path: Mapped[str] = mapped_column(Text)
+
+    # 향후 폴더별 읽기/쓰기 제어
+    permission: Mapped[str] = mapped_column(
+        String(16),
+        default="read",
+    )
+
+    is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow,
+    )
+
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=utcnow,
+        onupdate=utcnow,
+    )
+
+    owner: Mapped["User"] = relationship(
+        back_populates="shared_directories",
+    )
+
+    device: Mapped["Device"] = relationship(
+        back_populates="shared_directories",
+    )
+    
 
 
 class Service(Base):

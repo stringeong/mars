@@ -1,5 +1,5 @@
 from datetime import datetime, timezone
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, EmailStr, Field, PlainSerializer
 
@@ -70,6 +70,7 @@ class DeviceUpdate(BaseModel):
 
 class AgentNode(BaseModel):
     id: str
+    type: Literal["agent"] = "agent"
     name: str
     role_prompt: str = ""
     model: str = ""
@@ -77,14 +78,29 @@ class AgentNode(BaseModel):
     # React Flow 배치용 좌표 (없으면 프론트에서 자동 배치)
     position: dict | None = None
 
+WorkflowNode = Annotated[
+    AgentNode | DirectoryNode,
+    Field(discriminator="type"),
+]
+
+class DirectoryNode(BaseModel):
+    id: str
+    type: Literal["directory"] = "directory"
+    directory_id: int
+    name: str
+    device_id: int
+    position: dict | None = None
+
 
 class Edge(BaseModel):
     source: str
     target: str
+    relation: Literal["workflow", "directory"] = "workflow"
+
 
 
 class Graph(BaseModel):
-    nodes: list[AgentNode] = Field(default_factory=list)
+    nodes: list[AgentNode | DirectoryNode] = Field(default_factory=list)
     edges: list[Edge] = Field(default_factory=list)
 
 

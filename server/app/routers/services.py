@@ -80,7 +80,7 @@ def update_service(
         except dag.DagError as e:
             raise HTTPException(422, f"실행 불가능한 구성입니다: {e}")
         service.graph = graph
-    if body.name is not None:
+    if body.name is not None:``
         service.name = body.name
     if body.description is not None:
         service.description = body.description

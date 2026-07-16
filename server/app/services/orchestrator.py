@@ -19,7 +19,16 @@ def create_tasks_for_execution(db: Session, execution: models.Execution) -> None
     graph = execution.graph_snapshot
     parents = dag.parents_of(graph)
     for node in graph.get("nodes", []):
-        status = "ready" if not parents[node["id"]] else "blocked"
+
+        if node.get("type", "agent") != "agent":
+            continue
+
+        status = (
+            "ready"
+            if not parents[node["id"]]
+            else "blocked"
+        )
+        
         task = models.TaskRecord(
             execution_id=execution.id,
             node_id=node["id"],
@@ -33,6 +42,7 @@ def create_tasks_for_execution(db: Session, execution: models.Execution) -> None
         db.add(task)
     execution.status = "running"
     db.flush()
+
 
 
 def device_is_online(device: models.Device) -> bool:

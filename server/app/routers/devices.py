@@ -91,3 +91,224 @@ def delete_device(
         raise HTTPException(404, "기기를 찾을 수 없습니다.")
     db.delete(device)
     db.commit()
+
+
+#----------- Search Directory ----------
+@router.get(
+    "/{device_id}/directories",
+    response_model=list[schemas.SharedDirectoryResponse],
+)
+
+def list_directories(
+    device_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    device = (
+        db.query(models.Device)
+        .filter(
+            models.Device.id == device_id,
+            models.Device.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="기기를 찾을 수 없습니다.",
+        )
+
+    return (
+        db.query(models.SharedDirectory)
+        .filter(
+            models.SharedDirectory.device_id == device_id,
+            models.SharedDirectory.user_id == current_user.id,
+        )
+        .order_by(models.SharedDirectory.id)
+        .all()
+    )
+
+
+
+#----------- Create Directory ----------
+@router.post(
+    "/{device_id}/directories",
+    response_model=schemas.SharedDirectoryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_directory(
+    device_id: int,
+    payload: schemas.SharedDirectoryCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    device = (
+        db.query(models.Device)
+        .filter(
+            models.Device.id == device_id,
+            models.Device.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if device is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="기기를 찾을 수 없습니다.",
+        )
+
+    existing_alias = (
+        db.query(models.SharedDirectory)
+        .filter(
+            models.SharedDirectory.user_id == current_user.id,
+            models.SharedDirectory.alias == payload.alias,
+        )
+        .first()
+    )
+
+    if existing_alias:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="이미 사용 중인 디렉토리 별명입니다.",
+        )
+
+    existing_path = (
+        db.query(models.SharedDirectory)
+        .filter(
+            models.SharedDirectory.device_id == device_id,
+            models.SharedDirectory.local_path == payload.local_path,
+        )
+        .first()
+    )
+
+    if existing_path:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="해당 기기에 이미 등록된 경로입니다.",
+        )
+
+    directory = models.SharedDirectory(
+        user_id=current_user.id,
+        device_id=device.id,
+        alias=payload.alias,
+        local_path=payload.local_path,
+        permission=payload.permission,
+    )
+
+    db.add(directory)
+    db.commit()
+    db.refresh(directory)
+
+    return directory
+
+
+#----------- Update Directory ----------
+
+
+@router.patch(
+    "/{device_id}/directories/{directory_id}",
+    response_model=schemas.SharedDirectoryResponse,
+)
+def update_directory(
+    device_id: int,
+    directory_id: int,
+    payload: schemas.SharedDirectoryUpdate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    directory = (
+        db.query(models.SharedDirectory)
+        .filter(
+            models.SharedDirectory.id == directory_id,
+            models.SharedDirectory.device_id == device_id,
+            models.SharedDirectory.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if directory is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="디렉토리를 찾을 수 없습니다.",
+        )
+
+    update_data = payload.model_dump(exclude_unset=True)
+
+    if "alias" in update_data:
+        duplicate_alias = (
+            db.query(models.SharedDirectory)
+            .filter(
+                models.SharedDirectory.user_id == current_user.id,
+                models.SharedDirectory.alias == update_data["alias"],
+                models.SharedDirectory.id != directory_id,
+            )
+            .first()
+        )
+
+        if duplicate_alias:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="이미 사용 중인 디렉토리 별명입니다.",
+            )
+
+    if "local_path" in update_data:
+        duplicate_path = (
+            db.query(models.SharedDirectory)
+            .filter(
+                models.SharedDirectory.device_id == device_id,
+                models.SharedDirectory.local_path
+                == update_data["local_path"],
+                models.SharedDirectory.id != directory_id,
+            )
+            .first()
+        )
+
+        if duplicate_path:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="해당 기기에 이미 등록된 경로입니다.",
+            )
+
+    for field, value in update_data.items():
+        setattr(directory, field, value)
+
+    db.commit()
+    db.refresh(directory)
+
+    return directory
+
+
+#----------- Delete Directory ----------
+@router.delete(
+    "/{device_id}/directories/{directory_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_directory(
+    device_id: int,
+    directory_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    directory = (
+        db.query(models.SharedDirectory)
+        .filter(
+            models.SharedDirectory.id == directory_id,
+            models.SharedDirectory.device_id == device_id,
+            models.SharedDirectory.user_id == current_user.id,
+        )
+        .first()
+    )
+
+    if directory is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="디렉토리를 찾을 수 없습니다.",
+        )
+
+    directory.is_active = False
+
+    db.commit()
+
+    return None
+
