@@ -3,7 +3,7 @@
 기기 등록은 Worker CLI가 사용자 로그인 토큰으로 호출한다.
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
