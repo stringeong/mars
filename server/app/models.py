@@ -108,3 +108,21 @@ class TaskRecord(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     execution: Mapped[Execution] = relationship(back_populates="tasks")
+
+
+class EventLog(Base):
+    """주요 이벤트 기록 (NF-205 비정상 접근 기록, NF-207 이벤트 로그).
+
+    로그인 성공/실패, 기기 등록/삭제, 서비스 생성, 실행 시작/완료/실패/중단 등을
+    남긴다. 존재하지 않는 아이디로의 로그인 시도는 user_id 없이 기록된다.
+    """
+
+    __tablename__ = "event_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id"), index=True, nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(String(32), index=True)
+    detail: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)

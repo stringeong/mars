@@ -1,7 +1,10 @@
 import os
 
 # JWT 서명 키. 운영 환경에서는 반드시 환경변수로 주입한다.
-SECRET_KEY = os.environ.get("MARS_SECRET_KEY", "dev-secret-key-change-me")
+# (HS256 권장 최소 길이 32바이트 이상 — 짧으면 브루트포스에 취약)
+SECRET_KEY = os.environ.get(
+    "MARS_SECRET_KEY", "dev-only-secret-key-change-me-in-production-0123456789"
+)
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("MARS_TOKEN_EXPIRE_MIN", "720"))
 

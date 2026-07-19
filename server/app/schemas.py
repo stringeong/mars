@@ -181,3 +181,23 @@ class WorkerTaskResult(BaseModel):
     status: str = Field(pattern="^(done|failed)$")
     output: str = ""
     error: str = ""
+
+
+# ---------- 회원정보 수정 / 이벤트 로그 ----------
+
+
+class UserUpdate(BaseModel):
+    """회원정보 수정 — 본인 확인을 위해 현재 비밀번호가 항상 필요하다."""
+
+    current_password: str = Field(min_length=1)
+    email: EmailStr | None = None
+    new_password: str | None = Field(default=None, min_length=6, max_length=128)
+
+
+class EventOut(BaseModel):
+    id: int
+    event_type: str
+    detail: str
+    created_at: UTCDateTime
+
+    model_config = {"from_attributes": True}

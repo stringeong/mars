@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..security import get_current_user
-from ..services import dag, orchestrator
+from ..services import dag, events, orchestrator
 
 router = APIRouter(tags=["executions"])
 
@@ -46,6 +46,7 @@ def start_execution(
     db.add(execution)
     db.flush()
     orchestrator.create_tasks_for_execution(db, execution)
+    events.record(db, user.id, "실행 시작", f"서비스: {service.name} (실행 #{execution.id})")
     db.commit()
     db.refresh(execution)
     return _to_out(execution)
@@ -104,6 +105,7 @@ def cancel_execution(
     if execution.status not in ("pending", "running"):
         raise HTTPException(409, "이미 종료된 실행입니다.")
     orchestrator.cancel_execution(db, execution)  # UC-204 s201
+    events.record(db, user.id, "실행 중단", f"실행 #{execution.id}")
     db.commit()
     db.refresh(execution)
     return _to_out(execution)

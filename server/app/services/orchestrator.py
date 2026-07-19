@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..config import HEARTBEAT_TIMEOUT_SEC
-from . import dag
+from . import dag, events
 
 
 def create_tasks_for_execution(db: Session, execution: models.Execution) -> None:
@@ -153,6 +153,7 @@ def complete_task(
         execution.status = "failed"
         execution.error = f"{task.agent_name} 작업 실패: {error or '알 수 없는 오류'}"
         execution.finished_at = models.utcnow()
+        events.record(db, execution.user_id, "실행 실패", f"실행 #{execution.id}: {execution.error}")
         for t in tasks.values():
             if t.status in ("blocked", "ready"):
                 t.status = "failed"
@@ -180,6 +181,7 @@ def complete_task(
         execution.result = "\n\n---\n\n".join(outputs) if outputs else ""
         execution.status = "completed"
         execution.finished_at = models.utcnow()
+        events.record(db, execution.user_id, "실행 완료", f"실행 #{execution.id}")
     db.flush()
 
 

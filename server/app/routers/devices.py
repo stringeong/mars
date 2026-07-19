@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..security import get_current_user
+from ..services import events
 from ..services.orchestrator import device_is_online
 
 router = APIRouter(prefix="/devices", tags=["devices"])
@@ -48,6 +49,8 @@ def register_device(
         allowed_folders=body.allowed_folders,
     )
     db.add(device)
+    db.flush()
+    events.record(db, user.id, "기기 등록", f"기기: {device.name}")
     db.commit()
     db.refresh(device)
     return _to_out(device, with_key=True)
@@ -71,7 +74,19 @@ def update_device(
     device = db.get(models.Device, device_id)
     if device is None or device.user_id != user.id:
         raise HTTPException(404, "기기를 찾을 수 없습니다.")
-    if body.name is not None:
+    if body.name is not None and body.name != device.name:
+        dup = (
+            db.query(models.Device)
+            .filter(
+                models.Device.user_id == user.id,
+                models.Device.name == body.name,
+                models.Device.id != device.id,
+            )
+            .first()
+        )
+        if dup:
+            raise HTTPException(409, "같은 이름의 기기가 이미 등록되어 있습니다.")
+        events.record(db, user.id, "기기 수정", f"{device.name} → {body.name}")
         device.name = body.name
     if body.allowed_folders is not None:
         device.allowed_folders = body.allowed_folders
@@ -89,5 +104,6 @@ def delete_device(
     device = db.get(models.Device, device_id)
     if device is None or device.user_id != user.id:
         raise HTTPException(404, "기기를 찾을 수 없습니다.")
+    events.record(db, user.id, "기기 삭제", f"기기: {device.name}")
     db.delete(device)
     db.commit()

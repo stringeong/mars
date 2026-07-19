@@ -26,6 +26,17 @@ export default function DevicesPage() {
     load()
   }
 
+  async function rename(d: Device) {
+    const name = prompt('새 기기 이름을 입력하세요:', d.name)
+    if (!name || name === d.name) return
+    try {
+      await api.patch(`/devices/${d.id}`, { name })
+      load()
+    } catch (e) {
+      alert(e instanceof Error ? e.message : '이름 변경 실패')
+    }
+  }
+
   return (
     <div>
       <h1>기기 관리</h1>
@@ -58,7 +69,12 @@ export default function DevicesPage() {
                     {d.online ? '온라인' : '오프라인'}
                   </span>
                 </td>
-                <td><button className="btn sm danger" onClick={() => remove(d.id)}>삭제</button></td>
+                <td>
+                  <div className="row" style={{ gap: 6 }}>
+                    <button className="btn sm ghost" onClick={() => rename(d)}>이름 변경</button>
+                    <button className="btn sm danger" onClick={() => remove(d.id)}>삭제</button>
+                  </div>
+                </td>
               </tr>
             ))}
             {devices.length === 0 && (

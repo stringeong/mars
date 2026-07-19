@@ -74,6 +74,7 @@ label { font-size: 13px; font-weight: 600; color: var(--muted); display: block; 
 
 .badge {
   display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
+  white-space: nowrap;
 }
 .badge.online, .badge.completed, .badge.done { background: #dcfce7; color: #15803d; }
 .badge.offline, .badge.failed { background: #fee2e2; color: #b91c1c; }

@@ -9,6 +9,7 @@ import argparse
 import getpass
 import platform
 import sys
+import threading
 import time
 
 import httpx
@@ -80,6 +81,51 @@ def cmd_register(args: argparse.Namespace) -> None:
     print("이제 `python -m agent run` 으로 에이전트를 실행하세요.")
 
 
+def _run_with_cancel_watch(
+    task: dict, config: dict, server: str, headers: dict
+) -> dict | None:
+    """LLM 작업을 별도 스레드로 실행하면서 서버의 중단 지시를 감시한다 (F2-407).
+
+    사용자가 실행을 중단하면 서버가 이 작업을 failed로 바꾸므로, status가
+    'running'이 아니게 되는 즉시 결과를 버리고 None을 반환한다.
+    (진행 중인 Ollama 추론 자체는 강제 종료할 수 없지만, 워커는 곧바로
+    다음 작업을 받을 수 있는 상태로 돌아간다.)
+    """
+    box: dict = {}
+
+    def _work():
+        try:
+            box["result"] = {
+                "status": "done", "output": executor.run_task(task, config), "error": "",
+            }
+        except Exception as e:
+            box["result"] = {"status": "failed", "output": "", "error": str(e)}
+
+    thread = threading.Thread(target=_work, daemon=True)
+    thread.start()
+    while thread.is_alive():
+        thread.join(timeout=3)
+        if not thread.is_alive():
+            break
+        try:
+            status = httpx.get(
+                f"{server}/worker/tasks/{task['task_id']}/status",
+                headers=headers,
+                timeout=10,
+            ).json().get("status")
+            if status != "running":
+                return None
+        except Exception:
+            pass  # 일시적 통신 오류는 무시하고 계속 감시
+
+    result = box.get("result", {"status": "failed", "output": "", "error": "알 수 없는 오류"})
+    if result["status"] == "done":
+        print(f"✔ 작업 완료: #{task['task_id']} ({len(result['output'])}자)")
+    else:
+        print(f"✘ 작업 실패: #{task['task_id']} — {result['error']}")
+    return result
+
+
 def cmd_run(_args: argparse.Namespace) -> None:
     config = cfg.load()
     if not config.get("api_key"):
@@ -100,19 +146,17 @@ def cmd_run(_args: argparse.Namespace) -> None:
             if resp.status_code == 200 and resp.content and resp.text != "null":
                 task = resp.json()
                 print(f"▶ 작업 수신: #{task['task_id']} {task['agent_name']}")
-                try:
-                    output = executor.run_task(task, config)
-                    result = {"status": "done", "output": output, "error": ""}
-                    print(f"✔ 작업 완료: #{task['task_id']} ({len(output)}자)")
-                except Exception as e:  # LLM 실패 등 -> 서버에 실패 보고
-                    result = {"status": "failed", "output": "", "error": str(e)}
-                    print(f"✘ 작업 실패: #{task['task_id']} — {e}")
-                httpx.post(
-                    f"{server}/worker/tasks/{task['task_id']}/result",
-                    headers=headers,
-                    json=result,
-                    timeout=15,
-                )
+                result = _run_with_cancel_watch(task, config, server, headers)
+                if result is None:
+                    # 사용자가 실행을 중단함 (F2-407) — 결과를 버리고 다음 폴링으로
+                    print(f"■ 작업 중단됨: #{task['task_id']} (서버 지시)")
+                else:
+                    httpx.post(
+                        f"{server}/worker/tasks/{task['task_id']}/result",
+                        headers=headers,
+                        json=result,
+                        timeout=15,
+                    )
             else:
                 # 대기 중에도 주기적으로 상태(사양) 보고
                 httpx.post(

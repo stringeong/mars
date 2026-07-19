@@ -69,6 +69,23 @@ def next_task(
     return payload
 
 
+@router.get("/tasks/{task_id}/status")
+def task_status(
+    task_id: int,
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    """워커가 실행 중 작업의 취소 여부를 확인하는 용도 (F2-407 중단 전파).
+
+    실행이 중단되면 서버가 작업을 failed로 바꾸므로, 워커는 status가
+    'running'이 아니면 진행 중인 LLM 작업을 버리고 다음 폴링으로 넘어간다.
+    """
+    task = db.get(models.TaskRecord, task_id)
+    if task is None or task.assigned_device_id != device.id:
+        raise HTTPException(404, "할당된 작업이 아닙니다.")
+    return {"status": task.status}
+
+
 @router.post("/tasks/{task_id}/result")
 def submit_result(
     task_id: int,
