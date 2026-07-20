@@ -6,8 +6,9 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..security import get_current_user
-from ..services import dag
+from ..services import dag, directory_access
 from ..services.generator import generate_workflow, revise_workflow
+
 
 router = APIRouter(prefix="/services", tags=["services"])
 
@@ -79,6 +80,10 @@ def update_service(
             dag.validate_graph(graph)  # UC-202 e301 실행 불가 구성 차단
         except dag.DagError as e:
             raise HTTPException(422, f"실행 불가능한 구성입니다: {e}")
+        try:
+            directory_access.resolve_directories_by_agent(db, user.id, graph)
+        except directory_access.DirectoryAccessError as e:
+            raise HTTPException(422, f"디렉토리 접근 설정이 올바르지 않습니다: {e}")
         service.graph = graph
     if body.name is not None:
         service.name = body.name

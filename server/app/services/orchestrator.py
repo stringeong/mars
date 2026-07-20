@@ -12,12 +12,15 @@ from sqlalchemy.orm import Session
 
 from .. import models
 from ..config import HEARTBEAT_TIMEOUT_SEC
-from . import dag
+from . import dag, directory_access
 
 
 def create_tasks_for_execution(db: Session, execution: models.Execution) -> None:
     graph = execution.graph_snapshot
     parents = dag.parents_of(graph)
+    directories_by_agent = directory_access.resolve_directories_by_agent(
+        db, execution.user_id, graph
+    )
     for node in graph.get("nodes", []):
 
         if node.get("type", "agent") != "agent":
@@ -35,7 +38,10 @@ def create_tasks_for_execution(db: Session, execution: models.Execution) -> None
             agent_name=node.get("name", node["id"]),
             role_prompt=node.get("role_prompt", ""),
             model=node.get("model", ""),
-            allowed_folders=node.get("allowed_folders", []),
+            allowed_folders=(
+                [directory.local_path for directory in directories_by_agent[node["id"]]]
+                or node.get("allowed_folders", [])
+            ),
             status=status,
             input_context="",
         )
@@ -80,9 +86,8 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
     UPDATE가 0행이면 다른 기기가 먼저 가져간 것이므로 다음 후보로 넘어간다.
     """
     reclaim_stale_tasks(db, device.user_id)
-    candidate_ids = [
-        row[0]
-        for row in db.query(models.TaskRecord.id)
+    candidate_rows = (
+        db.query(models.TaskRecord.id, models.TaskRecord.node_id, models.Execution.graph_snapshot)
         .join(models.Execution, models.TaskRecord.execution_id == models.Execution.id)
         .filter(
             models.Execution.user_id == device.user_id,
@@ -90,9 +95,18 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
             models.TaskRecord.status == "ready",
         )
         .order_by(models.TaskRecord.id)
-        .limit(10)
+        .limit(20)
         .all()
-    ]
+    )
+    candidate_ids = []
+    for task_id, node_id, graph_snapshot in candidate_rows:
+        required_device = directory_access.required_device_by_agent(
+            graph_snapshot or {}
+        ).get(node_id)
+        if required_device is None or required_device == device.id:
+            candidate_ids.append(task_id)
+
+    # 원자적 UPDATE로 실제 선점
     task = None
     for tid in candidate_ids:
         claimed = (
@@ -139,7 +153,6 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
     task.input_context = "\n\n".join(parts)
     db.flush()
     return task
-
 
 def complete_task(
     db: Session, task: models.TaskRecord, status: str, output: str, error: str

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..security import get_current_user
-from ..services import dag, orchestrator
+from ..services import dag, orchestrator, directory_access
 
 router = APIRouter(tags=["executions"])
 
@@ -31,6 +31,10 @@ def start_execution(
         dag.validate_graph(service.graph)
     except dag.DagError as e:
         raise HTTPException(422, f"실행 불가능한 구성입니다: {e}")
+    try:
+        directory_access.resolve_directories_by_agent(db, user.id, service.graph)
+    except directory_access.DirectoryAccessError as e:
+        raise HTTPException(422, f"디렉토리 접근 설정이 올바르지 않습니다: {e}")
 
     # F2-403: 실행 전 사용 가능한 기기 확인
     devices = db.query(models.Device).filter(models.Device.user_id == user.id).all()
