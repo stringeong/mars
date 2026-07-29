@@ -107,3 +107,102 @@ class TestTerminalNodes:
     def test_multiple_sinks(self):
         graph = graph_of(["a", "b", "c"], [("a", "b"), ("a", "c")])
         assert dag.terminal_nodes(graph) == ["b", "c"]
+
+
+
+def test_one_directory_can_connect_to_multiple_agents():
+    graph = {
+        "nodes": [
+            {
+                "id": "dir_1",
+                "type": "directory",
+                "directory_id": 1,
+                "name": "docs",
+                "device_id": 1,
+            },
+            {
+                "id": "a",
+                "type": "agent",
+                "name": "A",
+            },
+            {
+                "id": "b",
+                "type": "agent",
+                "name": "B",
+            },
+        ],
+        "edges": [
+            {
+                "source": "dir_1",
+                "target": "a",
+                "relation": "directory",
+            },
+            {
+                "source": "dir_1",
+                "target": "b",
+                "relation": "directory",
+            },
+        ],
+    }
+
+    assert dag.validate_graph(graph) == ["a", "b"]
+    assert dag.directory_ids_by_agent(graph) == {
+        "a": [1],
+        "b": [1],
+    }
+
+
+def test_shared_directory_does_not_change_workflow_order():
+    graph = {
+        "nodes": [
+            {
+                "id": "dir",
+                "type": "directory",
+                "directory_id": 1,
+                "name": "docs",
+                "device_id": 1,
+            },
+            {
+                "id": "a",
+                "type": "agent",
+                "name": "A",
+            },
+            {
+                "id": "b",
+                "type": "agent",
+                "name": "B",
+            },
+            {
+                "id": "c",
+                "type": "agent",
+                "name": "C",
+            },
+        ],
+        "edges": [
+            {
+                "source": "dir",
+                "target": "a",
+                "relation": "directory",
+            },
+            {
+                "source": "dir",
+                "target": "b",
+                "relation": "directory",
+            },
+            {
+                "source": "a",
+                "target": "c",
+                "relation": "workflow",
+            },
+            {
+                "source": "b",
+                "target": "c",
+                "relation": "workflow",
+            },
+        ],
+    }
+
+    order = dag.validate_graph(graph)
+
+    assert order.index("a") < order.index("c")
+    assert order.index("b") < order.index("c")

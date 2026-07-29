@@ -33,6 +33,54 @@ def make_user(db):
 
     return _make
 
+@pytest.fixture()
+def make_directory(db):
+    def _make(
+        user,
+        device,
+        alias="documents",
+        local_path="/tmp/documents",
+        permission="read",
+        is_active=True,
+    ):
+        directory = models.SharedDirectory(
+            user_id=user.id,
+            device_id=device.id,
+            alias=alias,
+            local_path=local_path,
+            permission=permission,
+            is_active=is_active,
+        )
+        db.add(directory)
+        db.flush()
+        return directory
+
+    return _make
+
+
+@pytest.fixture()
+def make_directory(db):
+    def _make(
+        user,
+        device,
+        alias="documents",
+        local_path="/tmp/documents",
+        permission="read",
+        is_active=True,
+    ):
+        directory = models.SharedDirectory(
+            user_id=user.id,
+            device_id=device.id,
+            alias=alias,
+            local_path=local_path,
+            permission=permission,
+            is_active=is_active,
+        )
+        db.add(directory)
+        db.flush()
+        return directory
+
+    return _make
 
 @pytest.fixture()
 def make_device(db):

@@ -99,9 +99,9 @@ def required_device_by_agent(graph: dict) -> dict[str, int | None]:
     for edge in graph.get("edges", []):
         if edge.get("relation") != "directory":
             continue
-        node = directory_nodes.get(edge.get("target"))
+        node = directory_nodes.get(edge.get("source"))
         if node is not None:
-            devices[edge["source"]].add(node["device_id"])
+            devices[edge["target"]].add(node["device_id"])
 
     for agent_id, device_ids in devices.items():
         if len(device_ids) == 1:

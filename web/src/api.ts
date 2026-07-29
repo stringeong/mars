@@ -1,3 +1,5 @@
+import { SharedDirectory } from "./types"
+
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
 
 export function getToken(): string | null {
@@ -56,4 +58,11 @@ export const api = {
       method: 'POST',
       body: new URLSearchParams({ username, password }),
     }),
+}
+
+
+export function getDeviceDirectories(deviceId: number) {
+  return api.get<SharedDirectory[]>(
+    `/devices/${deviceId}/directories`,
+  )
 }

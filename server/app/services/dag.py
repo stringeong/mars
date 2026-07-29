@@ -97,20 +97,20 @@ def validate_graph(graph: dict) -> list[str]:
                 f"{source} -> {target}"
             )
 
-    # directory 간선은 Agent -> Directory만 허용
+    # directory 간선은 Directory -> Agent만 허용
     for edge in directory_edges:
         source = edge["source"]
         target = edge["target"]
 
-        if source not in agent_id_set:
+        if source not in directory_ids:
             raise DagError(
-                "directory 연결의 source는 에이전트여야 합니다: "
+                "directory 연결의 source는 디렉토리여야 합니다: "
                 f"{source} -> {target}"
             )
 
-        if target not in directory_ids:
+        if target not in agent_id_set:
             raise DagError(
-                "directory 연결의 target은 디렉토리여야 합니다: "
+                "directory 연결의 target은 에이전트여야 합니다: "
                 f"{source} -> {target}"
             )
 
@@ -236,8 +236,8 @@ def directory_ids_by_agent(graph: dict) -> dict[str, list[int]]:
         if edge.get("relation") != "directory":
             continue
 
-        agent_node_id = edge["source"]
-        directory_node_id = edge["target"]
+        directory_node_id = edge["source"]
+        agent_node_id = edge["target"]
 
         directory_node = directory_node_map.get(directory_node_id)
 

@@ -54,7 +54,10 @@ def next_task(
         return None
     execution = db.get(models.Execution, task.execution_id)
     # 에이전트별 허용 폴더가 비어 있으면 기기 기본 허용 폴더를 사용
-    folders = task.allowed_folders or device.allowed_folders or []
+    folders = ( task.allowed_folders 
+                #or device.allowed_folders 
+                or []
+    )
     payload = schemas.WorkerTaskOut(
         task_id=task.id,
         execution_id=task.execution_id,

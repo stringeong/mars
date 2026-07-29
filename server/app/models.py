@@ -52,7 +52,7 @@ class Device(Base):
     # Worker가 자동 수집한 사양 (os, cpu, ram_gb, hostname ...)
     specs: Mapped[dict] = mapped_column(JSON, default=dict)
     # 이 기기에서 에이전트가 접근을 허용받은 폴더 목록 (절대경로)
-    allowed_folders: Mapped[list] = mapped_column(JSON, default=list)
+    #allowed_folders: Mapped[list] = mapped_column(JSON, default=list)
     # Worker Agent 인증용 키
     api_key: Mapped[str] = mapped_column(String(64), default=lambda: secrets.token_hex(24), unique=True)
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

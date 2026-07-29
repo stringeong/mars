@@ -1,19 +1,32 @@
 export interface AgentNode {
   id: string
+  type: 'agent'
   name: string
   role_prompt: string
   model: string
-  allowed_folders: string[]
+  allowed_folders?: string[]
   position?: { x: number; y: number } | null
 }
+
+export interface DirectoryNode {
+  id: string
+  type: 'directory'
+  directory_id: number
+  name: string
+  device_id: number
+  position?: { x: number; y: number } | null
+}
+
+export type WorkflowNode = AgentNode | DirectoryNode
 
 export interface GraphEdge {
   source: string
   target: string
+  relation: 'workflow' | 'directory'
 }
 
 export interface Graph {
-  nodes: AgentNode[]
+  nodes: WorkflowNode[]
   edges: GraphEdge[]
 }
 
@@ -33,6 +46,19 @@ export interface Device {
   allowed_folders: string[]
   last_heartbeat: string | null
   online: boolean
+}
+
+
+export interface SharedDirectory {
+  id: number
+  user_id: number
+  device_id: number
+  alias: string
+  local_path: string
+  permission: 'read' | 'read_write'
+  is_active: boolean
+  created_at: string
+  updated_at: string
 }
 
 export interface Task {

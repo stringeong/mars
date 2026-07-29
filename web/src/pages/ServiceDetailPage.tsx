@@ -17,9 +17,14 @@ import { api } from '../api'
 import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
 import DeletableEdge from '../components/DeletableEdge'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
-import { AgentNode, Execution, Graph, Service } from '../types'
+import { AgentNode, Execution, Graph, Service, WorkflowNode, DirectoryNode, SharedDirectory } from '../types'
+import DirectoryBlockNode from '../components/DirectoryBlockNode'
 
-const nodeTypes = { agent: AgentBlockNode }
+const nodeTypes = {
+  agent: AgentBlockNode,
+  directory: DirectoryBlockNode,
+}
+
 const edgeTypes = { del: DeletableEdge }
 
 /** 그래프의 노드를 계층(위상 순서)별로 자동 배치한다. */
@@ -27,7 +32,12 @@ function layoutPositions(graph: Graph): Record<string, { x: number; y: number }>
   const level: Record<string, number> = {}
   const parents: Record<string, string[]> = {}
   graph.nodes.forEach((n) => (parents[n.id] = []))
-  graph.edges.forEach((e) => parents[e.target]?.push(e.source))
+
+  graph.edges
+    .filter((edge) => edge.relation === 'workflow')
+    .forEach((edge) => {
+      parents[edge.target]?.push(edge.source)
+    })
 
   const resolve = (id: string, seen: Set<string>): number => {
     if (level[id] !== undefined) return level[id]
@@ -38,6 +48,17 @@ function layoutPositions(graph: Graph): Record<string, { x: number; y: number }>
     return level[id]
   }
   graph.nodes.forEach((n) => resolve(n.id, new Set()))
+
+  const directoryNodes = graph.nodes.filter(
+    (node) => node.type === 'directory',
+  )
+
+  directoryNodes.forEach((node, index) => {
+    pos[node.id] = {
+      x: 20,
+      y: index * 120 + 40,
+    }
+  })
 
   const counts: Record<number, number> = {}
   const pos: Record<string, { x: number; y: number }> = {}
@@ -63,7 +84,8 @@ export default function ServiceDetailPage() {
   const [svcDesc, setSvcDesc] = useState('')
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
-  const [agents, setAgents] = useState<Record<string, AgentNode>>({})
+  const [agents, setAgents] =  useState<Record<string, AgentNode>>({})
+  const [directories, setDirectories] =  useState<Record<string, DirectoryNode>>({})  
   const [selected, setSelected] = useState<string | null>(null)
   const [runPrompt, setRunPrompt] = useState('')
   const [aiInstruction, setAiInstruction] = useState('')
@@ -95,13 +117,17 @@ export default function ServiceDetailPage() {
   const deleteEdgeRef = useRef(deleteEdge)
   deleteEdgeRef.current = deleteEdge
 
-  const makeEdge = useCallback((source: string, target: string): Edge => ({
+  const makeEdge = useCallback((
+    source: string, 
+    target: string,
+    relation : 'workflow' | 'directory',
+  ): Edge => ({
     id: `${source}-${target}`,
     source,
     target,
     type: 'del',
     markerEnd: { type: MarkerType.ArrowClosed },
-    data: { onDelete: (eid: string) => deleteEdgeRef.current(eid) },
+    data: { onDelete: (eid: string) => deleteEdgeRef.current(eid), relation },
   }), [])
 
   const applySnapshot = useCallback((snap: Snapshot) => {
@@ -166,7 +192,26 @@ export default function ServiceDetailPage() {
   const onConnect = useCallback((conn: Connection) => {
     if (!conn.source || !conn.target) return
     pushHistory()
-    setEdges((eds) => addEdge(makeEdge(conn.source!, conn.target!), eds))
+    const relation =
+      conn.sourceHandle === 'directory-output' 
+      ? 'directory'
+      : 'workflow'
+    setEdges((eds) => [
+      ...eds,
+      { ...makeEdge(conn.source, conn.target), 
+        data: { onDelete: (eid: string) => deleteEdgeRef.current(eid), relation } },
+    ])  
+    const sourceNode = nodes.find((n) => n.id === conn.source)
+    const targetNode = nodes.find((n) => n.id === conn.target)
+
+    if(relation === 'directory'){
+      if(
+        sourceNode?.type !== 'directory' || targetNode?.type !== 'agent'
+      ){
+        setError('디렉토리 연결은 디렉토리 블록에서 에이전트 블록으로만 가능합니다.')
+      }
+      return
+    }
   }, [pushHistory, setEdges, makeEdge])
 
   const selectedAgent = selected ? agents[selected] : null
@@ -233,13 +278,46 @@ export default function ServiceDetailPage() {
     setSelected(null)
   }
 
+  function addDirectoryBlock(
+    sharedDirectory: SharedDirectory,
+    position?: { x: number; y: number }
+  ) {
+    const nodeId = `directory_${sharedDirectory.id}_${Date.now()}`
+
+    const directoryNode: DirectoryNode = {
+      id: nodeId,
+      type: 'directory',
+      directory_id: sharedDirectory.id,
+      name: sharedDirectory.alias,
+      device_id: sharedDirectory.device_id,
+    }
+
+  }
+
+
   function currentGraph(): Graph {
     return {
       nodes: nodes.map((n) => ({
-        ...(agents[n.id] ?? { id: n.id, name: String(n.data.label), role_prompt: '', model: '', allowed_folders: [] }),
-        position: n.position,
+        if (n.type === 'directory') {
+          return {
+            ...directories[n.id],
+            position: n.position,
+          }
+        }
+
+        return {
+          ...agents[n.id],
+          position: n.position,
+        }
       })),
-      edges: edges.map((e) => ({ source: e.source, target: e.target })),
+
+      edges: edges.map((e) => ({
+        source: e.source, 
+        target: e.target, 
+        relation: e.data?.relation === 'directory' 
+        ? 'directory' 
+        : 'workflow' 
+      })),
     }
   }
 
@@ -250,10 +328,24 @@ export default function ServiceDetailPage() {
     setAgents(agentMap)
     setNodes(
       graph.nodes.map((n) => ({
-        id: n.id,
-        type: 'agent',
-        position: n.position ?? positions[n.id],
-        data: { label: n.name, model: n.model },
+        if( n.type === 'directory') {
+          return {
+            id: n.id,
+            type: 'directory',
+            position: n.position ?? positions[n.id],
+            data: { 
+            label: n.name, 
+            directoryId: n.directory_id,
+            deviceId: n.device_id,
+          },
+          }
+        }
+        return {
+          id: n.id,
+          type: 'agent',
+          position: n.position ?? positions[n.id],
+          data: { label: n.name, model: n.model },
+        }
       })),
     )
     setEdges(graph.edges.map((e) => makeEdge(e.source, e.target)))
@@ -422,6 +514,8 @@ export default function ServiceDetailPage() {
                 value={selectedAgent.model}
                 onChange={(e) => updateAgent({ model: e.target.value })}
               />
+              {/*
+              }
               <label>허용 폴더 (쉼표 구분, 비우면 기기 설정 사용)</label>
               <input
                 placeholder="/Users/me/Documents"
@@ -432,6 +526,8 @@ export default function ServiceDetailPage() {
                   })
                 }
               />
+              */}
+
               <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12 }}>
                 블록 가장자리의 점을 드래그하면 연결이 만들어지고, 연결선 위 ×를 누르면 삭제됩니다.
               </p>
