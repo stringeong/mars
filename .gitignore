@@ -13,3 +13,5 @@ worker/agent_config.json
 .idea/
 *.tsbuildinfo
 demo_data/
+.coverage
+htmlcov/
