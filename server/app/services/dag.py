@@ -70,6 +70,25 @@ def validate_graph(graph: dict) -> list[str]:
         if _edge_relation(edge) == "directory"
     ]
 
+    seen_edges: set[tuple[str, str, str]] = set()
+
+    for edge in all_edges:
+        relation = _edge_relation(edge)
+        key = (
+            edge["source"],
+            edge["target"],
+            relation,
+        )
+
+        if key in seen_edges:
+            raise DagError(
+                "동일한 연결이 중복되었습니다: "
+                f"{edge['source']} -> {edge['target']}"
+            )
+
+        seen_edges.add(key)
+
+
     # 모든 간선의 source/target 존재 여부 검사
     for edge in all_edges:
         source = edge["source"]
@@ -161,6 +180,8 @@ def validate_graph(graph: dict) -> list[str]:
         )
 
     return order
+
+
 
 
 def parents_of(graph: dict) -> dict[str, list[str]]:

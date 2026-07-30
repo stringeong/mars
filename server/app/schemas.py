@@ -42,14 +42,14 @@ class DeviceRegister(BaseModel):
 
     name: str = Field(min_length=1, max_length=128)
     specs: dict = Field(default_factory=dict)
-    allowed_folders: list[str] = Field(default_factory=list)
+    #allowed_folders: list[str] = Field(default_factory=list)
 
 
 class DeviceOut(BaseModel):
     id: int
     name: str
     specs: dict
-    allowed_folders: list
+    #allowed_folders: list
     last_heartbeat: UTCDateTime | None
     online: bool = False
 
@@ -62,7 +62,7 @@ class DeviceRegisterOut(DeviceOut):
 
 class DeviceUpdate(BaseModel):
     name: str | None = None
-    allowed_folders: list[str] | None = None
+    #allowed_folders: list[str] | None = None
 
 
 #----------- SharedDirectory ----------
@@ -104,7 +104,7 @@ class AgentNode(BaseModel):
     name: str
     role_prompt: str = ""
     model: str = ""
-    allowed_folders: list[str] = Field(default_factory=list)
+    #allowed_folders: list[str] = Field(default_factory=list)
     position: dict | None = None
 
 
@@ -127,6 +127,7 @@ class Edge(BaseModel):
     source: str
     target: str
     relation: Literal["workflow", "directory"] = "workflow"
+    access: Literal["read", "read_write"] | None = None
 
 
 
@@ -219,7 +220,7 @@ class WorkerTaskOut(BaseModel):
     agent_name: str
     role_prompt: str
     model: str
-    allowed_folders: list[str]
+    #allowed_folders: list[str]
     input_context: str
     run_prompt: str
 

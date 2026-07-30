@@ -28,10 +28,25 @@ const nodeTypes = {
 const edgeTypes = { del: DeletableEdge }
 
 /** 그래프의 노드를 계층(위상 순서)별로 자동 배치한다. */
-function layoutPositions(graph: Graph): Record<string, { x: number; y: number }> {
+function layoutPositions(
+  graph: Graph,
+): Record<string, { x: number; y: number }> {
   const level: Record<string, number> = {}
   const parents: Record<string, string[]> = {}
-  graph.nodes.forEach((n) => (parents[n.id] = []))
+  const pos: Record<string, { x: number; y: number }> = {}
+  const counts: Record<number, number> = {}
+
+  const agentNodes = graph.nodes.filter(
+    (node) => node.type === 'agent',
+  )
+
+  const directoryNodes = graph.nodes.filter(
+    (node) => node.type === 'directory',
+  )
+
+  agentNodes.forEach((node) => {
+    parents[node.id] = []
+  })
 
   graph.edges
     .filter((edge) => edge.relation === 'workflow')
@@ -39,19 +54,37 @@ function layoutPositions(graph: Graph): Record<string, { x: number; y: number }>
       parents[edge.target]?.push(edge.source)
     })
 
-  const resolve = (id: string, seen: Set<string>): number => {
-    if (level[id] !== undefined) return level[id]
-    if (seen.has(id)) return 0
+  const resolve = (
+    id: string,
+    seen: Set<string>,
+  ): number => {
+    if (level[id] !== undefined) {
+      return level[id]
+    }
+
+    if (seen.has(id)) {
+      return 0
+    }
+
     seen.add(id)
-    const ps = parents[id] ?? []
-    level[id] = ps.length === 0 ? 0 : Math.max(...ps.map((p) => resolve(p, seen))) + 1
+
+    const parentIds = parents[id] ?? []
+
+    level[id] =
+      parentIds.length === 0
+        ? 0
+        : Math.max(
+            ...parentIds.map((parentId) =>
+              resolve(parentId, seen),
+            ),
+          ) + 1
+
     return level[id]
   }
-  graph.nodes.forEach((n) => resolve(n.id, new Set()))
 
-  const directoryNodes = graph.nodes.filter(
-    (node) => node.type === 'directory',
-  )
+  agentNodes.forEach((node) => {
+    resolve(node.id, new Set())
+  })
 
   directoryNodes.forEach((node, index) => {
     pos[node.id] = {
@@ -60,20 +93,28 @@ function layoutPositions(graph: Graph): Record<string, { x: number; y: number }>
     }
   })
 
-  const counts: Record<number, number> = {}
-  const pos: Record<string, { x: number; y: number }> = {}
-  graph.nodes.forEach((n) => {
-    const lv = level[n.id]
-    counts[lv] = (counts[lv] ?? 0) + 1
-    pos[n.id] = { x: lv * 240 + 40, y: (counts[lv] - 1) * 130 + 40 }
+  agentNodes.forEach((node) => {
+    const nodeLevel = level[node.id] ?? 0
+
+    counts[nodeLevel] =
+      (counts[nodeLevel] ?? 0) + 1
+
+    pos[node.id] = {
+      x: nodeLevel * 240 + 300,
+      y: (counts[nodeLevel] - 1) * 130 + 40,
+    }
   })
+
   return pos
 }
+
+
 
 interface Snapshot {
   nodes: Node[]
   edges: Edge[]
   agents: Record<string, AgentNode>
+  directories : Record<string, DirectoryNode>
 }
 
 export default function ServiceDetailPage() {
@@ -98,8 +139,13 @@ export default function ServiceDetailPage() {
   const undoStack = useRef<Snapshot[]>([])
   const redoStack = useRef<Snapshot[]>([])
   // 콜백들이 항상 최신 상태를 보도록 ref에 미러링
-  const stateRef = useRef<Snapshot>({ nodes: [], edges: [], agents: {} })
-  stateRef.current = { nodes, edges, agents }
+  const stateRef = useRef<Snapshot>({ nodes: [], edges: [], agents: {}, directories: {} })
+  stateRef.current = { 
+    nodes, 
+    edges, 
+    agents, 
+    directories
+  }
 
   const clone = (s: Snapshot): Snapshot => JSON.parse(JSON.stringify(s))
 
@@ -122,7 +168,7 @@ export default function ServiceDetailPage() {
     target: string,
     relation : 'workflow' | 'directory',
   ): Edge => ({
-    id: `${source}-${target}`,
+    id: `${source}-${target}:${relation}`,
     source,
     target,
     type: 'del',
@@ -132,8 +178,15 @@ export default function ServiceDetailPage() {
 
   const applySnapshot = useCallback((snap: Snapshot) => {
     setNodes(snap.nodes)
-    setEdges(snap.edges.map((e) => ({ ...e, data: { onDelete: (eid: string) => deleteEdgeRef.current(eid) } })))
+
+    setEdges(snap.edges.map((e) => ({
+      ...e, 
+      data: { 
+        ...e.data,
+        onDelete: (eid: string) => 
+          deleteEdgeRef.current(eid), relation: e.data?.relation } })))
     setAgents(snap.agents)
+    setDirectories(snap.directories)
     setSelected(null)
   }, [setNodes, setEdges])
 
@@ -170,7 +223,7 @@ export default function ServiceDetailPage() {
           data: { label: n.name, model: n.model },
         })),
       )
-      setEdges(s.graph.edges.map((e) => makeEdge(e.source, e.target)))
+      setEdges(s.graph.edges.map((e) => makeEdge(e.source, e.target, e.relation)))
     }).catch((e) => setError(e.message))
   }, [id])
 
@@ -189,30 +242,92 @@ export default function ServiceDetailPage() {
     return () => window.removeEventListener('keydown', handler)
   }, [undo, redo])
 
-  const onConnect = useCallback((conn: Connection) => {
-    if (!conn.source || !conn.target) return
-    pushHistory()
-    const relation =
-      conn.sourceHandle === 'directory-output' 
-      ? 'directory'
-      : 'workflow'
-    setEdges((eds) => [
-      ...eds,
-      { ...makeEdge(conn.source, conn.target), 
-        data: { onDelete: (eid: string) => deleteEdgeRef.current(eid), relation } },
-    ])  
-    const sourceNode = nodes.find((n) => n.id === conn.source)
-    const targetNode = nodes.find((n) => n.id === conn.target)
-
-    if(relation === 'directory'){
-      if(
-        sourceNode?.type !== 'directory' || targetNode?.type !== 'agent'
-      ){
-        setError('디렉토리 연결은 디렉토리 블록에서 에이전트 블록으로만 가능합니다.')
-      }
+const onConnect = useCallback(
+  (connection: Connection) => {
+    if (!connection.source || !connection.target) {
       return
     }
-  }, [pushHistory, setEdges, makeEdge])
+
+    const sourceNode = nodes.find(
+      (node) => node.id === connection.source,
+    )
+
+    const targetNode = nodes.find(
+      (node) => node.id === connection.target,
+    )
+
+    const relation:
+      | 'workflow'
+      | 'directory' =
+      connection.sourceHandle === 'directory-output'
+        ? 'directory'
+        : 'workflow'
+
+    if (relation === 'directory') {
+      if (
+        sourceNode?.type !== 'directory' ||
+        targetNode?.type !== 'agent'
+      ) {
+        setError(
+          '디렉토리는 에이전트에만 연결할 수 있습니다.',
+        )
+        return
+      }
+
+      if (
+        connection.targetHandle !== 'directory-input'
+      ) {
+        setError(
+          '디렉토리 연결은 에이전트의 디렉토리 입력 포트에 연결해야 합니다.',
+        )
+        return
+      }
+    }
+
+    if (relation === 'workflow') {
+      if (
+        sourceNode?.type !== 'agent' ||
+        targetNode?.type !== 'agent'
+      ) {
+        setError(
+          '워크플로우 연결은 에이전트끼리만 가능합니다.',
+        )
+        return
+      }
+    }
+
+    const duplicated = edges.some(
+      (edge) =>
+        edge.source === connection.source &&
+        edge.target === connection.target &&
+        edge.data?.relation === relation,
+    )
+
+    if (duplicated) {
+      setError('이미 존재하는 연결입니다.')
+      return
+    }
+
+    pushHistory()
+    setError('')
+
+    setEdges((currentEdges) => [
+      ...currentEdges,
+      makeEdge(
+        connection.source!,
+        connection.target!,
+        relation,
+      ),
+    ])
+  },
+  [
+    nodes,
+    edges,
+    pushHistory,
+    setEdges,
+    makeEdge,
+  ],
+)
 
   const selectedAgent = selected ? agents[selected] : null
 
@@ -296,59 +411,80 @@ export default function ServiceDetailPage() {
 
 
   function currentGraph(): Graph {
-    return {
-      nodes: nodes.map((n) => ({
-        if (n.type === 'directory') {
-          return {
-            ...directories[n.id],
-            position: n.position,
-          }
-        }
+    const graphNodes : WorkflowNode[] = 
+    nodes.map((node) => {
+      if( node.type === 'directory') {
+        const directory = 
+        directories[node.id]
 
         return {
-          ...agents[n.id],
-          position: n.position,
+          ...directory,
+          position: node.position,
         }
-      })),
+      }
 
-      edges: edges.map((e) => ({
-        source: e.source, 
-        target: e.target, 
-        relation: e.data?.relation === 'directory' 
+        const agent = agents[node.id]
+
+        return {
+          ...agents[node.id],
+          position: node.position,
+        }
+      })
+
+      
+      const graphEdges = edges.map((edge) => ({
+        source: edge.source, 
+        target: edge.target, 
+        relation: 
+          edge.data?.relation === 'directory' 
         ? 'directory' 
         : 'workflow' 
-      })),
-    }
+      }))
+    
+      return {
+        nodes: graphNodes,
+        edges: graphEdges,
+      }
   }
 
   function applyGraph(graph: Graph) {
     const positions = layoutPositions(graph)
     const agentMap: Record<string, AgentNode> = {}
-    graph.nodes.forEach((n) => (agentMap[n.id] = n))
+    const directoryMap: Record<string, DirectoryNode> = {}
+    for(const node of graph.nodes) {
+      if (node.type === 'directory') {
+        directoryMap[node.id] = node
+      } else {
+        agentMap[node.id] = node
+      }
+    }
+
     setAgents(agentMap)
+    setDirectories(directoryMap)
+
     setNodes(
-      graph.nodes.map((n) => ({
-        if( n.type === 'directory') {
+      graph.nodes.map((node) => ({
+        if( node.type === 'directory') {
           return {
-            id: n.id,
+            id: node.id,
             type: 'directory',
-            position: n.position ?? positions[n.id],
+            position: node.position ?? positions[node.id],
             data: { 
-            label: n.name, 
-            directoryId: n.directory_id,
-            deviceId: n.device_id,
+            label: node.name, 
+            directoryId: node.directory_id,
+            deviceId: node.device_id,
           },
           }
         }
         return {
-          id: n.id,
+          id: node.id,
           type: 'agent',
-          position: n.position ?? positions[n.id],
-          data: { label: n.name, model: n.model },
+          position: node.position ?? positions[node.id],
+          data: { label: node.name, model: node.model },
         }
       })),
     )
-    setEdges(graph.edges.map((e) => makeEdge(e.source, e.target)))
+    setEdges(graph.edges.map((e) => makeEdge(e.source, e.target, e.relation)))
     setSelected(null)
     setTimeout(() => rfInstance.current?.fitView({ padding: 0.2 }), 50)
   }
