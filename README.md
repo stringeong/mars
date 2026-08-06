@@ -13,6 +13,8 @@
 
 ## 빠른 시작
 
+Linux 서버에 Docker Compose로 배포하는 절차는 [Linux 서버 실행 가이드](docs/linux-server.md)를 참고하세요.
+
 ### 1. 중앙 서버
 
 ```bash

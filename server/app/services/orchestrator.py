@@ -57,6 +57,22 @@ def device_is_online(device: models.Device) -> bool:
     return models.utcnow() - device.last_heartbeat < timedelta(seconds=HEARTBEAT_TIMEOUT_SEC)
 
 
+def device_has_capacity(device: models.Device) -> bool:
+    """현재 사용률이 사용자가 지정한 신규 작업 수용 상한 아래인지 확인한다."""
+    specs = device.specs or {}
+    limits = specs.get("resource_limits") or {}
+    for current_key, limit_key in (
+        ("cpu_percent", "max_cpu_percent"),
+        ("gpu_percent", "max_gpu_percent"),
+    ):
+        current = specs.get(current_key)
+        limit = limits.get(limit_key)
+        if isinstance(current, (int, float)) and isinstance(limit, (int, float)):
+            if current >= limit:
+                return False
+    return True
+
+
 def reclaim_stale_tasks(db: Session, user_id: int) -> None:
     """하트비트가 끊긴 기기에 할당된 running 작업을 ready로 되돌린다."""
     rows = (
@@ -103,7 +119,7 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
         required_device = directory_access.required_device_by_agent(
             graph_snapshot or {}
         ).get(node_id)
-        if required_device is None or required_device == device.id:
+        if (required_device is None or required_device == device.id) and device_has_capacity(device):
             candidate_ids.append(task_id)
 
     # 원자적 UPDATE로 실제 선점

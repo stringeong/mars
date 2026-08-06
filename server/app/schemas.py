@@ -37,6 +37,13 @@ class Token(BaseModel):
 # ---------- Device ----------
 
 
+class ResourceLimits(BaseModel):
+    """Worker를 새 작업에 배정할 때 사용할 현재 사용률 상한."""
+
+    max_cpu_percent: int | None = Field(default=None, ge=1, le=100)
+    max_gpu_percent: int | None = Field(default=None, ge=1, le=100)
+
+
 class DeviceRegister(BaseModel):
     """Worker CLI가 사용자 인증 후 호출하는 기기 등록 요청."""
 
@@ -49,6 +56,7 @@ class DeviceOut(BaseModel):
     id: int
     name: str
     specs: dict
+    resource_limits: ResourceLimits = Field(default_factory=ResourceLimits)
     #allowed_folders: list
     last_heartbeat: UTCDateTime | None
     online: bool = False
@@ -62,6 +70,7 @@ class DeviceRegisterOut(DeviceOut):
 
 class DeviceUpdate(BaseModel):
     name: str | None = None
+    resource_limits: ResourceLimits | None = None
     #allowed_folders: list[str] | None = None
 
 
@@ -70,13 +79,12 @@ class DeviceUpdate(BaseModel):
 class SharedDirectoryCreate(BaseModel):
     alias: str
     local_path: str
-    permission: Literal["read", "read_write"] = "read"
+    permission: Literal["read"] = "read"
 
 
 class SharedDirectoryUpdate(BaseModel):
     alias: str | None = None
     local_path: str | None = None
-    permission: Literal["read", "read_write"] | None = None
     is_active: bool | None = None
 
 

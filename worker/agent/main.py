@@ -8,6 +8,7 @@
 import argparse
 import getpass
 import platform
+import subprocess
 import sys
 import time
 
@@ -27,6 +28,28 @@ def collect_specs() -> dict:
         "cpu_count": psutil.cpu_count(logical=True),
         "ram_gb": round(psutil.virtual_memory().total / 1024**3, 1),
     }
+
+
+def collect_runtime_stats() -> dict:
+    """Report CPU and, when NVIDIA tools are available, GPU utilization."""
+    stats = {
+        "cpu_percent": psutil.cpu_percent(),
+        "ram_percent": psutil.virtual_memory().percent,
+    }
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=3,
+        )
+        values = [float(line.strip()) for line in result.stdout.splitlines() if line.strip()]
+        if values:
+            stats["gpu_percent"] = max(values)
+    except (FileNotFoundError, subprocess.SubprocessError, ValueError):
+        pass
+    return stats
 
 
 def cmd_register(args: argparse.Namespace) -> None:
@@ -113,8 +136,7 @@ def cmd_run(_args: argparse.Namespace) -> None:
                 httpx.post(
                     f"{server}/worker/heartbeat",
                     headers=headers,
-                    json={"specs": {"cpu_percent": psutil.cpu_percent(),
-                                    "ram_percent": psutil.virtual_memory().percent}},
+                    json={"specs": collect_runtime_stats()},
                     timeout=15,
                 )
         except KeyboardInterrupt:

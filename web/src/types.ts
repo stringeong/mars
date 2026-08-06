@@ -44,8 +44,14 @@ export interface Device {
   id: number
   name: string
   specs: Record<string, unknown>
+  resource_limits: ResourceLimits
   last_heartbeat: string | null
   online: boolean
+}
+
+export interface ResourceLimits {
+  max_cpu_percent?: number
+  max_gpu_percent?: number
 }
 
 
@@ -55,7 +61,7 @@ export interface SharedDirectory {
   device_id: number
   alias: string
   local_path: string
-  permission: 'read' | 'read_write'
+  permission: 'read'
   is_active: boolean
   created_at: string
   updated_at: string

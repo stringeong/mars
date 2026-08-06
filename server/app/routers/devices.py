@@ -15,10 +15,12 @@ router = APIRouter(prefix="/devices", tags=["devices"])
 
 
 def _to_out(device: models.Device, with_key: bool = False) -> dict:
+    specs = device.specs or {}
     data = {
         "id": device.id,
         "name": device.name,
-        "specs": device.specs or {},
+        "specs": specs,
+        "resource_limits": specs.get("resource_limits") or {},
         "last_heartbeat": device.last_heartbeat,
         "online": device_is_online(device),
     }
@@ -70,7 +72,23 @@ def update_device(
     if device is None or device.user_id != user.id:
         raise HTTPException(404, "기기를 찾을 수 없습니다.")
     if body.name is not None:
+        duplicate = (
+            db.query(models.Device)
+            .filter(
+                models.Device.user_id == user.id,
+                models.Device.name == body.name,
+                models.Device.id != device.id,
+            )
+            .first()
+        )
+        if duplicate:
+            raise HTTPException(409, "같은 이름의 기기가 이미 등록되어 있습니다.")
         device.name = body.name
+    if body.resource_limits is not None:
+        device.specs = {
+            **(device.specs or {}),
+            "resource_limits": body.resource_limits.model_dump(exclude_none=True),
+        }
     db.commit()
     db.refresh(device)
     return _to_out(device)

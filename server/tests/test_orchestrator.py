@@ -60,6 +60,25 @@ class TestDeviceOnline:
         assert not orchestrator.device_is_online(device)
 
 
+class TestDeviceCapacity:
+    def test_rejects_device_at_cpu_limit(self, make_user, make_device, db):
+        device = make_device(make_user())
+        device.specs = {
+            "cpu_percent": 80,
+            "resource_limits": {"max_cpu_percent": 80},
+        }
+        assert not orchestrator.device_has_capacity(device)
+
+    def test_allows_device_below_configured_limits(self, make_user, make_device, db):
+        device = make_device(make_user())
+        device.specs = {
+            "cpu_percent": 79,
+            "gpu_percent": 20,
+            "resource_limits": {"max_cpu_percent": 80, "max_gpu_percent": 50},
+        }
+        assert orchestrator.device_has_capacity(device)
+
+
 class TestReclaimStaleTasks:
     def test_stale_device_task_returns_to_ready(
         self, db, make_user, make_device, make_execution
