@@ -130,6 +130,24 @@ class SharedDirectory(Base):
     device: Mapped["Device"] = relationship(
         back_populates="shared_directories",
     )
+
+
+class DirectoryMount(Base):
+    """A Worker-specific local path for one logical shared directory."""
+
+    __tablename__ = "directory_mounts"
+
+    __table_args__ = (
+        UniqueConstraint("directory_id", "device_id", name="uq_directory_mount_device"),
+        UniqueConstraint("device_id", "local_path", name="uq_directory_mount_path"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    directory_id: Mapped[int] = mapped_column(
+        ForeignKey("shared_directories.id"), index=True
+    )
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
+    local_path: Mapped[str] = mapped_column(Text)
     
 
 

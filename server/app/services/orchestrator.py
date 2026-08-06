@@ -39,7 +39,7 @@ def create_tasks_for_execution(db: Session, execution: models.Execution) -> None
             role_prompt=node.get("role_prompt", ""),
             model=node.get("model", ""),
             allowed_folders=[
-                directory.local_path
+                {"directory_id": directory.id}
                 for directory in directories_by_agent[node["id"]]
             ],
             status=status,
@@ -103,7 +103,12 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
     """
     reclaim_stale_tasks(db, device.user_id)
     candidate_rows = (
-        db.query(models.TaskRecord.id, models.TaskRecord.node_id, models.Execution.graph_snapshot)
+        db.query(
+            models.TaskRecord.id,
+            models.TaskRecord.node_id,
+            models.TaskRecord.allowed_folders,
+            models.Execution.graph_snapshot,
+        )
         .join(models.Execution, models.TaskRecord.execution_id == models.Execution.id)
         .filter(
             models.Execution.user_id == device.user_id,
@@ -115,11 +120,19 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
         .all()
     )
     candidate_ids = []
-    for task_id, node_id, graph_snapshot in candidate_rows:
+    for task_id, node_id, accesses, graph_snapshot in candidate_rows:
         required_device = directory_access.required_device_by_agent(
             graph_snapshot or {}
         ).get(node_id)
-        if (required_device is None or required_device == device.id) and device_has_capacity(device):
+        directory_ids = directory_access.task_directory_ids(accesses)
+        local_paths = directory_access.local_paths_for_device(
+            db, device.id, directory_ids
+        )
+        if (
+            (required_device is None or required_device == device.id)
+            and device_has_capacity(device)
+            and local_paths is not None
+        ):
             candidate_ids.append(task_id)
 
     # 원자적 UPDATE로 실제 선점

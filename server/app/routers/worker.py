@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
-from ..services import orchestrator
+from ..services import directory_access, orchestrator
 
 router = APIRouter(prefix="/worker", tags=["worker"])
 
@@ -53,13 +53,25 @@ def next_task(
         response.status_code = 204
         return None
     execution = db.get(models.Execution, task.execution_id)
+    directory_ids = directory_access.task_directory_ids(task.allowed_folders)
+    directory_paths = directory_access.local_paths_for_device(
+        db, device.id, directory_ids
+    )
+    if directory_paths is None:
+        # A path mapping may have been removed between claim and payload creation.
+        task.status = "ready"
+        task.assigned_device_id = None
+        task.started_at = None
+        db.commit()
+        response.status_code = 204
+        return None
     payload = schemas.WorkerTaskOut(
         task_id=task.id,
         execution_id=task.execution_id,
         agent_name=task.agent_name,
         role_prompt=task.role_prompt,
         model=task.model or "",
-        directory_paths=task.allowed_folders or [],
+        directory_paths=directory_paths if directory_ids else task.allowed_folders or [],
         input_context=task.input_context,
         run_prompt=execution.run_prompt if execution else "",
     )

@@ -65,7 +65,7 @@ SQLite DB는 Docker volume `mars-data`에 보존된다. 컨테이너를 다시 �
 
 ## 3. 공유 디렉터리 준비
 
-이 프로젝트에서 하나의 디렉터리를 여러 Worker가 읽으려면 **모든 Worker 컨테이너 내부에서 같은 절대 경로**로 보여야 한다. 기본 경로는 `/shared`다.
+이 프로젝트에서 하나의 디렉터리를 여러 Worker가 읽을 때 각 Worker의 로컬 경로는 달라도 된다. 기기 관리에서 같은 디렉터리 별명을 Worker별로 등록하고, 각 Worker의 실제 경로를 입력한다.
 
 예를 들어 서버 Worker용 실제 디렉터리를 `/srv/mars/shared`로 만든다.
 
@@ -80,14 +80,14 @@ sudo chown -R "$USER":"$USER" /srv/mars/shared
 MARS_WORKER_SHARED_DIR=/srv/mars/shared
 ```
 
-다른 Linux Worker에서는 NFS/SMB 등의 방법으로 같은 데이터를 각 호스트에 마운트한 뒤, 각 Worker 컨테이너의 대상 경로를 모두 `/shared`로 고정한다. 호스트 측 경로는 달라도 된다.
+다른 Linux Worker에서는 NFS/SMB 등의 방법으로 같은 데이터를 각 호스트에 마운트한다. 컨테이너 내부 대상 경로도 Worker별로 달라도 된다.
 
 ```text
 Worker A: /mnt/team-share  ->  /shared
-Worker B: /data/team-share ->  /shared
+Worker B: /data/team-share ->  /workspace/team-share
 ```
 
-웹에서 공유 디렉터리를 등록할 때는 Worker 컨테이너 기준 경로를 입력한다. 예: `/shared/project`. 호스트 경로(`/srv/mars/shared/project`)를 입력하면 다른 Worker에서 접근할 수 없다.
+웹에서 같은 별명을 Worker마다 한 번씩 등록하고, 해당 Worker 컨테이너 기준 경로를 입력한다. 예: Worker A는 `/shared/project`, Worker B는 `/workspace/team-share/project`. 작업은 할당된 Worker에 맞는 경로를 받는다.
 
 ## 4. 서버에 Worker 하나 추가하기
 

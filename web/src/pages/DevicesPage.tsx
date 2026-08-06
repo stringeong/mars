@@ -118,10 +118,10 @@ export default function DevicesPage() {
         </form>
       </section>
       <section className="card"><h2>공유 디렉터리</h2>
-        <p className="muted">모든 Worker 컨테이너에서 같은 절대 경로로 마운트된 경로를 등록하세요.</p>
+        <p className="muted">같은 별명을 각 Worker에 등록하면, Worker별 서로 다른 로컬 경로를 하나의 공유 디렉터리로 연결합니다.</p>
         <form onSubmit={saveDirectory} className="directory-form">
           <input placeholder="별명 (예: 프로젝트 자료)" value={directoryForm.alias} onChange={(event) => setDirectoryForm({ ...directoryForm, alias: event.target.value })} required />
-          <input placeholder="/shared/project" value={directoryForm.local_path} onChange={(event) => setDirectoryForm({ ...directoryForm, local_path: event.target.value })} required />
+          <input placeholder="이 Worker의 로컬 경로" value={directoryForm.local_path} onChange={(event) => setDirectoryForm({ ...directoryForm, local_path: event.target.value })} required />
           <span className="directory-permission">읽기 전용</span>
           <button className="btn">{editingDirectoryId ? '수정 저장' : '디렉터리 추가'}</button>
           {editingDirectoryId && <button type="button" className="btn ghost" onClick={() => { setEditingDirectoryId(null); setDirectoryForm(emptyDirectory) }}>취소</button>}

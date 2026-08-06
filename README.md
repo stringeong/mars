@@ -57,7 +57,7 @@ python -m agent run
 
 - 등록 정보는 `worker/agent_config.json` 에 저장됩니다.
 - 워크플로우에 연결한 공유 디렉터리만 Worker의 파일 접근 허용 목록에 들어갑니다.
-- 하나의 디렉터리를 여러 Worker가 처리하려면, 모든 Worker에 **동일한 절대 경로**로 마운트해야 합니다. 예: 모든 컨테이너에서 `/shared/project`.
+- 하나의 디렉터리를 여러 Worker가 처리할 때는, 기기 관리에서 같은 디렉터리 별명을 각 Worker에 등록하고 각 Worker의 실제 로컬 경로를 입력합니다. 예: Linux `/shared/project`, Windows `D:\team\project`.
 
 ### 3. 웹 프론트엔드
 

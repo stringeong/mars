@@ -29,6 +29,20 @@ def _to_out(device: models.Device, with_key: bool = False) -> dict:
     return data
 
 
+def _directory_out(directory: models.SharedDirectory, local_path: str) -> dict:
+    return {
+        "id": directory.id,
+        "user_id": directory.user_id,
+        "device_id": directory.device_id,
+        "alias": directory.alias,
+        "local_path": local_path,
+        "permission": directory.permission,
+        "is_active": directory.is_active,
+        "created_at": directory.created_at,
+        "updated_at": directory.updated_at,
+    }
+
+
 @router.post("", response_model=schemas.DeviceRegisterOut, status_code=201)
 def register_device(
     body: schemas.DeviceRegister,
@@ -133,15 +147,23 @@ def list_directories(
             detail="기기를 찾을 수 없습니다.",
         )
 
-    return (
+    directories = (
         db.query(models.SharedDirectory)
-        .filter(
-            models.SharedDirectory.device_id == device_id,
-            models.SharedDirectory.user_id == current_user.id,
-        )
+        .filter(models.SharedDirectory.user_id == current_user.id)
         .order_by(models.SharedDirectory.id)
         .all()
     )
+    mounts = (
+        db.query(models.DirectoryMount)
+        .filter(models.DirectoryMount.device_id == device_id)
+        .all()
+    )
+    paths = {mount.directory_id: mount.local_path for mount in mounts}
+    return [
+        _directory_out(directory, paths.get(directory.id, directory.local_path))
+        for directory in directories
+        if directory.device_id == device_id or directory.id in paths
+    ]
 
 
 
@@ -182,10 +204,46 @@ def create_directory(
     )
 
     if existing_alias:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="이미 사용 중인 디렉토리 별명입니다.",
+        existing_mount = (
+            db.query(models.DirectoryMount)
+            .filter(
+                models.DirectoryMount.directory_id == existing_alias.id,
+                models.DirectoryMount.device_id == device_id,
+            )
+            .first()
         )
+        if existing_alias.device_id == device_id or existing_mount is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="이 Worker에 이미 등록된 디렉토리 별명입니다.",
+            )
+        path_in_use = (
+            db.query(models.SharedDirectory)
+            .filter(
+                models.SharedDirectory.device_id == device_id,
+                models.SharedDirectory.local_path == payload.local_path,
+            )
+            .first()
+            or db.query(models.DirectoryMount)
+            .filter(
+                models.DirectoryMount.device_id == device_id,
+                models.DirectoryMount.local_path == payload.local_path,
+            )
+            .first()
+        )
+        if path_in_use:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="해당 기기에 이미 등록된 경로입니다.",
+            )
+        db.add(models.DirectoryMount(
+            directory_id=existing_alias.id,
+            device_id=device_id,
+            local_path=payload.local_path,
+        ))
+        db.commit()
+        db.refresh(existing_alias)
+        return _directory_out(existing_alias, payload.local_path)
 
     existing_path = (
         db.query(models.SharedDirectory)
@@ -195,8 +253,16 @@ def create_directory(
         )
         .first()
     )
+    existing_mount_path = (
+        db.query(models.DirectoryMount)
+        .filter(
+            models.DirectoryMount.device_id == device_id,
+            models.DirectoryMount.local_path == payload.local_path,
+        )
+        .first()
+    )
 
-    if existing_path:
+    if existing_path or existing_mount_path:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="해당 기기에 이미 등록된 경로입니다.",
@@ -214,7 +280,7 @@ def create_directory(
     db.commit()
     db.refresh(directory)
 
-    return directory
+    return _directory_out(directory, directory.local_path)
 
 
 #----------- Update Directory ----------
@@ -235,7 +301,6 @@ def update_directory(
         db.query(models.SharedDirectory)
         .filter(
             models.SharedDirectory.id == directory_id,
-            models.SharedDirectory.device_id == device_id,
             models.SharedDirectory.user_id == current_user.id,
         )
         .first()
@@ -248,6 +313,14 @@ def update_directory(
         )
 
     update_data = payload.model_dump(exclude_unset=True)
+    mount = (
+        db.query(models.DirectoryMount)
+        .filter(
+            models.DirectoryMount.directory_id == directory_id,
+            models.DirectoryMount.device_id == device_id,
+        )
+        .first()
+    )
 
     if "alias" in update_data:
         duplicate_alias = (
@@ -267,7 +340,7 @@ def update_directory(
             )
 
     if "local_path" in update_data:
-        duplicate_path = (
+        duplicate_directory_path = (
             db.query(models.SharedDirectory)
             .filter(
                 models.SharedDirectory.device_id == device_id,
@@ -277,20 +350,47 @@ def update_directory(
             )
             .first()
         )
+        duplicate_mount_path = (
+            db.query(models.DirectoryMount)
+            .filter(
+                models.DirectoryMount.device_id == device_id,
+                models.DirectoryMount.local_path == update_data["local_path"],
+                models.DirectoryMount.directory_id != directory_id,
+            )
+            .first()
+        )
 
-        if duplicate_path:
+        if duplicate_directory_path or duplicate_mount_path:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="해당 기기에 이미 등록된 경로입니다.",
             )
 
     for field, value in update_data.items():
+        if field == "local_path":
+            continue
         setattr(directory, field, value)
+
+    if "local_path" in update_data:
+        if directory.device_id == device_id:
+            directory.local_path = update_data["local_path"]
+        elif mount is not None:
+            mount.local_path = update_data["local_path"]
+        else:
+            db.add(models.DirectoryMount(
+                directory_id=directory.id,
+                device_id=device_id,
+                local_path=update_data["local_path"],
+            ))
 
     db.commit()
     db.refresh(directory)
 
-    return directory
+    local_path = (
+        update_data.get("local_path")
+        or (mount.local_path if mount is not None else directory.local_path)
+    )
+    return _directory_out(directory, local_path)
 
 
 #----------- Delete Directory ----------
@@ -308,7 +408,6 @@ def delete_directory(
         db.query(models.SharedDirectory)
         .filter(
             models.SharedDirectory.id == directory_id,
-            models.SharedDirectory.device_id == device_id,
             models.SharedDirectory.user_id == current_user.id,
         )
         .first()

@@ -1,5 +1,6 @@
 import pytest
 
+from app import models
 from app.services import directory_access, orchestrator
 from tests.conftest import graph_of
 
@@ -64,17 +65,26 @@ def test_shared_directory_task_can_be_claimed_by_any_user_device(
     user = make_user()
     source = make_device(user, name="source")
     worker = make_device(user, name="worker")
-    directory = make_directory(user, source, local_path="/shared/private")
+    directory = make_directory(user, source, local_path="/srv/private")
+    db.add(models.DirectoryMount(
+        directory_id=directory.id,
+        device_id=worker.id,
+        local_path="D:/team/private",
+    ))
+    db.flush()
     execution = make_execution(user, graph_with_directory(directory))
 
     orchestrator.create_tasks_for_execution(db, execution)
     task = execution.tasks[0]
-    assert task.allowed_folders == ["/shared/private"]
+    assert task.allowed_folders == [{"directory_id": directory.id}]
 
     claimed = orchestrator.claim_next_task(db, worker)
     assert claimed is not None
     db.expire_all()
     assert claimed.assigned_device_id == worker.id
+    assert directory_access.local_paths_for_device(
+        db, worker.id, [directory.id]
+    ) == ["D:/team/private"]
 
 
 def test_nested_resources_resolve_and_pin_the_selected_worker(

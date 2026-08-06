@@ -12,6 +12,51 @@ class DirectoryAccessError(ValueError):
     pass
 
 
+def local_paths_for_device(
+    db: Session, device_id: int, directory_ids: list[int]
+) -> list[str] | None:
+    """Resolve logical directory IDs to paths mounted by a particular Worker."""
+    if not directory_ids:
+        return []
+    directories = (
+        db.query(models.SharedDirectory)
+        .filter(models.SharedDirectory.id.in_(directory_ids))
+        .all()
+    )
+    by_id = {directory.id: directory for directory in directories}
+    mounts = (
+        db.query(models.DirectoryMount)
+        .filter(
+            models.DirectoryMount.device_id == device_id,
+            models.DirectoryMount.directory_id.in_(directory_ids),
+        )
+        .all()
+    )
+    path_by_directory = {mount.directory_id: mount.local_path for mount in mounts}
+    result: list[str] = []
+    for directory_id in directory_ids:
+        directory = by_id.get(directory_id)
+        if directory is None:
+            return None
+        # Existing registrations remain a valid mapping for their original Worker.
+        path = path_by_directory.get(directory_id)
+        if path is None and directory.device_id == device_id:
+            path = directory.local_path
+        if not path:
+            return None
+        result.append(path)
+    return result
+
+
+def task_directory_ids(accesses: list) -> list[int]:
+    """Read directory IDs from new task records while accepting legacy paths."""
+    return [
+        access["directory_id"]
+        for access in accesses or []
+        if isinstance(access, dict) and isinstance(access.get("directory_id"), int)
+    ]
+
+
 def _agent_nodes(graph: dict) -> list[dict]:
     return [
         node for node in graph.get("nodes", [])
@@ -65,6 +110,11 @@ def resolve_directories_by_agent(
         worker = db.get(models.Device, worker_id)
         if worker is None or worker.user_id != user_id:
             raise DirectoryAccessError(f"Worker {worker_id} is unavailable.")
+        directory_ids = directory_ids_by_agent[agent["id"]]
+        if local_paths_for_device(db, worker_id, directory_ids) is None:
+            raise DirectoryAccessError(
+                f"Worker {worker.name} has no local path for a selected directory."
+            )
 
     return {
         agent_id: [by_id[directory_id] for directory_id in directory_ids]
