@@ -35,7 +35,6 @@ class TestCreateTasks:
     def test_task_fields_copied_from_node(self, db, make_user, make_execution):
         graph = graph_of(["a"], [])
         graph["nodes"][0]["model"] = "gemma3:4b"
-        graph["nodes"][0]["allowed_folders"] = ["/tmp/docs"]
         execution = make_execution(make_user(), graph)
         orchestrator.create_tasks_for_execution(db, execution)
 
@@ -43,7 +42,7 @@ class TestCreateTasks:
         assert task.agent_name == "에이전트 a"
         assert task.role_prompt == "a 역할"
         assert task.model == "gemma3:4b"
-        assert task.allowed_folders == ["/tmp/docs"]
+        assert task.allowed_folders == []
 
 
 class TestDeviceOnline:

@@ -38,10 +38,10 @@ def create_tasks_for_execution(db: Session, execution: models.Execution) -> None
             agent_name=node.get("name", node["id"]),
             role_prompt=node.get("role_prompt", ""),
             model=node.get("model", ""),
-            allowed_folders=(
-                [directory.local_path for directory in directories_by_agent[node["id"]]]
-                #or node.get("allowed_folders", [])
-            ),
+            allowed_folders=[
+                directory.local_path
+                for directory in directories_by_agent[node["id"]]
+            ],
             status=status,
             input_context="",
         )

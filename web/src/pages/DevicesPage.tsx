@@ -38,7 +38,7 @@ export default function DevicesPage() {
         <table>
           <thead>
             <tr>
-              <th>이름</th><th>사양</th><th>허용 폴더</th><th>상태</th><th></th>
+              <th>이름</th><th>사양</th><th>상태</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -50,9 +50,6 @@ export default function DevicesPage() {
                   {String(d.specs.ram_gb ?? '?')}GB
                   {d.specs.cpu_percent != null && ` · 사용률 ${d.specs.cpu_percent}%`}
                 </td>
-                <td style={{ fontSize: 13 }}>
-                  {(d.allowed_folders ?? []).length > 0 ? d.allowed_folders.join(', ') : '—'}
-                </td>
                 <td>
                   <span className={`badge ${d.online ? 'online' : 'offline'}`}>
                     {d.online ? '온라인' : '오프라인'}
@@ -62,7 +59,7 @@ export default function DevicesPage() {
               </tr>
             ))}
             {devices.length === 0 && (
-              <tr><td colSpan={5} style={{ color: 'var(--muted)' }}>등록된 기기가 없습니다.</td></tr>
+              <tr><td colSpan={4} style={{ color: 'var(--muted)' }}>등록된 기기가 없습니다.</td></tr>
             )}
           </tbody>
         </table>

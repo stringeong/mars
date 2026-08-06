@@ -19,7 +19,6 @@ def _to_out(device: models.Device, with_key: bool = False) -> dict:
         "id": device.id,
         "name": device.name,
         "specs": device.specs or {},
-        "allowed_folders": device.allowed_folders or [],
         "last_heartbeat": device.last_heartbeat,
         "online": device_is_online(device),
     }
@@ -45,7 +44,6 @@ def register_device(
         user_id=user.id,
         name=body.name,
         specs=body.specs,
-        allowed_folders=body.allowed_folders,
     )
     db.add(device)
     db.commit()
@@ -73,8 +71,6 @@ def update_device(
         raise HTTPException(404, "기기를 찾을 수 없습니다.")
     if body.name is not None:
         device.name = body.name
-    if body.allowed_folders is not None:
-        device.allowed_folders = body.allowed_folders
     db.commit()
     db.refresh(device)
     return _to_out(device)

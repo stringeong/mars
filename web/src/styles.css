@@ -145,6 +145,20 @@ tr.clickable:hover { background: #f8fafc; }
 }
 .agent-block-name { font-size: 13px; font-weight: 700; color: var(--text); }
 .agent-block-model { font-size: 10px; color: var(--muted); margin-top: 2px; }
+.scratch-agent { min-width: 210px; padding: 10px 12px 12px; border-radius: 14px; }
+.agent-resources { display: grid; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(71, 85, 105, .35); }
+.resource-slot { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 6px; align-items: center; padding: 5px 7px; border-radius: 7px; background: rgba(255,255,255,.72); font-size: 10px; }
+.resource-slot span { font-weight: 700; color: var(--muted); }
+.resource-slot strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.worker-slot { border-left: 3px solid #f59e0b; }
+.directory-slot { border-left: 3px solid #14b8a6; }
+.resource-picker { max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 5px; }
+.resource-check { display: flex; gap: 8px; align-items: start; margin: 0; padding: 7px; font-size: 12px; cursor: pointer; }
+.resource-check:hover { background: #f8fafc; }
+.resource-check input { width: auto; margin-top: 2px; }
+.resource-check span { display: grid; gap: 2px; min-width: 0; }
+.resource-check small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 250px; }
+.muted { color: var(--muted); font-size: 12px; }
 .block-handle {
   width: 11px !important; height: 11px !important;
   background: #fff !important; border: 2.5px solid #6366f1 !important;

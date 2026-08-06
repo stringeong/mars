@@ -11,6 +11,11 @@ FILE_CONTEXT_LIMIT = 5  # 컨텍스트에 포함할 최대 파일 수
 PREVIEW_CHARS = 200  # 파일 선별 시 LLM에게 보여줄 미리보기 길이
 
 
+def _directory_paths(task: dict) -> list[str]:
+    """Read the current protocol field while accepting legacy payloads."""
+    return task.get("directory_paths") or task.get("allowed_folders") or []
+
+
 def _chat(config: dict, model: str, messages: list[dict], temperature: float) -> str:
     resp = httpx.post(
         f"{config['ollama_url']}/api/chat",
@@ -45,7 +50,7 @@ def _select_relevant_files(task: dict, files: list[str], config: dict) -> list[s
     previews = []
     for path in files[:20]:
         try:
-            head = sandbox.read_file(path, task.get("allowed_folders") or [])[:PREVIEW_CHARS]
+            head = sandbox.read_file(path, _directory_paths(task))[:PREVIEW_CHARS]
         except sandbox.SandboxError:
             continue
         previews.append(f"- {path}\n  미리보기: {head!r}")
@@ -91,7 +96,7 @@ def _build_messages(task: dict, config: dict) -> list[dict]:
 
     # 허용 폴더의 파일을 컨텍스트로 제공 (개인 자료 활용, 로컬 처리)
     # 단, 작업과 관련된 파일만 선별해 무관한 개인정보 유입을 막는다
-    folders = task.get("allowed_folders") or []
+    folders = _directory_paths(task)
     if folders:
         files = sandbox.list_files(folders)
         relevant = _select_relevant_files(task, files, config) if files else []

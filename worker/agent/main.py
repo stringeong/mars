@@ -51,16 +51,12 @@ def cmd_register(args: argparse.Namespace) -> None:
     default_name = platform.node() or "내 기기"
     name = input(f"기기 이름 [{default_name}]: ").strip() or default_name
 
-    print("에이전트가 접근을 허용할 폴더를 입력하세요 (쉼표로 구분, 비우면 없음)")
-    folders_raw = input("허용 폴더: ").strip()
-    folders = [f.strip() for f in folders_raw.split(",") if f.strip()]
-
     specs = collect_specs()
     print(f"자동 수집된 기기 정보: {specs}")
 
     resp = httpx.post(
         f"{config['server_url']}/devices",
-        json={"name": name, "specs": specs, "allowed_folders": folders},
+        json={"name": name, "specs": specs},
         headers={"Authorization": f"Bearer {token}"},
         timeout=15,
     )
@@ -73,7 +69,6 @@ def cmd_register(args: argparse.Namespace) -> None:
         device_id=data["id"],
         device_name=data["name"],
         api_key=data["api_key"],
-        allowed_folders=folders,
     )
     cfg.save(config)
     print(f"등록 완료! device_id={data['id']} (설정 저장: {cfg.CONFIG_PATH})")

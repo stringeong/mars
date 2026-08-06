@@ -65,7 +65,6 @@ def make_device(db):
             user_id=user.id,
             name=name,
             last_heartbeat=last_heartbeat,
-            allowed_folders=allowed_folders or [],
         )
         db.add(device)
         db.flush()

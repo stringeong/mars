@@ -46,7 +46,7 @@ cd worker
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 최초 1회: 기기 등록 (서버 주소, 계정, 기기명, 허용 폴더 지정)
+# 최초 1회: 기기 등록 (서버 주소, 계정, 기기명)
 python -m agent register --server http://localhost:8000
 
 # 상시 실행: 하트비트 전송 + 작업 폴링·실행
@@ -54,7 +54,8 @@ python -m agent run
 ```
 
 - 등록 정보는 `worker/agent_config.json` 에 저장됩니다.
-- 에이전트는 등록 시 지정한 **허용 폴더 밖의 파일에 절대 접근하지 않습니다** (최소 권한 원칙).
+- 워크플로우에 연결한 공유 디렉터리만 Worker의 파일 접근 허용 목록에 들어갑니다.
+- 하나의 디렉터리를 여러 Worker가 처리하려면, 모든 Worker에 **동일한 절대 경로**로 마운트해야 합니다. 예: 모든 컨테이너에서 `/shared/project`.
 
 ### 3. 웹 프론트엔드
 

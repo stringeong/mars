@@ -53,18 +53,13 @@ def next_task(
         response.status_code = 204
         return None
     execution = db.get(models.Execution, task.execution_id)
-    # 에이전트별 허용 폴더가 비어 있으면 기기 기본 허용 폴더를 사용
-    folders = ( task.allowed_folders 
-                #or device.allowed_folders 
-                or []
-    )
     payload = schemas.WorkerTaskOut(
         task_id=task.id,
         execution_id=task.execution_id,
         agent_name=task.agent_name,
         role_prompt=task.role_prompt,
         model=task.model or "",
-        allowed_folders=folders,
+        directory_paths=task.allowed_folders or [],
         input_context=task.input_context,
         run_prompt=execution.run_prompt if execution else "",
     )

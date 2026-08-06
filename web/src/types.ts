@@ -4,7 +4,8 @@ export interface AgentNode {
   name: string
   role_prompt: string
   model: string
-  allowed_folders?: string[]
+  worker_id?: number | null
+  directory_ids?: number[]
   position?: { x: number; y: number } | null
 }
 
@@ -43,7 +44,6 @@ export interface Device {
   id: number
   name: string
   specs: Record<string, unknown>
-  allowed_folders: string[]
   last_heartbeat: string | null
   online: boolean
 }
