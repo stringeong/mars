@@ -103,6 +103,19 @@ class SharedDirectoryResponse(BaseModel):
         "from_attributes": True,
     }
 
+
+class DirectoryInspectionOut(BaseModel):
+    id: int
+    directory_id: int
+    device_id: int
+    status: str
+    files: list[str] = Field(default_factory=list)
+    error: str | None = None
+    created_at: datetime
+    finished_at: datetime | None
+
+    model_config = {"from_attributes": True}
+
 # ---------- Service / Workflow ----------
 
 

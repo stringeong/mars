@@ -17,6 +17,7 @@ import psutil
 
 from . import config as cfg
 from . import executor
+from . import sandbox
 
 
 def collect_specs() -> dict:
@@ -98,6 +99,28 @@ def cmd_register(args: argparse.Namespace) -> None:
     print("이제 `python -m agent run` 으로 에이전트를 실행하세요.")
 
 
+def process_directory_inspection(server: str, headers: dict) -> bool:
+    """Run one server-requested, sandboxed file listing when available."""
+    response = httpx.post(
+        f"{server}/worker/directory-inspections/next", headers=headers, timeout=15
+    )
+    if response.status_code != 200 or not response.content:
+        return False
+    inspection = response.json()
+    try:
+        files = sandbox.list_files([inspection["local_path"]])
+        result = {"files": files, "error": ""}
+    except Exception as exc:
+        result = {"files": [], "error": str(exc)}
+    httpx.post(
+        f"{server}/worker/directory-inspections/{inspection['inspection_id']}/result",
+        headers=headers,
+        json=result,
+        timeout=30,
+    ).raise_for_status()
+    return True
+
+
 def cmd_run(_args: argparse.Namespace) -> None:
     config = cfg.load()
     if not config.get("api_key"):
@@ -112,6 +135,8 @@ def cmd_run(_args: argparse.Namespace) -> None:
     while True:
         try:
             # 하트비트 겸 작업 요청
+            if process_directory_inspection(server, headers):
+                continue
             resp = httpx.post(
                 f"{server}/worker/tasks/next", headers=headers, timeout=15
             )

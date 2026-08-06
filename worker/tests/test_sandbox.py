@@ -3,6 +3,8 @@
 계약: 서버가 어떤 경로를 지시하더라도 허용 폴더 밖 접근은 거부되어야 한다.
 """
 
+from pathlib import Path
+
 import pytest
 
 from agent import sandbox
@@ -144,6 +146,19 @@ class TestListFiles:
         (allowed / "NOTES.TXT").write_text("t")
         files = sandbox.list_files([str(allowed)])
         assert len(files) == 1
+
+    def test_pdf_extension_included(self, allowed):
+        (allowed / "report.pdf").write_bytes(b"%PDF-1.4")
+        files = sandbox.list_files([str(allowed)])
+        assert len(files) == 1
+        assert files[0].endswith("report.pdf")
+
+    def test_common_source_and_document_extensions_included(self, allowed):
+        (allowed / "app.ts").write_text("export {}")
+        (allowed / "settings.toml").write_text("title = 'MARS'")
+        (allowed / "notes.docx").write_bytes(b"not a real document")
+        names = {Path(path).name for path in sandbox.list_files([str(allowed)])}
+        assert names == {"app.ts", "settings.toml", "notes.docx"}
 
     def test_hidden_files_and_dirs_skipped(self, allowed):
         (allowed / ".hidden.txt").write_text("t")

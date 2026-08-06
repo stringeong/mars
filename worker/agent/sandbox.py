@@ -6,7 +6,17 @@
 from pathlib import Path
 
 MAX_FILE_BYTES = 200_000  # 파일당 읽기 상한 (프롬프트 폭주 방지)
-TEXT_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".yaml", ".yml", ".log", ".py", ".html"}
+MAX_PDF_BYTES = 20_000_000  # PDF 파싱 전 파일 크기 상한
+TEXT_EXTENSIONS = {
+    ".txt", ".md", ".rst", ".csv", ".tsv", ".json", ".jsonl", ".xml",
+    ".yaml", ".yml", ".toml", ".ini", ".cfg", ".conf", ".env", ".log",
+    ".py", ".js", ".jsx", ".ts", ".tsx", ".html", ".htm", ".css", ".scss",
+    ".sh", ".bash", ".zsh", ".ps1", ".bat", ".cmd", ".sql", ".r", ".java",
+    ".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".cs", ".go", ".rs", ".rb",
+    ".php", ".swift", ".kt", ".kts", ".lua", ".dart", ".vue", ".svelte", ".rtf",
+}
+DOCUMENT_EXTENSIONS = {".pdf", ".docx", ".xlsx", ".pptx"}
+SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | DOCUMENT_EXTENSIONS
 
 
 class SandboxError(PermissionError):
@@ -40,8 +50,93 @@ def read_file(path: str, allowed_folders: list[str]) -> str:
     p = Path(path).expanduser().resolve()
     if not p.is_file():
         raise SandboxError(f"파일이 아닙니다: {path}")
+    suffix = p.suffix.lower()
+    if suffix in DOCUMENT_EXTENSIONS and p.stat().st_size > MAX_PDF_BYTES:
+        raise SandboxError(f"문서 파일이 너무 큽니다 (최대 {MAX_PDF_BYTES:,} bytes): {path}")
+    if suffix == ".pdf":
+        if p.stat().st_size > MAX_PDF_BYTES:
+            raise SandboxError(f"PDF 파일이 너무 큽니다 (최대 {MAX_PDF_BYTES:,} bytes): {path}")
+        try:
+            from pypdf import PdfReader
+
+            reader = PdfReader(str(p))
+            parts: list[str] = []
+            size = 0
+            for page in reader.pages:
+                text = page.extract_text() or ""
+                parts.append(text)
+                size += len(text)
+                if size >= MAX_FILE_BYTES:
+                    break
+            content = "\n".join(parts)[:MAX_FILE_BYTES]
+            if not content.strip():
+                raise SandboxError(
+                    f"PDF에 추출 가능한 텍스트가 없습니다 (스캔본은 OCR 필요): {path}"
+                )
+            return content
+        except SandboxError:
+            raise
+        except Exception as exc:
+            raise SandboxError(f"PDF 텍스트를 추출할 수 없습니다: {path}") from exc
+    if suffix == ".docx":
+        try:
+            from docx import Document
+
+            document = Document(str(p))
+            parts = [paragraph.text for paragraph in document.paragraphs if paragraph.text]
+            for table in document.tables:
+                for row in table.rows:
+                    parts.append(" | ".join(cell.text for cell in row.cells))
+            return _document_content(parts, path)
+        except SandboxError:
+            raise
+        except Exception as exc:
+            raise SandboxError(f"Word 문서를 읽을 수 없습니다: {path}") from exc
+    if suffix == ".xlsx":
+        try:
+            from openpyxl import load_workbook
+
+            workbook = load_workbook(str(p), read_only=True, data_only=True)
+            parts: list[str] = []
+            for worksheet in workbook.worksheets[:10]:
+                parts.append(f"[시트: {worksheet.title}]")
+                for row in worksheet.iter_rows(values_only=True):
+                    values = [str(value) for value in row if value is not None]
+                    if values:
+                        parts.append(" | ".join(values))
+                    if sum(len(part) for part in parts) >= MAX_FILE_BYTES:
+                        break
+            return _document_content(parts, path)
+        except SandboxError:
+            raise
+        except Exception as exc:
+            raise SandboxError(f"Excel 문서를 읽을 수 없습니다: {path}") from exc
+    if suffix == ".pptx":
+        try:
+            from pptx import Presentation
+
+            presentation = Presentation(str(p))
+            parts = []
+            for index, slide in enumerate(presentation.slides, start=1):
+                parts.append(f"[슬라이드 {index}]")
+                parts.extend(
+                    shape.text for shape in slide.shapes
+                    if getattr(shape, "has_text_frame", False) and shape.text
+                )
+            return _document_content(parts, path)
+        except SandboxError:
+            raise
+        except Exception as exc:
+            raise SandboxError(f"PowerPoint 문서를 읽을 수 없습니다: {path}") from exc
     data = p.read_bytes()[:MAX_FILE_BYTES]
     return data.decode("utf-8", errors="replace")
+
+
+def _document_content(parts: list[str], path: str) -> str:
+    content = "\n".join(parts)[:MAX_FILE_BYTES]
+    if not content.strip():
+        raise SandboxError(f"문서에 추출 가능한 텍스트가 없습니다: {path}")
+    return content
 
 
 # 홈 폴더처럼 큰 경로가 허용되어도 순회 폭주하지 않도록 건너뛰는 디렉터리
@@ -78,7 +173,7 @@ def list_files(allowed_folders: list[str], max_entries: int = 200) -> list[str]:
                     continue
                 if p.is_dir():
                     stack.append(p)
-                elif p.is_file() and p.suffix.lower() in TEXT_EXTENSIONS:
+                elif p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS:
                     entries.append(str(p))
                     if len(entries) >= max_entries:
                         return entries

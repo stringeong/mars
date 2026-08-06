@@ -167,6 +167,12 @@ tr.clickable:hover { background: #f8fafc; }
 .directory-permission { align-self: center; color: var(--muted); font-size: 12px; }
 .directory-form label { margin: 0; }
 .directory-list { display: grid; gap: 6px; margin-top: 12px; }
+.directory-inspection { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.directory-inspection .directory-row { border: 0; border-radius: 0; }
+.inspection-files { padding: 9px 12px; border-top: 1px solid var(--border); background: #f8fafc; font-size: 12px; }
+.inspection-files ul { max-height: 180px; overflow: auto; margin: 7px 0 0; padding-left: 18px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.inspection-files li { overflow-wrap: anywhere; margin: 2px 0; }
+.inspection-error { padding: 9px 12px; border-top: 1px solid #fecaca; background: #fef2f2; color: var(--danger); font-size: 12px; }
 .directory-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 9px; border: 1px solid var(--border); border-radius: 8px; }
 .directory-row div:first-child { display: grid; gap: 2px; min-width: 0; }
 .directory-row small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

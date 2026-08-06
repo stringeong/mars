@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..security import get_current_user
+from ..services import directory_access
 from ..services.orchestrator import device_is_online
 
 router = APIRouter(prefix="/devices", tags=["devices"])
@@ -424,4 +425,61 @@ def delete_directory(
     db.commit()
 
     return None
+
+
+@router.post(
+    "/{device_id}/directories/{directory_id}/inspections",
+    response_model=schemas.DirectoryInspectionOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def request_directory_inspection(
+    device_id: int,
+    directory_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    device = db.get(models.Device, device_id)
+    directory = db.get(models.SharedDirectory, directory_id)
+    if device is None or device.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="기기를 찾을 수 없습니다.")
+    if directory is None or directory.user_id != current_user.id or not directory.is_active:
+        raise HTTPException(status_code=404, detail="활성 디렉터리를 찾을 수 없습니다.")
+    paths = directory_access.local_paths_for_device(db, device_id, [directory_id])
+    if paths is None:
+        raise HTTPException(
+            status_code=422,
+            detail="이 Worker에 등록된 디렉터리 경로가 없습니다.",
+        )
+    inspection = models.DirectoryInspection(
+        user_id=current_user.id,
+        directory_id=directory_id,
+        device_id=device_id,
+        local_path=paths[0],
+    )
+    db.add(inspection)
+    db.commit()
+    db.refresh(inspection)
+    return inspection
+
+
+@router.get(
+    "/{device_id}/directories/{directory_id}/inspections/latest",
+    response_model=schemas.DirectoryInspectionOut | None,
+)
+def get_latest_directory_inspection(
+    device_id: int,
+    directory_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return (
+        db.query(models.DirectoryInspection)
+        .filter(
+            models.DirectoryInspection.user_id == current_user.id,
+            models.DirectoryInspection.device_id == device_id,
+            models.DirectoryInspection.directory_id == directory_id,
+        )
+        .order_by(models.DirectoryInspection.id.desc())
+        .first()
+    )
 

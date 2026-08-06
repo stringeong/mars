@@ -67,6 +67,17 @@ export interface SharedDirectory {
   updated_at: string
 }
 
+export interface DirectoryInspection {
+  id: number
+  directory_id: number
+  device_id: number
+  status: 'pending' | 'running' | 'done' | 'failed'
+  files: string[]
+  error: string | null
+  created_at: string
+  finished_at: string | null
+}
+
 export interface Task {
   id: number
   node_id: string

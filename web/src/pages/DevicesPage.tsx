@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from 'react'
 import { api, getDeviceDirectories } from '../api'
-import { Device, SharedDirectory } from '../types'
+import { Device, DirectoryInspection, SharedDirectory } from '../types'
 
 const emptyDirectory = { alias: '', local_path: '', permission: 'read' as const }
 
@@ -13,6 +13,7 @@ export default function DevicesPage() {
   const [maxGpu, setMaxGpu] = useState('')
   const [directoryForm, setDirectoryForm] = useState(emptyDirectory)
   const [editingDirectoryId, setEditingDirectoryId] = useState<number | null>(null)
+  const [inspections, setInspections] = useState<Record<number, DirectoryInspection>>({})
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
 
@@ -81,6 +82,32 @@ export default function DevicesPage() {
     } catch (cause) { setError(cause instanceof Error ? cause.message : '디렉터리 변경 실패') }
   }
 
+  async function pollInspection(directoryId: number, remaining = 20): Promise<void> {
+    if (!selected || remaining <= 0) return
+    await new Promise((resolve) => window.setTimeout(resolve, 1000))
+    try {
+      const inspection = await api.get<DirectoryInspection | null>(
+        `/devices/${selected.id}/directories/${directoryId}/inspections/latest`,
+      )
+      if (!inspection) return
+      setInspections((current) => ({ ...current, [directoryId]: inspection }))
+      if (inspection.status === 'pending' || inspection.status === 'running') {
+        await pollInspection(directoryId, remaining - 1)
+      }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '검사 결과 조회 실패') }
+  }
+
+  async function inspectDirectory(directoryId: number) {
+    if (!selected) return
+    try {
+      const inspection = await api.post<DirectoryInspection>(
+        `/devices/${selected.id}/directories/${directoryId}/inspections`,
+      )
+      setInspections((current) => ({ ...current, [directoryId]: inspection }))
+      void pollInspection(directoryId)
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '디렉터리 검사 요청 실패') }
+  }
+
   async function removeDevice(deviceId: number) {
     if (!confirm('이 Worker를 삭제할까요?')) return
     await api.delete(`/devices/${deviceId}`)
@@ -127,7 +154,11 @@ export default function DevicesPage() {
           {editingDirectoryId && <button type="button" className="btn ghost" onClick={() => { setEditingDirectoryId(null); setDirectoryForm(emptyDirectory) }}>취소</button>}
         </form>
         <div className="directory-list">
-          {directories.map((directory) => <div className="directory-row" key={directory.id}><div><strong>{directory.alias}</strong><small>{directory.local_path} · 읽기 전용 · {directory.is_active ? '활성' : '비활성'}</small></div><div className="row"><button className="btn sm ghost" onClick={() => { setEditingDirectoryId(directory.id); setDirectoryForm({ alias: directory.alias, local_path: directory.local_path, permission: 'read' }) }}>수정</button>{directory.is_active && <button className="btn sm danger" onClick={() => deactivateDirectory(directory.id)}>비활성화</button>}</div></div>)}
+          {directories.map((directory) => {
+            const inspection = inspections[directory.id]
+            const checking = inspection?.status === 'pending' || inspection?.status === 'running'
+            return <div key={directory.id} className="directory-inspection"><div className="directory-row"><div><strong>{directory.alias}</strong><small>{directory.local_path} · 읽기 전용 · {directory.is_active ? '활성' : '비활성'}</small></div><div className="row"><button className="btn sm ghost" disabled={checking || !directory.is_active} onClick={() => inspectDirectory(directory.id)}>{checking ? '검사 중…' : '검사'}</button><button className="btn sm ghost" onClick={() => { setEditingDirectoryId(directory.id); setDirectoryForm({ alias: directory.alias, local_path: directory.local_path, permission: 'read' }) }}>수정</button>{directory.is_active && <button className="btn sm danger" onClick={() => deactivateDirectory(directory.id)}>비활성화</button>}</div></div>{inspection?.status === 'done' && <div className="inspection-files"><strong>파일 {inspection.files.length}개</strong>{inspection.files.length ? <ul>{inspection.files.map((file) => <li key={file}>{file}</li>)}</ul> : <span className="muted">표시 가능한 파일이 없습니다.</span>}</div>}{inspection?.status === 'failed' && <div className="inspection-error">검사 실패: {inspection.error}</div>}</div>
+          })}
           {!directories.length && <span className="muted">등록된 디렉터리가 없습니다.</span>}
         </div>
       </section>

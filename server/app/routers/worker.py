@@ -79,6 +79,64 @@ def next_task(
     return payload
 
 
+@router.post("/directory-inspections/next")
+def next_directory_inspection(
+    response: Response,
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    inspection_id = (
+        db.query(models.DirectoryInspection.id)
+        .filter(
+            models.DirectoryInspection.device_id == device.id,
+            models.DirectoryInspection.status == "pending",
+        )
+        .order_by(models.DirectoryInspection.id)
+        .scalar()
+    )
+    if inspection_id is None:
+        response.status_code = 204
+        return None
+    claimed = (
+        db.query(models.DirectoryInspection)
+        .filter(
+            models.DirectoryInspection.id == inspection_id,
+            models.DirectoryInspection.status == "pending",
+        )
+        .update({"status": "running"}, synchronize_session=False)
+    )
+    if not claimed:
+        db.commit()
+        response.status_code = 204
+        return None
+    inspection = db.get(models.DirectoryInspection, inspection_id)
+    device.last_heartbeat = models.utcnow()
+    db.commit()
+    return {"inspection_id": inspection.id, "local_path": inspection.local_path}
+
+
+@router.post("/directory-inspections/{inspection_id}/result")
+def submit_directory_inspection(
+    inspection_id: int,
+    body: dict,
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    inspection = db.get(models.DirectoryInspection, inspection_id)
+    if inspection is None or inspection.device_id != device.id:
+        raise HTTPException(404, "할당된 디렉터리 검사가 아닙니다.")
+    if inspection.status != "running":
+        raise HTTPException(409, "이미 종료된 디렉터리 검사입니다.")
+    files = body.get("files")
+    inspection.files = files if isinstance(files, list) else []
+    inspection.error = str(body.get("error") or "") or None
+    inspection.status = "failed" if inspection.error else "done"
+    inspection.finished_at = models.utcnow()
+    device.last_heartbeat = models.utcnow()
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/tasks/{task_id}/result")
 def submit_result(
     task_id: int,

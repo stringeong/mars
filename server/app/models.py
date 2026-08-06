@@ -148,6 +148,25 @@ class DirectoryMount(Base):
     )
     device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
     local_path: Mapped[str] = mapped_column(Text)
+
+
+class DirectoryInspection(Base):
+    """A Worker-side, read-only directory listing request."""
+
+    __tablename__ = "directory_inspections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    directory_id: Mapped[int] = mapped_column(
+        ForeignKey("shared_directories.id"), index=True
+    )
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
+    local_path: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    files: Mapped[list] = mapped_column(JSON, default=list)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     
 
 
