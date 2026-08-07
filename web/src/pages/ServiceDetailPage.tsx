@@ -176,7 +176,7 @@ export default function ServiceDetailPage() {
     <header className="builder-header">
       <div><div className="breadcrumb">M.A.R.S <span>/</span> Workflows <span>/</span> Builder</div><h1>{svcName}</h1><p>{svcDesc || 'Build and assign a distributed multi-agent workflow.'}</p></div>
       <div className="builder-header-actions"><button className="btn ghost" onClick={() => navigate('/services')}>All workflows</button><button className="btn" onClick={save}>Save changes</button></div>
-    </div>
+    </header>
     {message && <div style={{ color: 'var(--success)', marginBottom: 8 }}>{message}</div>}
     {error && <div className="error">{error}</div>}
     <form className="ai-bar" onSubmit={aiRevise}>
