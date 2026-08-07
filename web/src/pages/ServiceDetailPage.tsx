@@ -5,7 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api, getDeviceDirectories } from '../api'
 import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
-import { AgentNode, Device, Execution, Graph, Service, SharedDirectory, WorkflowNode } from '../types'
+import { AgentNode, Device, Graph, Service, SharedDirectory, WorkflowNode } from '../types'
 
 const nodeTypes = { agent: AgentBlockNode }
 
@@ -41,7 +41,6 @@ export default function ServiceDetailPage() {
   const [selected, setSelected] = useState<string | null>(null)
   const [svcName, setSvcName] = useState('')
   const [svcDesc, setSvcDesc] = useState('')
-  const [runPrompt, setRunPrompt] = useState('')
   const [aiInstruction, setAiInstruction] = useState('')
   const [aiLoading, setAiLoading] = useState(false)
   const [message, setMessage] = useState('')
@@ -159,15 +158,6 @@ export default function ServiceDetailPage() {
     }
   }
 
-  async function run(event: FormEvent) {
-    event.preventDefault()
-    try {
-      if (!await save()) return
-      const execution = await api.post<Execution>(`/services/${id}/executions`, { run_prompt: runPrompt })
-      navigate(`/executions/${execution.id}`)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '실행 실패') }
-  }
-
   async function aiRevise(event: FormEvent) {
     event.preventDefault()
     setAiLoading(true)
@@ -180,12 +170,12 @@ export default function ServiceDetailPage() {
     finally { setAiLoading(false) }
   }
 
-  if (!service) return <div>{error || '불러오는 중...'}</div>
+  if (!service) return <div className="page-loading">{error || 'Loading workflow...'}</div>
 
-  return <div>
-    <div className="row spread" style={{ marginBottom: 10 }}>
-      <h1 style={{ margin: 0 }}>{svcName}</h1>
-      <button className="btn" onClick={save}>저장</button>
+  return <div className="builder-page">
+    <header className="builder-header">
+      <div><div className="breadcrumb">M.A.R.S <span>/</span> Workflows <span>/</span> Builder</div><h1>{svcName}</h1><p>{svcDesc || 'Build and assign a distributed multi-agent workflow.'}</p></div>
+      <div className="builder-header-actions"><button className="btn ghost" onClick={() => navigate('/services')}>All workflows</button><button className="btn" onClick={save}>Save changes</button></div>
     </div>
     {message && <div style={{ color: 'var(--success)', marginBottom: 8 }}>{message}</div>}
     {error && <div className="error">{error}</div>}
@@ -194,7 +184,7 @@ export default function ServiceDetailPage() {
       <input value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder="예: 검토 에이전트를 분석 뒤에 추가해줘" required minLength={2} />
       <button className="btn sm" disabled={aiLoading}>{aiLoading ? '수정 중...' : '적용'}</button>
     </form>
-    <div className="builder3">
+    <div className="builder3 builder-workspace">
       <aside className="palette">
         <div className="palette-title">에이전트 블록</div><div className="palette-hint">드래그하거나 클릭해 추가</div>
         {BLOCK_PRESETS.map((preset) => { const category = categoryOf(preset.name); return <div key={preset.name} className="palette-block" style={{ borderColor: category.color, background: category.bg }} draggable onDragStart={(event) => event.dataTransfer.setData('application/mars-agent', JSON.stringify(preset))} onClick={() => addAgent(preset)}><span className="palette-block-tag" style={{ background: category.color }}>{category.tag}</span><div className="palette-block-name">{preset.name}</div><div className="palette-block-hint">{preset.hint}</div></div> })}
@@ -212,7 +202,7 @@ export default function ServiceDetailPage() {
           <label>공유 디렉터리</label><div className="resource-picker">{directories.length ? directories.map((directory) => <label key={directory.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.directory_ids ?? []).includes(directory.id)} onChange={(event) => updateAgent({ directory_ids: event.target.checked ? [...(selectedAgent.directory_ids ?? []), directory.id] : (selectedAgent.directory_ids ?? []).filter((directoryId) => directoryId !== directory.id) })} /><span><strong>{directory.alias}</strong><small>{directory.local_path}</small></span></label>) : <span className="muted">등록된 공유 디렉터리가 없습니다.</span>}</div>
         </> : <>
           <h2>서비스 정보</h2><label>이름</label><input value={svcName} onChange={(event) => setSvcName(event.target.value)} /><label>설명</label><textarea rows={3} value={svcDesc} onChange={(event) => setSvcDesc(event.target.value)} />
-          <h2 style={{ marginTop: 20 }}>서비스 실행</h2><form onSubmit={run}><label>실행 프롬프트</label><textarea rows={4} value={runPrompt} onChange={(event) => setRunPrompt(event.target.value)} required /><button className="btn" style={{ marginTop: 12, width: '100%' }}>실행</button></form>
+          <h2 style={{ marginTop: 20 }}>Workflow execution</h2><p className="muted">Enter the run-specific prompt on a separate execution input screen.</p><button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={async () => { if (await save()) navigate(`/services/${id}/run`) }}>Configure and run</button>
         </>}
       </aside>
     </div>

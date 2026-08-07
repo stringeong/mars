@@ -116,6 +116,16 @@ class DirectoryInspectionOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
+
+class UploadedFileOut(BaseModel):
+    id: int
+    original_name: str
+    content_type: str | None = None
+    size_bytes: int
+    created_at: UTCDateTime
+
+    model_config = {"from_attributes": True}
+
 # ---------- Service / Workflow ----------
 
 

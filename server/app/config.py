@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 # JWT 서명 키. 운영 환경에서는 반드시 환경변수로 주입한다.
 SECRET_KEY = os.environ.get("MARS_SECRET_KEY", "dev-secret-key-change-me")
@@ -6,6 +7,7 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("MARS_TOKEN_EXPIRE_MIN", "720"))
 
 DATABASE_URL = os.environ.get("MARS_DATABASE_URL", "sqlite:///./mars.db")
+UPLOAD_DIR = Path(os.environ.get("MARS_UPLOAD_DIR", "./uploads")).resolve()
 
 # 워크플로우 생성용 LLM (서버 측). 없으면 규칙 기반 폴백을 사용한다.
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")

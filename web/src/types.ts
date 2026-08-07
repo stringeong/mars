@@ -78,6 +78,14 @@ export interface DirectoryInspection {
   finished_at: string | null
 }
 
+export interface UploadedFile {
+  id: number
+  original_name: string
+  content_type: string | null
+  size_bytes: number
+  created_at: string
+}
+
 export interface Task {
   id: number
   node_id: string

@@ -1,11 +1,14 @@
 import { Link, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { getToken, setToken } from './api'
+import DeviceMonitor from './components/DeviceMonitor'
 import DevicesPage from './pages/DevicesPage'
 import ExecutionPage from './pages/ExecutionPage'
+import FilesPage from './pages/FilesPage'
 import HistoryPage from './pages/HistoryPage'
 import LoginPage from './pages/LoginPage'
 import ServiceDetailPage from './pages/ServiceDetailPage'
 import ServicesPage from './pages/ServicesPage'
+import WorkflowRunPage from './pages/WorkflowRunPage'
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   if (!getToken()) return <Navigate to="/login" replace />
@@ -19,6 +22,7 @@ export default function App() {
   const navItems = [
     { to: '/services', label: 'Workflows', icon: 'W' },
     { to: '/devices', label: 'Workers', icon: 'R' },
+    { to: '/files', label: 'Files', icon: 'F' },
     { to: '/history', label: 'Run history', icon: 'H' },
   ]
 
@@ -48,11 +52,14 @@ export default function App() {
           <Route path="/login" element={<LoginPage />} />
           <Route path="/" element={<Navigate to="/services" replace />} />
           <Route path="/services" element={<RequireAuth><ServicesPage /></RequireAuth>} />
+          <Route path="/services/:id/run" element={<RequireAuth><WorkflowRunPage /></RequireAuth>} />
           <Route path="/services/:id" element={<RequireAuth><ServiceDetailPage /></RequireAuth>} />
           <Route path="/devices" element={<RequireAuth><DevicesPage /></RequireAuth>} />
+          <Route path="/files" element={<RequireAuth><FilesPage /></RequireAuth>} />
           <Route path="/history" element={<RequireAuth><HistoryPage /></RequireAuth>} />
           <Route path="/executions/:id" element={<RequireAuth><ExecutionPage /></RequireAuth>} />
         </Routes>
+        {authed && location.pathname !== '/login' && <DeviceMonitor />}
       </main>
     </div>
   )

@@ -10,54 +10,14 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault()
-    setError('')
-    setLoading(true)
-    try {
-      if (mode === 'register') {
-        await api.post('/auth/register', { username, email, password })
-      }
-      const token = await api.login(username, password)
-      setToken(token.access_token)
-      navigate('/services')
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '요청에 실패했습니다.')
-    } finally {
-      setLoading(false)
-    }
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault(); setError(''); setLoading(true)
+    try { if (mode === 'register') await api.post('/auth/register', { username, email, password }); const token = await api.login(username, password); setToken(token.access_token); navigate('/services') }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to complete the request.') }
+    finally { setLoading(false) }
   }
-
-  return (
-    <div className="auth-page">
-      <div className="card auth-card">
-        <div className="logo">M.A.R.S</div>
-        <div className="tagline">MAS And Resource Sharing — 내 기기로 돌리는 AI 워크플로우</div>
-        <form onSubmit={handleSubmit}>
-          <label>아이디</label>
-          <input value={username} onChange={(e) => setUsername(e.target.value)} required minLength={3} />
-          {mode === 'register' && (
-            <>
-              <label>이메일</label>
-              <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-            </>
-          )}
-          <label>비밀번호</label>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required minLength={6} />
-          {error && <div className="error">{error}</div>}
-          <button className="btn" disabled={loading}>
-            {loading ? '처리 중...' : mode === 'login' ? '로그인' : '회원가입'}
-          </button>
-        </form>
-        <div className="auth-switch">
-          {mode === 'login' ? (
-            <>계정이 없나요? <a onClick={() => setMode('register')}>회원가입</a></>
-          ) : (
-            <>이미 계정이 있나요? <a onClick={() => setMode('login')}>로그인</a></>
-          )}
-        </div>
-      </div>
-    </div>
-  )
+  return <div className="auth-page">
+    <section className="auth-intro"><div className="auth-brand"><span>M</span> M.A.R.S</div><span className="eyebrow">MULTI-AGENT RESOURCE SHARING</span><h1>Private AI automation,<br />orchestrated your way.</h1><p>Connect your own workers and directories, then create distributed AI workflows without losing control of your data.</p><div className="auth-benefits"><div><i>1</i><span><strong>Connect workers</strong><small>Use the computing resources you already have.</small></span></div><div><i>2</i><span><strong>Build workflows</strong><small>Arrange specialized agents in a visual canvas.</small></span></div><div><i>3</i><span><strong>Run privately</strong><small>Keep data access scoped to each worker.</small></span></div></div></section>
+    <section className="auth-form-side"><div className="auth-card"><div className="auth-card-heading"><span className="eyebrow">WELCOME TO M.A.R.S</span><h2>{mode === 'login' ? 'Sign in to your workspace' : 'Create your workspace'}</h2><p>{mode === 'login' ? 'Continue building and running your workflows.' : 'Start orchestrating your connected resources.'}</p></div><form onSubmit={handleSubmit}><label>Username</label><input value={username} onChange={(event) => setUsername(event.target.value)} required minLength={3} autoComplete="username" />{mode === 'register' && <><label>Email address</label><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" /></>}<label>Password</label><input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} />{error && <div className="error">{error}</div>}<button className="auth-submit" disabled={loading}>{loading ? 'Please wait...' : mode === 'login' ? 'Sign in' : 'Create account'} <span>→</span></button></form><div className="auth-switch">{mode === 'login' ? <>New to M.A.R.S? <button type="button" onClick={() => setMode('register')}>Create account</button></> : <>Already have an account? <button type="button" onClick={() => setMode('login')}>Sign in</button></>}</div></div></section>
+  </div>
 }

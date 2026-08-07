@@ -115,7 +115,11 @@ export default function DevicesPage() {
     load()
   }
 
-  return <div>
+  return <div className="devices-page">
+    <header className="page-topbar">
+      <div><div className="breadcrumb">M.A.R.S <span>/</span> Workers</div><h1>Worker management</h1><p>Monitor connected machines, set resource limits, and manage local directory access.</p></div>
+      <div className="page-stat"><strong>{devices.filter((device) => device.online).length}</strong><span>workers online</span></div>
+    </header>
     <h1>기기 관리</h1>
     <p className="subtitle">Worker의 이름, 새 작업 수용 기준과 공유 디렉터리를 관리합니다.</p>
     {error && <div className="error">{error}</div>}

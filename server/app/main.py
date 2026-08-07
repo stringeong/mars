@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import Base, engine
-from .routers import auth, devices, executions, services, worker
+from .routers import auth, devices, executions, files, services, worker
 
 Base.metadata.create_all(bind=engine)
 
@@ -29,6 +29,7 @@ app.include_router(auth.router)
 app.include_router(devices.router)
 app.include_router(services.router)
 app.include_router(executions.router)
+app.include_router(files.router)
 app.include_router(worker.router)
 
 

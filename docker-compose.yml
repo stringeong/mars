@@ -7,6 +7,7 @@ services:
     environment:
       MARS_SECRET_KEY: ${MARS_SECRET_KEY:-dev-secret-key-change-me}
       MARS_DATABASE_URL: sqlite:////data/mars.db
+      MARS_UPLOAD_DIR: /data/uploads
       OLLAMA_URL: ${OLLAMA_URL:-http://host.docker.internal:11434}
       MARS_DEFAULT_MODEL: ${MARS_DEFAULT_MODEL:-gemma3:4b}
       MARS_TOKEN_EXPIRE_MIN: ${MARS_TOKEN_EXPIRE_MIN:-720}

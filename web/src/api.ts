@@ -23,7 +23,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     ...(options.headers as Record<string, string> | undefined),
   }
-  if (!(options.body instanceof URLSearchParams) && options.body) {
+  if (!(options.body instanceof URLSearchParams) && !(options.body instanceof FormData) && options.body) {
     headers['Content-Type'] = 'application/json'
   }
   const token = getToken()
@@ -53,6 +53,7 @@ export const api = {
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
   delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+  upload: <T>(path: string, body: FormData) => request<T>(path, { method: 'POST', body }),
   login: (username: string, password: string) =>
     request<{ access_token: string }>('/auth/login', {
       method: 'POST',

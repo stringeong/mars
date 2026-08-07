@@ -1,132 +1,55 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
-import { Execution } from '../types'
+import { Execution, ExecutionListItem } from '../types'
 
-const STATUS_LABEL: Record<string, string> = {
-  pending: '대기', running: '실행 중', completed: '완료', failed: '실패', cancelled: '중단됨',
-  blocked: '선행 대기', ready: '할당 대기', done: '완료',
-}
+function statusLabel(status: string) { return status.replace(/_/g, ' ') }
 
 export default function ExecutionPage() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const [execution, setExecution] = useState<Execution | null>(null)
+  const [history, setHistory] = useState<ExecutionListItem[]>([])
   const [error, setError] = useState('')
 
   async function load() {
-    try {
-      setExecution(await api.get<Execution>(`/executions/${id}`))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '조회 실패')
-    }
+    try { setExecution(await api.get<Execution>(`/executions/${id}`)) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to load execution.') }
   }
-
   useEffect(() => {
-    load()
-    const timer = setInterval(() => {
-      setExecution((cur) => {
-        if (cur && ['completed', 'failed', 'cancelled'].includes(cur.status)) return cur
-        load()
-        return cur
-      })
-    }, 3000) // NF-102: 실행 상태 5초 이내 주기 갱신
+    load(); api.get<ExecutionListItem[]>('/executions').then(setHistory).catch(() => {})
+    const timer = setInterval(() => { if (!execution || ['pending', 'running'].includes(execution.status)) load() }, 3000)
     return () => clearInterval(timer)
-  }, [id])
+  }, [id, execution?.status])
 
   async function cancel() {
-    if (!confirm('실행을 중단할까요?')) return
-    try {
-      setExecution(await api.post<Execution>(`/executions/${id}/cancel`))
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '중단 실패')
-    }
+    if (!confirm('Cancel this execution?')) return
+    try { setExecution(await api.post<Execution>(`/executions/${id}/cancel`)) }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to cancel execution.') }
   }
-
-  if (!execution) return <div>{error || '불러오는 중...'}</div>
-
+  function downloadResult() {
+    if (!execution?.result) return
+    const blob = new Blob([execution.result], { type: 'text/markdown' })
+    const link = document.createElement('a')
+    link.href = URL.createObjectURL(blob); link.download = `mars_result_${execution.id}.md`; link.click(); URL.revokeObjectURL(link.href)
+  }
+  if (!execution) return <div className="page-loading">{error || 'Loading execution...'}</div>
   const active = ['pending', 'running'].includes(execution.status)
 
-  return (
-    <div>
-      <div className="row spread">
-        <div>
-          <h1>실행 #{execution.id}</h1>
-          <p className="subtitle">{execution.run_prompt}</p>
-        </div>
-        <div className="row">
-          <span className={`badge ${execution.status}`}>{STATUS_LABEL[execution.status] ?? execution.status}</span>
-          {active && <button className="btn danger" onClick={cancel}>중단</button>}
-        </div>
-      </div>
+  return <div className="result-viewer-page">
+    <aside className="result-history-panel">
+      <div className="list-panel-header"><div><span className="eyebrow">EXECUTIONS</span><h2>History</h2></div><button type="button" className="text-button" onClick={() => navigate('/history')}>View all</button></div>
+      <div className="compact-history">{history.slice(0, 8).map((item) => <button type="button" key={item.id} className={item.id === execution.id ? 'current' : ''} onClick={() => navigate(`/executions/${item.id}`)}><strong>{item.service_name}</strong><span><i className={`status-dot ${item.status === 'completed' ? '' : 'muted-dot'}`} /> {item.status} · #{item.id}</span></button>)}</div>
+    </aside>
+    <main className="result-main">
+      <header className="result-header"><div><div className="breadcrumb">M.A.R.S <span>/</span> Executions <span>/</span> #{execution.id}</div><div className="result-title-row"><h1>Workflow result</h1><span className={`status-pill large ${execution.status}`}>{statusLabel(execution.status)}</span></div><p>{execution.run_prompt || 'Distributed multi-agent workflow execution'}</p></div><div className="result-actions">{execution.result && <button className="btn ghost" onClick={downloadResult}>Export report</button>}{active && <button className="btn danger" onClick={cancel}>Cancel run</button>}</div></header>
       {error && <div className="error">{error}</div>}
-
-      <div className="card">
-        <div className="row">
-          <div className="progress-bar"><div style={{ width: `${execution.progress}%` }} /></div>
-          <strong>{execution.progress}%</strong>
-        </div>
-      </div>
-
-      <div className="card">
-        <h2>작업 현황</h2>
-        <table>
-          <thead>
-            <tr><th>에이전트</th><th>상태</th><th>기기</th><th>완료 시각</th></tr>
-          </thead>
-          <tbody>
-            {execution.tasks.map((t) => (
-              <tr key={t.id}>
-                <td><strong>{t.agent_name}</strong></td>
-                <td><span className={`badge ${t.status}`}>{STATUS_LABEL[t.status] ?? t.status}</span></td>
-                <td>{t.assigned_device_id ? `#${t.assigned_device_id}` : '—'}</td>
-                <td style={{ fontSize: 13 }}>
-                  {t.finished_at ? new Date(t.finished_at).toLocaleTimeString('ko-KR') : '—'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-
-      {execution.error && (
-        <div className="card">
-          <h2>오류</h2>
-          <div className="error">{execution.error}</div>
-        </div>
-      )}
-
-      {execution.result && (
-        <div className="card">
-          <div className="row spread">
-            <h2>최종 결과</h2>
-            <button
-              className="btn sm ghost"
-              onClick={() => {
-                const blob = new Blob([execution.result ?? ''], { type: 'text/markdown' })
-                const a = document.createElement('a')
-                a.href = URL.createObjectURL(blob)
-                a.download = `mars_result_${execution.id}.md`
-                a.click()
-              }}
-            >
-              다운로드
-            </button>
-          </div>
-          <div className="result-box">{execution.result}</div>
-        </div>
-      )}
-
-      {execution.tasks.some((t) => t.output) && (
-        <div className="card">
-          <h2>에이전트별 출력</h2>
-          {execution.tasks.filter((t) => t.output).map((t) => (
-            <details key={t.id} style={{ marginBottom: 8 }}>
-              <summary style={{ cursor: 'pointer', fontWeight: 600, padding: '6px 0' }}>{t.agent_name}</summary>
-              <div className="result-box">{t.output}</div>
-            </details>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+      <section className="run-progress-card"><div className="run-progress-heading"><span><i className={active ? 'pulse-dot' : 'check-dot'} /> {active ? 'Workflow is running' : 'Execution complete'}</span><strong>{execution.progress}%</strong></div><div className="progress-bar"><div style={{ width: `${execution.progress}%` }} /></div></section>
+      <section className="result-section"><div className="result-section-heading"><span className="eyebrow">EXECUTION TIMELINE</span><h2>Agent collaboration</h2><p>Each step records the assigned worker and completed output.</p></div><div className="agent-timeline">{execution.tasks.map((task, index) => <div className={`timeline-row ${task.status}`} key={task.id}><div className="timeline-rail"><i>{task.status === 'done' || task.status === 'completed' ? '✓' : index + 1}</i></div><div className="timeline-content"><div><strong>{task.agent_name}</strong><span className={`status-pill ${task.status}`}>{statusLabel(task.status)}</span></div><small>{task.assigned_device_id ? `Worker #${task.assigned_device_id}` : 'Waiting for worker'} {task.finished_at ? ` · finished ${new Date(task.finished_at).toLocaleTimeString()}` : ''}</small>{task.error && <p className="timeline-error">{task.error}</p>}</div></div>)}{!execution.tasks.length && <div className="empty-workflows">No agent tasks were created for this execution.</div>}</div></section>
+      {execution.error && <section className="result-section failure-section"><span className="eyebrow">EXECUTION ERROR</span><h2>This run needs attention</h2><p>{execution.error}</p></section>}
+      {execution.result && <section className="final-result-card"><div className="result-section-heading"><div><span className="eyebrow">FINAL OUTPUT</span><h2>Generated result</h2></div><button className="btn sm ghost" onClick={downloadResult}>Download</button></div><article className="result-box">{execution.result}</article></section>}
+      {execution.tasks.some((task) => task.output) && <section className="agent-output-section"><span className="eyebrow">TRACE OUTPUT</span><h2>Agent outputs</h2>{execution.tasks.filter((task) => task.output).map((task) => <details key={task.id}><summary><span>{task.agent_name}</span><small>{task.assigned_device_id ? `Worker #${task.assigned_device_id}` : 'Auto assigned'}</small></summary><div className="result-box">{task.output}</div></details>)}</section>}
+    </main>
+    <aside className="execution-detail-panel"><span className="eyebrow">EXECUTION DETAILS</span><h2>Run metadata</h2><dl><div><dt>Status</dt><dd><span className={`status-pill ${execution.status}`}>{statusLabel(execution.status)}</span></dd></div><div><dt>Progress</dt><dd>{execution.progress}%</dd></div><div><dt>Started</dt><dd>{new Date(execution.created_at).toLocaleString()}</dd></div><div><dt>Agents</dt><dd>{execution.tasks.length}</dd></div></dl><div className="mini-flow"><span className="eyebrow">WORKFLOW MAP</span><div><b>Input</b><i /><b>Agents</b><i /><b>Output</b></div><small>Workflow blocks and worker assignments are recorded in the execution trace.</small></div></aside>
+  </div>
 }

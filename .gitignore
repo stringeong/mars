@@ -9,6 +9,7 @@ node_modules/
 dist/
 .env
 worker/agent_config.json
+uploads/
 .DS_Store
 .idea/
 *.tsbuildinfo
