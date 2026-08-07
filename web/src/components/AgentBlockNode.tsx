@@ -10,6 +10,7 @@ export function categoryOf(name: string) {
 export default function AgentBlockNode({ data, selected }: { data: any; selected?: boolean }) {
   const category = categoryOf(String(data.label ?? ''))
   const directories: string[] = data.directories ?? []
+  const files: string[] = data.files ?? []
 
   return (
     <div className={`agent-block scratch-agent${selected ? ' selected' : ''}`} style={{ borderColor: category.color, background: category.bg }}>
@@ -25,6 +26,10 @@ export default function AgentBlockNode({ data, selected }: { data: any; selected
         <div className="resource-slot directory-slot">
           <span>▣ Directory</span>
           <strong>{directories.length ? directories.join(', ') : '없음'}</strong>
+        </div>
+        <div className="resource-slot file-slot">
+          <span>Files</span>
+          <strong>{files.length ? files.join(', ') : 'None'}</strong>
         </div>
       </div>
 

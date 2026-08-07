@@ -6,6 +6,7 @@ export interface AgentNode {
   model: string
   worker_id?: number | null
   directory_ids?: number[]
+  uploaded_file_ids?: number[]
   position?: { x: number; y: number } | null
 }
 

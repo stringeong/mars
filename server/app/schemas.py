@@ -137,6 +137,7 @@ class AgentNode(BaseModel):
     model: str = ""
     worker_id: int | None = None
     directory_ids: list[int] = Field(default_factory=list)
+    uploaded_file_ids: list[int] = Field(default_factory=list)
     #allowed_folders: list[str] = Field(default_factory=list)
     position: dict | None = None
 
@@ -254,6 +255,7 @@ class WorkerTaskOut(BaseModel):
     role_prompt: str
     model: str
     directory_paths: list[str] = Field(default_factory=list)
+    uploaded_files: list[dict] = Field(default_factory=list)
     input_context: str
     run_prompt: str
 

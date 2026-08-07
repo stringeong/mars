@@ -152,7 +152,9 @@ tr.clickable:hover { background: #f8fafc; }
 .resource-slot strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
 .worker-slot { border-left: 3px solid #f59e0b; }
 .directory-slot { border-left: 3px solid #14b8a6; }
+.file-slot { border-left: 3px solid #8b5cf6; }
 .resource-picker { max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; padding: 5px; }
+.uploaded-file-picker { margin: 7px 2px 2px; padding-top: 8px; border-top: 1px dashed #d9d7e6; }.uploaded-file-picker > strong { display: block; color: #7155ca; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }
 .resource-check { display: flex; gap: 8px; align-items: start; margin: 0; padding: 7px; font-size: 12px; cursor: pointer; }
 .resource-check:hover { background: #f8fafc; }
 .resource-check input { width: auto; margin-top: 2px; }

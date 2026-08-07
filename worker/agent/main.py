@@ -8,9 +8,12 @@
 import argparse
 import getpass
 import platform
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 import httpx
 import psutil
@@ -121,6 +124,32 @@ def process_directory_inspection(server: str, headers: dict) -> bool:
     return True
 
 
+def stage_uploaded_files(server: str, headers: dict, task: dict) -> str | None:
+    """Download files selected in the agent block to a private, temporary folder."""
+    uploads = task.get("uploaded_files") or []
+    if not uploads:
+        return None
+    staging_dir = Path(tempfile.mkdtemp(prefix="mars-task-files-"))
+    try:
+        for uploaded in uploads:
+            file_id = uploaded.get("id")
+            name = Path(str(uploaded.get("original_name") or "upload")).name
+            if not isinstance(file_id, int) or not name:
+                raise ValueError("Invalid uploaded file metadata")
+            response = httpx.get(
+                f"{server}/worker/files/{file_id}", headers=headers, timeout=60
+            )
+            response.raise_for_status()
+            (staging_dir / f"{file_id}_{name}").write_bytes(response.content)
+        task["directory_paths"] = [
+            *(task.get("directory_paths") or []), str(staging_dir)
+        ]
+        return str(staging_dir)
+    except Exception:
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        raise
+
+
 def cmd_run(_args: argparse.Namespace) -> None:
     config = cfg.load()
     if not config.get("api_key"):
@@ -143,13 +172,18 @@ def cmd_run(_args: argparse.Namespace) -> None:
             if resp.status_code == 200 and resp.content and resp.text != "null":
                 task = resp.json()
                 print(f"▶ 작업 수신: #{task['task_id']} {task['agent_name']}")
+                staging_dir = None
                 try:
+                    staging_dir = stage_uploaded_files(server, headers, task)
                     output = executor.run_task(task, config)
                     result = {"status": "done", "output": output, "error": ""}
                     print(f"✔ 작업 완료: #{task['task_id']} ({len(output)}자)")
                 except Exception as e:  # LLM 실패 등 -> 서버에 실패 보고
                     result = {"status": "failed", "output": "", "error": str(e)}
                     print(f"✘ 작업 실패: #{task['task_id']} — {e}")
+                finally:
+                    if staging_dir:
+                        shutil.rmtree(staging_dir, ignore_errors=True)
                 httpx.post(
                     f"{server}/worker/tasks/{task['task_id']}/result",
                     headers=headers,

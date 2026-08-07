@@ -7,10 +7,12 @@ Worker는 기기 api_key(X-Device-Key 헤더)로 인증한다.
 """
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
+from ..config import UPLOAD_DIR
 from ..services import directory_access, orchestrator
 
 router = APIRouter(prefix="/worker", tags=["worker"])
@@ -65,6 +67,22 @@ def next_task(
         db.commit()
         response.status_code = 204
         return None
+    agent = next(
+        (node for node in (execution.graph_snapshot or {}).get("nodes", []) if node.get("id") == task.node_id),
+        {},
+    )
+    uploaded_file_ids = [
+        file_id for file_id in agent.get("uploaded_file_ids", []) if isinstance(file_id, int)
+    ]
+    uploaded_files = (
+        db.query(models.UploadedFile)
+        .filter(
+            models.UploadedFile.user_id == device.user_id,
+            models.UploadedFile.id.in_(uploaded_file_ids),
+        )
+        .all()
+        if uploaded_file_ids else []
+    )
     payload = schemas.WorkerTaskOut(
         task_id=task.id,
         execution_id=task.execution_id,
@@ -72,11 +90,30 @@ def next_task(
         role_prompt=task.role_prompt,
         model=task.model or "",
         directory_paths=directory_paths if directory_ids else task.allowed_folders or [],
+        uploaded_files=[
+            {"id": uploaded.id, "original_name": uploaded.original_name}
+            for uploaded in uploaded_files
+        ],
         input_context=task.input_context,
         run_prompt=execution.run_prompt if execution else "",
     )
     db.commit()
     return payload
+
+
+@router.get("/files/{file_id}")
+def download_uploaded_file(
+    file_id: int,
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    uploaded = db.get(models.UploadedFile, file_id)
+    if uploaded is None or uploaded.user_id != device.user_id:
+        raise HTTPException(404, "File not found.")
+    path = UPLOAD_DIR / uploaded.stored_name
+    if not path.is_file():
+        raise HTTPException(404, "Stored file not found.")
+    return FileResponse(path, filename=uploaded.original_name)
 
 
 @router.post("/directory-inspections/next")

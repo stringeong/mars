@@ -5,7 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api, getDeviceDirectories } from '../api'
 import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
-import { AgentNode, Device, Graph, Service, SharedDirectory, WorkflowNode } from '../types'
+import { AgentNode, Device, Graph, Service, SharedDirectory, UploadedFile, WorkflowNode } from '../types'
 
 const nodeTypes = { agent: AgentBlockNode }
 
@@ -22,6 +22,7 @@ function asAgents(graph: Graph): AgentNode[] {
         .filter((edge) => edge.relation === 'directory' && edge.target === agent.id)
         .map((edge) => legacyDirectories.get(edge.source))
         .filter((id): id is number => id !== undefined),
+      uploaded_file_ids: agent.uploaded_file_ids ?? [],
     }))
 }
 
@@ -38,6 +39,7 @@ export default function ServiceDetailPage() {
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [devices, setDevices] = useState<Device[]>([])
   const [directories, setDirectories] = useState<SharedDirectory[]>([])
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [selected, setSelected] = useState<string | null>(null)
   const [svcName, setSvcName] = useState('')
   const [svcDesc, setSvcDesc] = useState('')
@@ -49,13 +51,15 @@ export default function ServiceDetailPage() {
   const selectedAgent = selected ? agents[selected] : null
   const directoryById = useMemo(() => new Map(directories.map((directory) => [directory.id, directory])), [directories])
   const deviceById = useMemo(() => new Map(devices.map((device) => [device.id, device])), [devices])
+  const uploadedFileById = useMemo(() => new Map(uploadedFiles.map((file) => [file.id, file])), [uploadedFiles])
 
   const nodeData = useCallback((agent: AgentNode) => ({
     label: agent.name,
     model: agent.model,
     workerName: agent.worker_id ? deviceById.get(agent.worker_id)?.name : undefined,
     directories: (agent.directory_ids ?? []).map((directoryId) => directoryById.get(directoryId)?.alias ?? `#${directoryId}`),
-  }), [deviceById, directoryById])
+    files: (agent.uploaded_file_ids ?? []).map((fileId) => uploadedFileById.get(fileId)?.original_name ?? `#${fileId}`),
+  }), [deviceById, directoryById, uploadedFileById])
 
   const applyAgents = useCallback((nextAgents: AgentNode[], graphEdges: Graph['edges'] = []) => {
     const positions = layout(nextAgents)
@@ -76,9 +80,10 @@ export default function ServiceDetailPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [loadedService, loadedDevices] = await Promise.all([
+        const [loadedService, loadedDevices, files] = await Promise.all([
           api.get<Service>(`/services/${id}`),
           api.get<Device[]>('/devices'),
+          api.get<UploadedFile[]>('/files'),
         ])
         const directoryGroups = await Promise.all(loadedDevices.map((device) => getDeviceDirectories(device.id)))
         setService(loadedService)
@@ -86,6 +91,7 @@ export default function ServiceDetailPage() {
         setSvcDesc(loadedService.description)
         setDevices(loadedDevices)
         setDirectories(directoryGroups.flat())
+        setUploadedFiles(files)
         const loadedAgents = asAgents(loadedService.graph)
         const positions = layout(loadedAgents)
         setAgents(Object.fromEntries(loadedAgents.map((agent) => [agent.id, agent])))
@@ -104,7 +110,7 @@ export default function ServiceDetailPage() {
 
   function currentGraph(): Graph {
     return {
-      nodes: nodes.map((node) => ({ ...agents[node.id], position: node.position, directory_ids: agents[node.id].directory_ids ?? [] })),
+      nodes: nodes.map((node) => ({ ...agents[node.id], position: node.position, directory_ids: agents[node.id].directory_ids ?? [], uploaded_file_ids: agents[node.id].uploaded_file_ids ?? [] })),
       edges: edges.map((edge) => ({ source: edge.source, target: edge.target, relation: 'workflow' as const })),
     }
   }
@@ -123,6 +129,7 @@ export default function ServiceDetailPage() {
       model: '',
       worker_id: null,
       directory_ids: [],
+      uploaded_file_ids: [],
     }
     setAgents((current) => ({ ...current, [agent.id]: agent }))
     setNodes((current) => [...current, { id: agent.id, type: 'agent', position: position ?? { x: 80, y: 80 + current.length * 35 }, data: nodeData(agent) }])
@@ -199,7 +206,7 @@ export default function ServiceDetailPage() {
           <label>역할 프롬프트</label><textarea rows={5} value={selectedAgent.role_prompt} onChange={(event) => updateAgent({ role_prompt: event.target.value })} />
           <label>모델</label><input placeholder="비우면 Worker 기본값" value={selectedAgent.model} onChange={(event) => updateAgent({ model: event.target.value })} />
           <label>컴퓨팅 자원 (Worker)</label><select value={selectedAgent.worker_id ?? ''} onChange={(event) => updateAgent({ worker_id: event.target.value ? Number(event.target.value) : null })}><option value="">자동 배정</option>{devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.online ? ' · 온라인' : ' · 오프라인'}</option>)}</select>
-          <label>공유 디렉터리</label><div className="resource-picker">{directories.length ? directories.map((directory) => <label key={directory.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.directory_ids ?? []).includes(directory.id)} onChange={(event) => updateAgent({ directory_ids: event.target.checked ? [...(selectedAgent.directory_ids ?? []), directory.id] : (selectedAgent.directory_ids ?? []).filter((directoryId) => directoryId !== directory.id) })} /><span><strong>{directory.alias}</strong><small>{directory.local_path}</small></span></label>) : <span className="muted">등록된 공유 디렉터리가 없습니다.</span>}</div>
+          <label>공유 디렉터리</label><div className="resource-picker">{directories.length ? directories.map((directory) => <label key={directory.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.directory_ids ?? []).includes(directory.id)} onChange={(event) => updateAgent({ directory_ids: event.target.checked ? [...(selectedAgent.directory_ids ?? []), directory.id] : (selectedAgent.directory_ids ?? []).filter((directoryId) => directoryId !== directory.id) })} /><span><strong>{directory.alias}</strong><small>{directory.local_path}</small></span></label>) : <span className="muted">등록된 공유 디렉터리가 없습니다.</span>}<div className="uploaded-file-picker"><strong>Uploaded files</strong>{uploadedFiles.length ? uploadedFiles.map((file) => <label key={file.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.uploaded_file_ids ?? []).includes(file.id)} onChange={(event) => updateAgent({ uploaded_file_ids: event.target.checked ? [...(selectedAgent.uploaded_file_ids ?? []), file.id] : (selectedAgent.uploaded_file_ids ?? []).filter((fileId) => fileId !== file.id) })} /><span><strong>{file.original_name}</strong><small>{file.size_bytes.toLocaleString()} bytes</small></span></label>) : <span className="muted">No uploaded files. Add files from the Files page.</span>}</div></div>
         </> : <>
           <h2>서비스 정보</h2><label>이름</label><input value={svcName} onChange={(event) => setSvcName(event.target.value)} /><label>설명</label><textarea rows={3} value={svcDesc} onChange={(event) => setSvcDesc(event.target.value)} />
           <h2 style={{ marginTop: 20 }}>Workflow execution</h2><p className="muted">Enter the run-specific prompt on a separate execution input screen.</p><button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={async () => { if (await save()) navigate(`/services/${id}/run`) }}>Configure and run</button>

@@ -11,6 +11,29 @@ from ..services import dag, orchestrator, directory_access
 router = APIRouter(tags=["executions"])
 
 
+def _validate_uploaded_files(db: Session, user_id: int, graph: dict) -> None:
+    file_ids = {
+        file_id
+        for node in graph.get("nodes", [])
+        if node.get("type", "agent") == "agent"
+        for file_id in node.get("uploaded_file_ids", [])
+        if isinstance(file_id, int)
+    }
+    if not file_ids:
+        return
+    owned_ids = {
+        file_id
+        for (file_id,) in db.query(models.UploadedFile.id)
+        .filter(
+            models.UploadedFile.user_id == user_id,
+            models.UploadedFile.id.in_(file_ids),
+        )
+        .all()
+    }
+    if owned_ids != file_ids:
+        raise HTTPException(422, "A selected uploaded file is unavailable.")
+
+
 @router.post(
     "/services/{service_id}/executions",
     response_model=schemas.ExecutionOut,
@@ -37,6 +60,7 @@ def start_execution(
         raise HTTPException(422, f"디렉토리 접근 설정이 올바르지 않습니다: {e}")
 
     # F2-403: 실행 전 사용 가능한 기기 확인
+    _validate_uploaded_files(db, user.id, service.graph)
     devices = db.query(models.Device).filter(models.Device.user_id == user.id).all()
     if not any(orchestrator.device_is_online(d) for d in devices):
         raise HTTPException(409, "사용 가능한(온라인) 기기가 없습니다. Worker Agent를 실행해 주세요.")
