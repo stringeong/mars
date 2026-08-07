@@ -16,37 +16,30 @@ export default function App() {
   const location = useLocation()
   const navigate = useNavigate()
   const authed = !!getToken()
-
   const navItems = [
-    { to: '/services', label: '서비스' },
-    { to: '/devices', label: '기기 관리' },
-    { to: '/history', label: '실행 이력' },
+    { to: '/services', label: 'Workflows', icon: 'W' },
+    { to: '/devices', label: 'Workers', icon: 'R' },
+    { to: '/history', label: 'Run history', icon: 'H' },
   ]
 
   return (
     <div className="layout">
       {authed && location.pathname !== '/login' && (
         <aside className="sidebar">
-          <div className="logo">M.A.R.S</div>
+          <Link to="/services" className="brand">
+            <span className="brand-mark">M</span><span>M.A.R.S</span>
+          </Link>
+          <div className="workspace-label">ORCHESTRATION</div>
           <nav>
             {navItems.map((item) => (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={location.pathname.startsWith(item.to) ? 'active' : ''}
-              >
-                {item.label}
+              <Link key={item.to} to={item.to} className={location.pathname.startsWith(item.to) ? 'active' : ''}>
+                <span className="nav-icon">{item.icon}</span>{item.label}
               </Link>
             ))}
           </nav>
-          <button
-            className="btn ghost logout"
-            onClick={() => {
-              setToken(null)
-              navigate('/login')
-            }}
-          >
-            로그아웃
+          <div className="sidebar-status"><span className="status-dot" /> System connected</div>
+          <button className="btn ghost logout" onClick={() => { setToken(null); navigate('/login') }}>
+            Sign out
           </button>
         </aside>
       )}
