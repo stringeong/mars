@@ -225,6 +225,11 @@ def main() -> None:
     p_run = sub.add_parser("run", help="에이전트 실행 (하트비트 + 작업 처리)")
     p_run.set_defaults(func=cmd_run)
 
+    p_ui = sub.add_parser("ui", help="localhost Worker 관리 UI 실행")
+    p_ui.add_argument("--host", default="127.0.0.1", help="바인딩 주소")
+    p_ui.add_argument("--port", default=8765, type=int, help="포트")
+    p_ui.set_defaults(func=lambda a: __import__("agent.webui", fromlist=["serve"]).serve(a.host, a.port))
+
     args = parser.parse_args()
     args.func(args)
 
