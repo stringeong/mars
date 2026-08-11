@@ -139,5 +139,16 @@ def delete_service(
     db: Session = Depends(get_db),
 ):
     service = _get_owned(service_id, user, db)
+    has_history = (
+        db.query(models.Execution.id)
+        .filter(models.Execution.service_id == service.id)
+        .first()
+        is not None
+    )
+    if has_history:
+        raise HTTPException(
+            409,
+            "실행 이력이 있는 서비스는 삭제할 수 없습니다. 실행 이력을 보존해 주세요.",
+        )
     db.delete(service)
     db.commit()

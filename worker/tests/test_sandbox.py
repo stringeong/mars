@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from agent import sandbox
+from agent import executor, sandbox
 
 
 @pytest.fixture()
@@ -198,3 +198,51 @@ class TestListFiles:
         f = allowed / "a.txt"
         f.write_text("t")
         assert sandbox.list_files([str(f)]) == []
+
+
+
+def test_direct_upload_bypasses_file_selector_and_uses_longer_context(
+    tmp_path, monkeypatch
+):
+    shared = tmp_path / "shared"
+    uploaded_dir = tmp_path / "uploads"
+    shared.mkdir()
+    uploaded_dir.mkdir()
+    shared_file = shared / "unrelated.txt"
+    shared_file.write_text("SHOULD_NOT_APPEAR", encoding="utf-8")
+    uploaded_file = uploaded_dir / "report.txt"
+    uploaded_file.write_text("A" * 5000 + "END_MARKER", encoding="utf-8")
+    monkeypatch.setattr(executor, "_select_relevant_files", lambda *_: [])
+
+    messages = executor._build_messages(
+        {
+            "role_prompt": "보고서를 읽으세요",
+            "run_prompt": "첨부 파일 분석",
+            "directory_paths": [str(shared), str(uploaded_dir)],
+            "uploaded_file_paths": [str(uploaded_file)],
+        },
+        {"default_model": "test"},
+    )
+
+    prompt = messages[1]["content"]
+    assert "direct upload" in prompt
+    assert "END_MARKER" in prompt
+    assert "SHOULD_NOT_APPEAR" not in prompt
+    assert "part 2/2" in prompt
+
+
+def test_blank_pdf_falls_back_to_ocr(allowed, monkeypatch):
+    from pypdf import PdfWriter
+
+    path = allowed / "scan.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=100, height=100)
+    with path.open("wb") as stream:
+        writer.write(stream)
+    monkeypatch.setattr(
+        sandbox,
+        "_ocr_pdf",
+        lambda pdf_path, display_path: "OCR로 추출한 내용",
+    )
+
+    assert sandbox.read_file(str(path), [str(allowed)]) == "OCR로 추출한 내용"

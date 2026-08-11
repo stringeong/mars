@@ -130,6 +130,7 @@ def stage_uploaded_files(server: str, headers: dict, task: dict) -> str | None:
     if not uploads:
         return None
     staging_dir = Path(tempfile.mkdtemp(prefix="mars-task-files-"))
+    staged_paths: list[str] = []
     try:
         for uploaded in uploads:
             file_id = uploaded.get("id")
@@ -140,10 +141,13 @@ def stage_uploaded_files(server: str, headers: dict, task: dict) -> str | None:
                 f"{server}/worker/files/{file_id}", headers=headers, timeout=60
             )
             response.raise_for_status()
-            (staging_dir / f"{file_id}_{name}").write_bytes(response.content)
+            destination = staging_dir / f"{file_id}_{name}"
+            destination.write_bytes(response.content)
+            staged_paths.append(str(destination))
         task["directory_paths"] = [
             *(task.get("directory_paths") or []), str(staging_dir)
         ]
+        task["uploaded_file_paths"] = staged_paths
         return str(staging_dir)
     except Exception:
         shutil.rmtree(staging_dir, ignore_errors=True)

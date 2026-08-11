@@ -55,6 +55,7 @@ python -m agent register --server http://localhost:8000
 python -m agent run
 ```
 
+- 스캔 PDF OCR을 사용하려면 Tesseract가 필요합니다. Ubuntu/Debian은 `sudo apt install tesseract-ocr tesseract-ocr-kor`, macOS는 `brew install tesseract tesseract-lang`으로 설치합니다. Docker Worker 이미지에는 자동 설치됩니다.
 - 등록 정보는 `worker/agent_config.json` 에 저장됩니다.
 - 워크플로우에 연결한 공유 디렉터리만 Worker의 파일 접근 허용 목록에 들어갑니다.
 - 하나의 디렉터리를 여러 Worker가 처리할 때는, 기기 관리에서 같은 디렉터리 별명을 각 Worker에 등록하고 각 Worker의 실제 로컬 경로를 입력합니다. 예: Linux `/shared/project`, Windows `D:\team\project`.

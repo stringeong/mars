@@ -1,6 +1,6 @@
 import { addEdge, Background, Connection, Controls, Edge, MarkerType, Node, ReactFlow, useEdgesState, useNodesState } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
+import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, getDeviceDirectories } from '../api'
 import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
@@ -40,6 +40,10 @@ export default function ServiceDetailPage() {
   const [devices, setDevices] = useState<Device[]>([])
   const [directories, setDirectories] = useState<SharedDirectory[]>([])
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
+  const [fileUploading, setFileUploading] = useState(false)
+  const [fileLibraryOpen, setFileLibraryOpen] = useState(false)
+  const [draftFileIds, setDraftFileIds] = useState<number[]>([])
+  const uploadInputRef = useRef<HTMLInputElement>(null)
   const [selected, setSelected] = useState<string | null>(null)
   const [svcName, setSvcName] = useState('')
   const [svcDesc, setSvcDesc] = useState('')
@@ -153,6 +157,52 @@ export default function ServiceDetailPage() {
     setSelected(null)
   }
 
+  function openFileLibrary() {
+    setDraftFileIds([...(selectedAgent?.uploaded_file_ids ?? [])])
+    setFileLibraryOpen(true)
+  }
+
+  function applyFileLibrarySelection() {
+    updateAgent({ uploaded_file_ids: draftFileIds })
+    setFileLibraryOpen(false)
+  }
+
+  async function uploadForSelectedAgent(files: FileList | null) {
+    if (!selected || !files?.length) return
+    setFileUploading(true)
+    setError("")
+    try {
+      const uploaded: UploadedFile[] = []
+      for (const file of Array.from(files)) {
+        const form = new FormData()
+        form.append("file", file)
+        uploaded.push(await api.upload<UploadedFile>("/files", form))
+      }
+      setUploadedFiles((current) => {
+        const byId = new Map([...uploaded, ...current].map((file) => [file.id, file]))
+        return [...byId.values()]
+      })
+      const uploadedIds = uploaded.map((file) => file.id)
+      setAgents((current) => {
+        const agent = current[selected]
+        if (!agent) return current
+        return {
+          ...current,
+          [selected]: {
+            ...agent,
+            uploaded_file_ids: [...new Set([...(agent.uploaded_file_ids ?? []), ...uploadedIds])],
+          },
+        }
+      })
+      setMessage(String(uploaded.length) + "개 파일을 업로드하고 현재 에이전트에 첨부했습니다. 저장해 주세요.")
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "파일 업로드 실패")
+    } finally {
+      setFileUploading(false)
+      if (uploadInputRef.current) uploadInputRef.current.value = ""
+    }
+  }
+
   async function save(): Promise<boolean> {
     try {
       const updated = await api.put<Service>(`/services/${id}`, { name: svcName, description: svcDesc, graph: currentGraph() })
@@ -206,12 +256,34 @@ export default function ServiceDetailPage() {
           <label>역할 프롬프트</label><textarea rows={5} value={selectedAgent.role_prompt} onChange={(event) => updateAgent({ role_prompt: event.target.value })} />
           <label>모델</label><input placeholder="비우면 Worker 기본값" value={selectedAgent.model} onChange={(event) => updateAgent({ model: event.target.value })} />
           <label>컴퓨팅 자원 (Worker)</label><select value={selectedAgent.worker_id ?? ''} onChange={(event) => updateAgent({ worker_id: event.target.value ? Number(event.target.value) : null })}><option value="">자동 배정</option>{devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.online ? ' · 온라인' : ' · 오프라인'}</option>)}</select>
-          <label>공유 디렉터리</label><div className="resource-picker">{directories.length ? directories.map((directory) => <label key={directory.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.directory_ids ?? []).includes(directory.id)} onChange={(event) => updateAgent({ directory_ids: event.target.checked ? [...(selectedAgent.directory_ids ?? []), directory.id] : (selectedAgent.directory_ids ?? []).filter((directoryId) => directoryId !== directory.id) })} /><span><strong>{directory.alias}</strong><small>{directory.local_path}</small></span></label>) : <span className="muted">등록된 공유 디렉터리가 없습니다.</span>}<div className="uploaded-file-picker"><strong>Uploaded files</strong>{uploadedFiles.length ? uploadedFiles.map((file) => <label key={file.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.uploaded_file_ids ?? []).includes(file.id)} onChange={(event) => updateAgent({ uploaded_file_ids: event.target.checked ? [...(selectedAgent.uploaded_file_ids ?? []), file.id] : (selectedAgent.uploaded_file_ids ?? []).filter((fileId) => fileId !== file.id) })} /><span><strong>{file.original_name}</strong><small>{file.size_bytes.toLocaleString()} bytes</small></span></label>) : <span className="muted">No uploaded files. Add files from the Files page.</span>}</div></div>
+          <label>공유 디렉터리</label>
+          <div className="resource-picker directory-resource-picker">
+            {directories.length ? directories.map((directory) => <label key={directory.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.directory_ids ?? []).includes(directory.id)} onChange={(event) => updateAgent({ directory_ids: event.target.checked ? [...(selectedAgent.directory_ids ?? []), directory.id] : (selectedAgent.directory_ids ?? []).filter((directoryId) => directoryId !== directory.id) })} /><span><strong>{directory.alias}</strong><small>{directory.local_path}</small></span></label>) : <span className="muted">등록된 공유 디렉터리가 없습니다.</span>}
+          </div>
+          <div className="uploaded-file-picker">
+            <div className="uploaded-file-heading"><strong>첨부 파일</strong><div className="file-picker-actions"><button type="button" className="btn sm ghost" disabled={fileUploading} onClick={() => uploadInputRef.current?.click()}>{fileUploading ? '업로드 중…' : '새 파일 업로드'}</button><button type="button" className="btn sm ghost" onClick={openFileLibrary}>기존 파일 선택</button></div><input ref={uploadInputRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx" onChange={(event) => uploadForSelectedAgent(event.target.files)} /></div>
+            <small className="file-picker-help">현재 에이전트가 실행할 때 우선 읽는 파일입니다.</small>
+            <div className="selected-file-list">
+              {(selectedAgent.uploaded_file_ids ?? []).map((fileId) => { const file = uploadedFileById.get(fileId); return <div className="selected-file-chip" key={fileId}><span><strong>{file?.original_name ?? '삭제된 파일'}</strong><small>{file ? file.size_bytes.toLocaleString() + ' bytes' : '#' + fileId}</small></span><button type="button" aria-label="첨부 해제" onClick={() => updateAgent({ uploaded_file_ids: (selectedAgent.uploaded_file_ids ?? []).filter((id) => id !== fileId) })}>×</button></div> })}
+              {!(selectedAgent.uploaded_file_ids ?? []).length && <span className="muted">선택된 파일이 없습니다.</span>}
+            </div>
+          </div>
         </> : <>
           <h2>서비스 정보</h2><label>이름</label><input value={svcName} onChange={(event) => setSvcName(event.target.value)} /><label>설명</label><textarea rows={3} value={svcDesc} onChange={(event) => setSvcDesc(event.target.value)} />
           <h2 style={{ marginTop: 20 }}>Workflow execution</h2><p className="muted">Enter the run-specific prompt on a separate execution input screen.</p><button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={async () => { if (await save()) navigate(`/services/${id}/run`) }}>Configure and run</button>
         </>}
       </aside>
     </div>
+    {fileLibraryOpen && <div className="file-library-modal-backdrop" role="presentation" onMouseDown={() => setFileLibraryOpen(false)}>
+      <section className="file-library-modal" role="dialog" aria-modal="true" aria-labelledby="file-library-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header><div><span className="eyebrow">FILE LIBRARY</span><h2 id="file-library-title">기존 파일 선택</h2></div><button type="button" className="modal-close" aria-label="닫기" onClick={() => setFileLibraryOpen(false)}>×</button></header>
+        <p>이 에이전트가 실행할 때 읽을 파일을 선택하세요.</p>
+        <div className="modal-file-list">
+          {uploadedFiles.map((file) => <label className="modal-file-item" key={file.id}><input type="checkbox" checked={draftFileIds.includes(file.id)} onChange={(event) => setDraftFileIds((current) => event.target.checked ? [...current, file.id] : current.filter((id) => id !== file.id))} /><span><strong>{file.original_name}</strong><small>{file.size_bytes.toLocaleString()} bytes · {new Date(file.created_at).toLocaleDateString()}</small></span></label>)}
+          {!uploadedFiles.length && <div className="modal-file-empty">업로드된 파일이 없습니다. 먼저 새 파일을 업로드해 주세요.</div>}
+        </div>
+        <footer><span>{draftFileIds.length}개 선택</span><div><button type="button" className="btn sm ghost" onClick={() => setFileLibraryOpen(false)}>취소</button><button type="button" className="btn sm" onClick={applyFileLibrarySelection}>선택 적용</button></div></footer>
+      </section>
+    </div>}
   </div>
 }

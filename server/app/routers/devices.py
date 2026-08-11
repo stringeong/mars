@@ -298,6 +298,13 @@ def update_directory(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    device = db.get(models.Device, device_id)
+    if device is None or device.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="기기를 찾을 수 없습니다.",
+        )
+
     directory = (
         db.query(models.SharedDirectory)
         .filter(
@@ -322,6 +329,11 @@ def update_directory(
         )
         .first()
     )
+    if directory.device_id != device_id and mount is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="이 기기에 등록된 디렉토리를 찾을 수 없습니다.",
+        )
 
     if "alias" in update_data:
         duplicate_alias = (
@@ -405,6 +417,13 @@ def delete_directory(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
+    device = db.get(models.Device, device_id)
+    if device is None or device.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="기기를 찾을 수 없습니다.",
+        )
+
     directory = (
         db.query(models.SharedDirectory)
         .filter(
@@ -420,7 +439,34 @@ def delete_directory(
             detail="디렉토리를 찾을 수 없습니다.",
         )
 
-    directory.is_active = False
+    mount = (
+        db.query(models.DirectoryMount)
+        .filter(
+            models.DirectoryMount.directory_id == directory_id,
+            models.DirectoryMount.device_id == device_id,
+        )
+        .first()
+    )
+    if directory.device_id != device_id:
+        if mount is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="이 기기에 등록된 디렉토리를 찾을 수 없습니다.",
+            )
+        db.delete(mount)
+    else:
+        replacement = (
+            db.query(models.DirectoryMount)
+            .filter(models.DirectoryMount.directory_id == directory_id)
+            .order_by(models.DirectoryMount.id)
+            .first()
+        )
+        if replacement is None:
+            directory.is_active = False
+        else:
+            directory.device_id = replacement.device_id
+            directory.local_path = replacement.local_path
+            db.delete(replacement)
 
     db.commit()
 

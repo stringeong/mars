@@ -23,6 +23,35 @@ class SandboxError(PermissionError):
     pass
 
 
+def _ocr_pdf(path: Path, display_path: str) -> str:
+    """Extract text from image-only PDF pages with local Tesseract OCR."""
+    try:
+        import fitz
+        import pytesseract
+        from PIL import Image
+
+        parts: list[str] = []
+        size = 0
+        with fitz.open(path) as document:
+            for page in document:
+                pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+                image = Image.frombytes("RGB", [pixmap.width, pixmap.height], pixmap.samples)
+                text = pytesseract.image_to_string(image, lang="kor+eng")
+                if text.strip():
+                    parts.append(text)
+                    size += len(text)
+                if size >= MAX_FILE_BYTES:
+                    break
+        content = "\n".join(parts)[:MAX_FILE_BYTES]
+        if not content.strip():
+            raise SandboxError(f"PDF OCR에서 텍스트를 찾지 못했습니다: {display_path}")
+        return content
+    except SandboxError:
+        raise
+    except Exception as exc:
+        raise SandboxError(f"스캔 PDF OCR에 실패했습니다: {display_path} ({exc})") from exc
+
+
 def _normalize(folders: list[str]) -> list[Path]:
     result = []
     for f in folders:
@@ -70,9 +99,7 @@ def read_file(path: str, allowed_folders: list[str]) -> str:
                     break
             content = "\n".join(parts)[:MAX_FILE_BYTES]
             if not content.strip():
-                raise SandboxError(
-                    f"PDF에 추출 가능한 텍스트가 없습니다 (스캔본은 OCR 필요): {path}"
-                )
+                return _ocr_pdf(p, path)
             return content
         except SandboxError:
             raise

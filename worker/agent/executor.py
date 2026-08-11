@@ -7,13 +7,30 @@ import httpx
 
 from . import sandbox
 
-FILE_CONTEXT_LIMIT = 5  # 컨텍스트에 포함할 최대 파일 수
-PREVIEW_CHARS = 200  # 파일 선별 시 LLM에게 보여줄 미리보기 길이
+FILE_CONTEXT_LIMIT = 10  # 직접 첨부를 우선해 컨텍스트에 포함할 최대 파일 수
+FILE_CONTEXT_CHARS = 30_000  # 파일별 최대 입력 길이
+FILE_CHUNK_CHARS = 4_000  # 긴 문서는 구간을 나눠 경계를 명확히 표시
+PREVIEW_CHARS = 500  # 파일 선별 시 LLM에게 보여줄 미리보기 길이
 
 
 def _directory_paths(task: dict) -> list[str]:
     """Read the current protocol field while accepting legacy payloads."""
     return task.get("directory_paths") or task.get("allowed_folders") or []
+
+
+def _uploaded_file_paths(task: dict) -> list[str]:
+    """Paths downloaded from the file vault for this specific agent."""
+    return [str(path) for path in task.get("uploaded_file_paths") or []]
+
+
+def _chunk_document(path: str, content: str) -> list[str]:
+    content = content[:FILE_CONTEXT_CHARS]
+    total = max(1, (len(content) + FILE_CHUNK_CHARS - 1) / FILE_CHUNK_CHARS)
+    return [
+        f"### {path} (part {index + 1}/{total})\n"
+        + content[start : start + FILE_CHUNK_CHARS]
+        for index, start in enumerate(range(0, len(content), FILE_CHUNK_CHARS))
+    ]
 
 
 def _chat(config: dict, model: str, messages: list[dict], temperature: float) -> str:
@@ -98,20 +115,35 @@ def _build_messages(task: dict, config: dict) -> list[dict]:
     # 단, 작업과 관련된 파일만 선별해 무관한 개인정보 유입을 막는다
     folders = _directory_paths(task)
     if folders:
-        files = sandbox.list_files(folders)
-        relevant = _select_relevant_files(task, files, config) if files else []
-        if relevant:
-            listing = "\n".join(f"- {f}" for f in relevant[:50])
-            parts.append(f"[이 작업에 사용할 로컬 파일 목록]\n{listing}")
+        uploaded = _uploaded_file_paths(task)
+        uploaded_set = set(uploaded)
+        shared_files = [
+            path for path in sandbox.list_files(folders) if path not in uploaded_set
+        ]
+        relevant_shared = (
+            _select_relevant_files(task, shared_files, config) if shared_files else []
+        )
+        ordered_files = list(dict.fromkeys([*uploaded, *relevant_shared]))
+        selected_files = ordered_files[:FILE_CONTEXT_LIMIT]
+        if selected_files:
+            listing = "\n".join(
+                f"- {path}{' (direct upload)' if path in uploaded_set else ''}"
+                for path in selected_files
+            )
+            parts.append(f"[이 작업에 사용할 파일 목록]\n{listing}")
             snippets = []
-            for path in relevant[:FILE_CONTEXT_LIMIT]:
+            errors = []
+            for path in selected_files:
                 try:
                     content = sandbox.read_file(path, folders)
-                except sandbox.SandboxError:
+                except sandbox.SandboxError as exc:
+                    errors.append(f"- {path}: {exc}")
                     continue
-                snippets.append(f"### {path}\n{content[:4000]}")
+                snippets.extend(_chunk_document(path, content))
             if snippets:
-                parts.append("[로컬 파일 내용 발췌]\n" + "\n\n".join(snippets))
+                parts.append("[파일 내용]\n" + "\n\n".join(snippets))
+            if errors:
+                parts.append("[읽지 못한 파일]\n" + "\n".join(errors))
 
     parts.append("위 정보를 바탕으로 당신의 역할을 수행하고 결과만 출력하세요.")
     return [
