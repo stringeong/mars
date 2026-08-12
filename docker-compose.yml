@@ -52,8 +52,9 @@ services:
     restart: unless-stopped
     environment:
       PYTHONUNBUFFERED: "1"
+      MARS_CONFIG_PATH: /data/agent_config.json
     volumes:
-      - ./worker/agent_config.json:/app/agent_config.json
+      - worker-config:/data
       - ${MARS_WORKER_SHARED_DIR:-./worker/shared}:/shared
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -61,6 +62,38 @@ services:
       server:
         condition: service_healthy
 
+  worker-ui:
+    profiles: ["worker-ui"]
+    build:
+      context: ./worker
+    container_name: mars-worker-ui
+    restart: unless-stopped
+    command: ["python", "-m", "agent", "ui", "--host", "0.0.0.0", "--port", "8765"]
+    environment:
+      PYTHONUNBUFFERED: "1"
+      MARS_CONFIG_PATH: /data/agent_config.json
+      MARS_OLLAMA_URL: http://ollama:11434
+      MARS_ALLOW_CONTAINER_BIND: "1"
+    volumes:
+      - worker-config:/data
+      - ${MARS_WORKER_SHARED_DIR:-./worker/shared}:/shared
+    ports:
+      - "127.0.0.1:${MARS_WORKER_UI_PORT:-8765}:8765"
+    depends_on:
+      - ollama
+
+  ollama:
+    profiles: ["worker-ui"]
+    image: ollama/ollama:latest
+    container_name: mars-ollama
+    restart: unless-stopped
+    volumes:
+      - ollama-data:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+
 volumes:
   mars-data:
+  ollama-data:
+  worker-config:
 

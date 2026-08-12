@@ -59,6 +59,13 @@ python -m agent run
 http://127.0.0.1:8765 를 여세요. Setup, Models, Tools, Status 화면에서 등록,
 Ollama 모델 관리, 승인된 Tool 설치, 공유 디렉터리 및 Worker 실행 상태를 관리할 수 있습니다.
 
+Docker 기반 Worker UI와 Ollama를 함께 실행하면 OCR, Office, Git Tool이 이미지에 포함되므로
+호스트 관리자 권한 없이 사용할 수 있습니다.
+
+```bash
+docker compose --profile worker-ui up --build -d worker-ui
+```
+
 - 스캔 PDF OCR을 사용하려면 Tesseract가 필요합니다. Ubuntu/Debian은 `sudo apt install tesseract-ocr tesseract-ocr-kor`, macOS는 `brew install tesseract tesseract-lang`으로 설치합니다. Docker Worker 이미지에는 자동 설치됩니다.
 - 등록 정보는 `worker/agent_config.json` 에 저장됩니다.
 - 워크플로우에 연결한 공유 디렉터리만 Worker의 파일 접근 허용 목록에 들어갑니다.

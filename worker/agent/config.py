@@ -1,9 +1,10 @@
 """Worker Agent 설정 파일 관리 (worker/agent_config.json)."""
 
 import json
+import os
 from pathlib import Path
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "agent_config.json"
+CONFIG_PATH = Path(os.getenv("MARS_CONFIG_PATH", Path(__file__).resolve().parent.parent / "agent_config.json"))
 
 DEFAULTS = {
     "server_url": "http://localhost:8000",
@@ -16,11 +17,13 @@ DEFAULTS = {
     "poll_interval_sec": 3,
 }
 
-
 def load() -> dict:
     if CONFIG_PATH.exists():
-        return {**DEFAULTS, **json.loads(CONFIG_PATH.read_text(encoding="utf-8"))}
-    return dict(DEFAULTS)
+        config = {**DEFAULTS, **json.loads(CONFIG_PATH.read_text(encoding="utf-8"))}
+    else:
+        config = dict(DEFAULTS)
+    config["ollama_url"] = os.getenv("MARS_OLLAMA_URL", config["ollama_url"])
+    return config
 
 
 def save(config: dict) -> None:
