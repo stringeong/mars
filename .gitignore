@@ -21,3 +21,9 @@ demo_data/
 # Docker/local runtime
 worker/shared/*
 !worker/shared/.gitkeep
+
+# Local deployment work plan (not committed)
+DEPLOYMENT_PLAN.local.md
+
+# Local deployment backups
+.local-backups/
