@@ -36,10 +36,8 @@ services:
       context: ./web
     container_name: mars-web
     restart: unless-stopped
-    environment:
-      VITE_API_URL: ${VITE_API_URL:-http://localhost:8000}
     ports:
-      - "${MARS_WEB_PORT:-5173}:5173"
+      - "${MARS_WEB_PORT:-5173}:8080"
     depends_on:
       server:
         condition: service_healthy

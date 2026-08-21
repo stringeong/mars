@@ -1,6 +1,6 @@
 import { SharedDirectory } from "./types"
 
-const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000'
+const API_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 
 export function getToken(): string | null {
   return localStorage.getItem('mars_token')

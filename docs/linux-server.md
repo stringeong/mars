@@ -33,16 +33,15 @@ cp .env.example .env
 openssl rand -hex 32
 ```
 
-서버 IP가 `192.168.1.20`일 때 최소 예시는 다음과 같다.
-
 ```dotenv
 MARS_SECRET_KEY=<openssl로 생성한 값>
 MARS_SERVER_PORT=8000
 MARS_WEB_PORT=5173
-VITE_API_URL=http://192.168.1.20:8000
 MARS_DEFAULT_MODEL=gemma3:4b
 MARS_HEARTBEAT_TIMEOUT=30
 ```
+
+웹 UI는 같은 origin의 `/api` 경로를 통해 서버에 연결하므로 별도의 브라우저 API 주소 설정은 필요하지 않다.
 
 서버 호스트에서 Ollama를 실행한다면 `OLLAMA_URL=http://host.docker.internal:11434`를 유지한다. Ollama가 다른 서버에 있다면 그 서버가 접근 가능한 주소로 바꾼다. Ollama가 없어도 서비스 생성은 규칙 기반 폴백으로 동작하지만, Worker가 작업을 처리하려면 각 Worker에서 Ollama와 모델이 준비되어 있어야 한다.
 
@@ -54,7 +53,9 @@ docker compose ps
 curl http://localhost:8000/
 ```
 
-정상이라면 브라우저에서 `http://192.168.1.20:5173`을 열어 회원가입을 한다. 로그 확인과 중지는 다음 명령을 사용한다.
+`192.0.2.10`은 문서 전용 예시 주소다. 아래 웹·Worker 주소는 실제 서버의 LAN IP 또는 도메인으로 바꿔 사용한다.
+
+정상이라면 브라우저에서 `http://192.0.2.10:5173`을 열어 회원가입을 한다. 로그 확인과 중지는 다음 명령을 사용한다.
 
 ```bash
 docker compose logs -f server web
@@ -119,7 +120,7 @@ cd worker
 python3 -m venv .venv
 . .venv/bin/activate
 pip install -r requirements.txt
-python -m agent register --server http://192.168.1.20:8000
+python -m agent register --server http://192.0.2.10:8000
 python -m agent run
 ```
 

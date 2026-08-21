@@ -34,9 +34,10 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 #### 여러 기기로 분산 실행하기 (데모 구성)
 
 1. 서버 기기에서 위처럼 `--host 0.0.0.0` 으로 서버를 켜고, 서버 기기의 LAN IP를 확인합니다
-   (`ipconfig getifaddr en0` → 예: `192.168.0.10`).
+   (`ipconfig getifaddr en0` → 예: `192.0.2.10`).
+   `192.0.2.10`은 문서용 예시이므로 실제 서버의 LAN IP로 바꿔 사용합니다.
 2. 다른 기기(팀원 노트북)에서 Worker를 설치하고 서버 IP로 등록합니다:
-   `python -m agent register --server http://192.168.0.10:8000`
+   `python -m agent register --server http://192.0.2.10:8000`
 3. 각 기기에서 `python -m agent run` 을 켜두면, 워크플로우의 병렬 단계가
    서로 다른 기기에 분배되어 동시에 실행됩니다.
 4. 같은 공유기(사설 IP 대역) 안에서만 동작하도록 CORS가 설정되어 있습니다.
@@ -80,7 +81,7 @@ npm run dev
 ```
 
 - http://localhost:5173 접속 → 회원가입 → 로그인
-- 서버 주소는 `web/.env` 의 `VITE_API_URL` (기본 `http://localhost:8000`).
+- 개발 서버는 기본적으로 `/api` 요청을 `http://localhost:8000`으로 프록시합니다. 필요한 경우 `VITE_API_URL`로 덮어쓸 수 있습니다.
 
 ## 테스트
 
