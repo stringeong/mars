@@ -8,6 +8,7 @@
 import argparse
 import getpass
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -31,7 +32,27 @@ def collect_specs() -> dict:
         "cpu": platform.processor() or platform.machine(),
         "cpu_count": psutil.cpu_count(logical=True),
         "ram_gb": round(psutil.virtual_memory().total / 1024**3, 1),
+        "gpus": collect_gpu_devices(),
     }
+
+
+def collect_gpu_devices() -> list[dict]:
+    """Detect NVIDIA and Linux DRM GPUs without vendor SDKs."""
+    devices = []
+    vendors = {"0x1002": "AMD", "0x8086": "Intel", "0x10de": "NVIDIA"}
+    for card in sorted(Path("/sys/class/drm").glob("card[0-9]*")):
+        device = card / "device"
+        try:
+            vendor_id = (device / "vendor").read_text().strip().lower()
+            device_id = (device / "device").read_text().strip().lower()
+            uevent = (device / "uevent").read_text()
+            match = re.search(r"^DRIVER=(.+)$", uevent, re.MULTILINE)
+            driver = match.group(1) if match else ""
+            vendor = vendors.get(vendor_id, vendor_id)
+            devices.append({"vendor": vendor, "name": f"{vendor} GPU ({driver or device_id})", "id": f"{vendor_id}:{device_id}", "card": card.name})
+        except OSError:
+            continue
+    return devices
 
 
 def collect_runtime_stats() -> dict:
@@ -53,6 +74,17 @@ def collect_runtime_stats() -> dict:
             stats["gpu_percent"] = max(values)
     except (FileNotFoundError, subprocess.SubprocessError, ValueError):
         pass
+    if "gpu_percent" not in stats:
+        values = []
+        for busy_file in Path("/sys/class/drm").glob("card[0-9]*/device/gpu_busy_percent"):
+            try:
+                values.append(float(busy_file.read_text().strip()))
+            except (OSError, ValueError):
+                continue
+        if values:
+            stats["gpu_percent"] = max(values)
+            stats["gpu_source"] = "drm"
+    stats["gpu_devices"] = collect_gpu_devices()
     return stats
 
 

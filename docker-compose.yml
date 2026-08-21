@@ -56,6 +56,8 @@ services:
     volumes:
       - worker-config:/data
       - ${MARS_WORKER_SHARED_DIR:-./worker/shared}:/shared
+    devices:
+      - /dev/dri:/dev/dri
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -77,6 +79,8 @@ services:
     volumes:
       - worker-config:/data
       - ${MARS_WORKER_SHARED_DIR:-./worker/shared}:/shared
+    devices:
+      - /dev/dri:/dev/dri
     ports:
       - "127.0.0.1:${MARS_WORKER_UI_PORT:-8765}:8765"
     depends_on:
