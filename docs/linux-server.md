@@ -1,6 +1,6 @@
 # Linux 서버 실행 가이드
 
-이 문서는 Ubuntu 등 Linux 서버 한 대에서 M.A.R.S 서버와 웹 UI를 Docker Compose로 실행하고, 여러 Worker가 같은 공유 디렉터리를 읽도록 구성하는 방법을 설명한다. 현재 CORS 설정은 사설 네트워크 주소만 허용하므로, 이 구성은 VPN 또는 사내/LAN 환경을 전제로 한다.
+이 문서는 Ubuntu 등 Linux 서버 한 대에서 M.A.R.S 서버와 웹 UI를 Docker Compose로 실행하고, 여러 Worker가 같은 공유 디렉터리를 읽도록 구성하는 방법을 설명한다. 기본 개발 CORS는 localhost만 허용한다. LAN/VPN Origin은 `MARS_ALLOWED_ORIGINS`에 명시하며, 인터넷 공개 운영은 `production-deployment.md`의 HTTPS 구성을 적용한다.
 
 ## 1. 준비
 
@@ -16,7 +16,6 @@ git --version
 
 ```bash
 sudo ufw allow 5173/tcp
-sudo ufw allow 8000/tcp
 ```
 
 ## 2. 서버와 웹 UI 실행
@@ -34,7 +33,10 @@ openssl rand -hex 32
 ```
 
 ```dotenv
+MARS_ENV=development
 MARS_SECRET_KEY=<openssl로 생성한 값>
+MARS_ALLOWED_ORIGINS=http://192.0.2.10:5173
+MARS_ALLOWED_HOSTS=192.0.2.10,localhost,127.0.0.1
 MARS_SERVER_PORT=8000
 MARS_WEB_PORT=5173
 MARS_DEFAULT_MODEL=gemma3:4b
@@ -124,7 +126,7 @@ python -m agent register --server http://192.0.2.10:8000
 python -m agent run
 ```
 
-Worker는 서버로 연결을 여는 pull 방식이므로, Worker 쪽에서 8000 포트를 열 필요는 없다. Worker가 서버의 `8000/tcp`에 연결할 수 있고, 로컬 Ollama가 준비되어 있으면 된다.
+Worker는 서버로 연결을 여는 pull 방식이므로, Worker 쪽에서 8000 포트를 열 필요는 없다. LAN 개발 환경에서는 Worker가 서버의 `8000/tcp`에 연결할 수 있어야 한다. 운영에서는 8000을 공개하지 않고 `https://<운영 도메인>/api`를 사용한다.
 
 ## 6. 운영 점검
 

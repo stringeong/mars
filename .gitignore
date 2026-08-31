@@ -25,5 +25,8 @@ worker/shared/*
 # Local deployment work plan (not committed)
 DEPLOYMENT_PLAN.local.md
 
+# Local implementation status document (not committed)
+docs/current-implementation.md
+
 # Local deployment backups
 .local-backups/

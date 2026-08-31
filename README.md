@@ -14,6 +14,7 @@
 ## 빠른 시작
 
 Linux 서버에 Docker Compose로 배포하는 절차는 [Linux 서버 실행 가이드](docs/linux-server.md)를 참고하세요.
+인터넷에 공개하는 운영 배포는 [운영 HTTPS 배포 가이드](docs/production-deployment.md)를 함께 적용하세요.
 
 ### 1. 중앙 서버
 
@@ -40,7 +41,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
    `python -m agent register --server http://192.0.2.10:8000`
 3. 각 기기에서 `python -m agent run` 을 켜두면, 워크플로우의 병렬 단계가
    서로 다른 기기에 분배되어 동시에 실행됩니다.
-4. 같은 공유기(사설 IP 대역) 안에서만 동작하도록 CORS가 설정되어 있습니다.
+4. 개발 CORS는 localhost만 기본 허용합니다. 다른 Origin은 `MARS_ALLOWED_ORIGINS`에 명시합니다.
 
 ### 2. Worker Agent (작업을 실행할 기기마다)
 

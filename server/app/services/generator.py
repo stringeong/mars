@@ -5,11 +5,17 @@
 """
 
 import json
+import logging
 import re
 
 import httpx
 
 from ..config import DEFAULT_MODEL, OLLAMA_URL
+
+logger = logging.getLogger(__name__)
+
+# Stay within the 60-second reverse-proxy response window.
+OLLAMA_TIMEOUT = httpx.Timeout(25.0, connect=3.0)
 
 SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.
 사용자가 만들고 싶은 서비스 설명을 읽고, 이를 수행할 에이전트 구성과 실행 순서(DAG)를 설계하세요.
@@ -84,11 +90,35 @@ def _fallback_graph(prompt: str) -> dict:
     }
 
 
+def _agent_node(node: dict, index: int) -> dict:
+    """Return the canonical shape expected by the API and web editor."""
+    return {
+        "id": str(node.get("id") or f"agent{index}"),
+        "type": "agent",
+        "name": node.get("name") or f"에이전트 {index + 1}",
+        "role_prompt": node.get("role_prompt") or "",
+        "model": node.get("model") or "",
+        "worker_id": node.get("worker_id"),
+        "directory_ids": node.get("directory_ids") or [],
+        "uploaded_file_ids": node.get("uploaded_file_ids") or [],
+        **({"position": node["position"]} if node.get("position") is not None else {}),
+    }
+
+
+def _workflow_edge(edge: dict) -> dict:
+    """Return the canonical workflow-edge shape."""
+    return {
+        "source": str(edge["source"]),
+        "target": str(edge["target"]),
+        "relation": "workflow",
+    }
+
+
 async def _generate_once(prompt: str, temperature: float) -> dict:
     """LLM을 1회 호출해 그래프를 만들고 DAG 검증까지 통과시킨다. 실패 시 예외."""
     from . import dag
 
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as client:
         resp = await client.post(
             f"{OLLAMA_URL}/api/chat",
             json={
@@ -98,6 +128,7 @@ async def _generate_once(prompt: str, temperature: float) -> dict:
                     {"role": "user", "content": prompt},
                 ],
                 "stream": False,
+                "format": "json",
                 "options": {"temperature": temperature},
             },
         )
@@ -111,18 +142,9 @@ async def _generate_once(prompt: str, temperature: float) -> dict:
     graph = {
         "name": data.get("name") or "새 서비스",
         "description": data.get("description") or prompt,
-        "nodes": [
-            {
-                "id": str(n.get("id") or f"agent{i}"),
-                "name": n.get("name") or f"에이전트 {i + 1}",
-                "role_prompt": n.get("role_prompt") or "",
-                "model": "",
-                "allowed_folders": [],
-            }
-            for i, n in enumerate(nodes)
-        ],
+        "nodes": [_agent_node(n, i) for i, n in enumerate(nodes)],
         "edges": [
-            {"source": str(e["source"]), "target": str(e["target"])}
+            _workflow_edge(e)
             for e in (data.get("edges") or [])
             if e.get("source") and e.get("target")
         ],
@@ -139,19 +161,25 @@ async def generate_workflow(prompt: str) -> tuple[dict, str]:
     그래도 실패하면 규칙 기반 폴백으로 항상 유효한 그래프를 보장한다 —
     사용자에게 '생성 실패'를 돌려주는 일이 없도록 한다.
     """
-    for temperature in (0.3, 0.1):
+    for attempt, temperature in enumerate((0.3, 0.1), start=1):
         try:
             return await _generate_once(prompt, temperature), "llm"
+        except httpx.HTTPError as exc:
+            logger.warning("Ollama workflow generation unavailable: %s", exc)
+            break
+        except (KeyError, TypeError, ValueError) as exc:
+            logger.warning(
+                "Invalid Ollama workflow response (attempt %s): %s", attempt, exc
+            )
         except Exception:
-            continue
+            logger.exception("Unexpected workflow generation failure")
+            break
     fb = _fallback_graph(prompt)
     graph = {
         "name": fb["name"],
         "description": fb["description"],
-        "nodes": [
-            {**n, "model": "", "allowed_folders": []} for n in fb["nodes"]
-        ],
-        "edges": fb["edges"],
+        "nodes": [_agent_node(n, i) for i, n in enumerate(fb["nodes"])],
+        "edges": [_workflow_edge(edge) for edge in fb["edges"]],
     }
     return graph, "fallback"
 
@@ -189,7 +217,7 @@ async def revise_workflow(graph: dict, instruction: str) -> dict:
         ],
         "edges": graph.get("edges", []),
     }
-    async with httpx.AsyncClient(timeout=120) as client:
+    async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as client:
         resp = await client.post(
             f"{OLLAMA_URL}/api/chat",
             json={
@@ -205,6 +233,7 @@ async def revise_workflow(graph: dict, instruction: str) -> dict:
                     },
                 ],
                 "stream": False,
+                "format": "json",
                 "options": {"temperature": 0.2},
             },
         )
@@ -223,10 +252,13 @@ async def revise_workflow(graph: dict, instruction: str) -> dict:
         prev = old.get(nid, {})
         merged_nodes.append({
             "id": nid,
+            "type": "agent",
             "name": n.get("name") or prev.get("name") or f"에이전트 {i + 1}",
             "role_prompt": n.get("role_prompt") or prev.get("role_prompt") or "",
             "model": prev.get("model", ""),
-            "allowed_folders": prev.get("allowed_folders", []),
+            "worker_id": prev.get("worker_id"),
+            "directory_ids": prev.get("directory_ids", []),
+            "uploaded_file_ids": prev.get("uploaded_file_ids", []),
             "position": prev.get("position"),
         })
     return {
@@ -234,7 +266,7 @@ async def revise_workflow(graph: dict, instruction: str) -> dict:
         "description": data.get("description"),
         "nodes": merged_nodes,
         "edges": [
-            {"source": str(e["source"]), "target": str(e["target"])}
+            _workflow_edge(e)
             for e in (data.get("edges") or [])
             if e.get("source") and e.get("target")
         ],

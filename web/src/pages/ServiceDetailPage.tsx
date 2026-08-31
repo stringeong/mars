@@ -15,9 +15,11 @@ function asAgents(graph: Graph): AgentNode[] {
       .map((node) => [node.id, node.directory_id]),
   )
   return graph.nodes
-    .filter((node): node is AgentNode => node.type === 'agent')
+    // Legacy generated services omitted `type`; the server treats them as agents.
+    .filter((node): node is AgentNode => !node.type || node.type === 'agent')
     .map((agent) => ({
       ...agent,
+      type: 'agent',
       directory_ids: agent.directory_ids ?? graph.edges
         .filter((edge) => edge.relation === 'directory' && edge.target === agent.id)
         .map((edge) => legacyDirectories.get(edge.source))
@@ -74,7 +76,7 @@ export default function ServiceDetailPage() {
       position: agent.position ?? positions[agent.id],
       data: nodeData(agent),
     })))
-    setEdges(graphEdges.filter((edge) => edge.relation === 'workflow').map((edge) => ({
+    setEdges(graphEdges.filter((edge) => !edge.relation || edge.relation === 'workflow').map((edge) => ({
       ...edge,
       id: `${edge.source}-${edge.target}`,
       markerEnd: { type: MarkerType.ArrowClosed },
@@ -100,7 +102,7 @@ export default function ServiceDetailPage() {
         const positions = layout(loadedAgents)
         setAgents(Object.fromEntries(loadedAgents.map((agent) => [agent.id, agent])))
         setNodes(loadedAgents.map((agent) => ({ id: agent.id, type: 'agent', position: agent.position ?? positions[agent.id], data: {} })))
-        setEdges(loadedService.graph.edges.filter((edge) => edge.relation === 'workflow').map((edge) => ({ ...edge, id: `${edge.source}-${edge.target}`, markerEnd: { type: MarkerType.ArrowClosed } })))
+        setEdges(loadedService.graph.edges.filter((edge) => !edge.relation || edge.relation === 'workflow').map((edge) => ({ ...edge, id: `${edge.source}-${edge.target}`, markerEnd: { type: MarkerType.ArrowClosed } })))
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : '불러오기 실패')
       }

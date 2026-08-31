@@ -1,14 +1,18 @@
 """generator의 순수 함수 검증 — LLM 출력 파싱과 규칙 기반 폴백.
 
-HTTP 호출이 필요한 경로(generate_workflow 등)는 다루지 않는다.
+실제 Ollama HTTP 호출은 모킹하고, 파싱·폴백·재시도 정책을 검증한다.
 """
 
+import asyncio
 import json
+from unittest.mock import AsyncMock, patch
+
+import httpx
 
 import pytest
 
 from app.services import dag
-from app.services.generator import _extract_json, _fallback_graph
+from app.services.generator import _extract_json, _fallback_graph, generate_workflow
 
 
 class TestExtractJson:
@@ -50,3 +54,31 @@ class TestFallbackGraph:
     def test_fallback_name_truncates_long_prompt(self):
         graph = _fallback_graph("긴 프롬프트 " * 50)
         assert len(graph["name"]) <= 40 + len(" 서비스")
+
+
+class TestGenerateWorkflow:
+    def test_network_failure_falls_back_immediately_with_canonical_graph(self):
+        with patch(
+            "app.services.generator._generate_once",
+            new=AsyncMock(side_effect=httpx.ConnectError("Ollama unavailable")),
+        ) as generate:
+            graph, source = asyncio.run(
+                generate_workflow("문서를 분석해 보고서를 작성해줘")
+            )
+
+        assert source == "fallback"
+        assert generate.await_count == 1
+        assert all(node["type"] == "agent" for node in graph["nodes"])
+        assert all(edge["relation"] == "workflow" for edge in graph["edges"])
+        assert dag.validate_graph(graph) == ["collector", "analyzer", "writer"]
+
+    def test_invalid_model_output_is_retried_once(self):
+        with patch(
+            "app.services.generator._generate_once",
+            new=AsyncMock(side_effect=ValueError("invalid model JSON")),
+        ) as generate:
+            graph, source = asyncio.run(generate_workflow("여행 계획을 만들어줘"))
+
+        assert source == "fallback"
+        assert generate.await_count == 2
+        assert graph["nodes"][0]["type"] == "agent"
