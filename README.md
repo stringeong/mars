@@ -84,6 +84,23 @@ npm run dev
 - http://localhost:5173 접속 → 회원가입 → 로그인
 - 개발 서버는 기본적으로 `/api` 요청을 `http://localhost:8000`으로 프록시합니다. 필요한 경우 `VITE_API_URL`로 덮어쓸 수 있습니다.
 
+## Worker GUI 런처
+
+Linux에서는 프로젝트 루트에서 다음 명령으로 Tkinter GUI를 실행한다.
+
+```bash
+./launch-worker.sh
+```
+
+Windows에서는 Docker Desktop을 실행한 뒤 `mars_worker_launcher.py`를 직접 실행하거나 PowerShell에서 다음 빌드 스크립트로 단일 EXE를 만든다.
+
+```powershell
+py -m pip install -r requirements-launcher.txt
+.\build-windows-exe.ps1
+```
+
+생성된 `dist\MARS-Worker-Launcher.exe`를 `docker-compose.yml`, `docker-compose.nvidia.yml`과 같은 폴더에 둔다. 런처는 Server URL, Worker 이름과 계정, 공유 폴더, 자동/GPU/CPU 모드, Ollama 모델 다운로드, Worker 시작·중지, 로그, Docker Desktop 안내 및 Git 기반 업데이트 확인을 제공한다. NVIDIA GPU가 감지되면 GPU 구성을 우선 시도하고 Docker GPU 실행에 실패하면 CPU 모드로 자동 재시도한다. 비밀번호는 파일에 저장하지 않는다.
+
 ## 테스트
 
 서버와 워커는 pytest로 테스트한다. CI(GitHub Actions)에서 매 PR마다

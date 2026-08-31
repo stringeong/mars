@@ -23,6 +23,7 @@ def load() -> dict:
     else:
         config = dict(DEFAULTS)
     config["ollama_url"] = os.getenv("MARS_OLLAMA_URL", config["ollama_url"])
+    config["default_model"] = os.getenv("MARS_DEFAULT_MODEL", config["default_model"])
     return config
 
 
