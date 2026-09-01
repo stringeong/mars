@@ -49,7 +49,6 @@ class DeviceRegister(BaseModel):
 
     name: str = Field(min_length=1, max_length=128)
     specs: dict = Field(default_factory=dict)
-    #allowed_folders: list[str] = Field(default_factory=list)
 
 
 class DeviceOut(BaseModel):
@@ -57,7 +56,6 @@ class DeviceOut(BaseModel):
     name: str
     specs: dict
     resource_limits: ResourceLimits = Field(default_factory=ResourceLimits)
-    #allowed_folders: list
     last_heartbeat: UTCDateTime | None
     online: bool = False
 
@@ -71,7 +69,6 @@ class DeviceRegisterOut(DeviceOut):
 class DeviceUpdate(BaseModel):
     name: str | None = None
     resource_limits: ResourceLimits | None = None
-    #allowed_folders: list[str] | None = None
 
 
 #----------- SharedDirectory ----------
@@ -138,7 +135,6 @@ class AgentNode(BaseModel):
     worker_id: int | None = None
     directory_ids: list[int] = Field(default_factory=list)
     uploaded_file_ids: list[int] = Field(default_factory=list)
-    #allowed_folders: list[str] = Field(default_factory=list)
     position: dict | None = None
 
 

@@ -22,7 +22,7 @@ HTML = r'''<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name
 const $=s=>document.querySelector(s), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),api=async(p,o={})=>{let r=await fetch(p,{headers:{'Content-Type':'application/json'},...o}),d=await r.json();if(!r.ok)throw Error(d.error||'요청 실패');return d};let S={};
 document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button,.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.p).classList.add('active');if(b.dataset.p==='models')models();if(b.dataset.p==='tools')tools()});
 async function status(){try{S=await api('/api/status');$('#dot').className='dot '+(S.running?'on':'');$('#state').textContent=S.running?'실행 중':S.registered?'등록됨 · 중지':'등록 필요';$('#server').value=S.server_url||$('#server').value;$('#name').value=S.device_name||navigator.platform;$('#specs').textContent=Object.entries(S.specs).map(x=>x.join(': ')).join(' · ');$('#cpu').textContent=S.stats.cpu_percent+'%';$('#ram').textContent=S.stats.ram_percent+'%';$('#gpu').textContent=S.stats.gpu_percent==null?'감지 안 됨':S.stats.gpu_percent+'%';$('#gpuName').textContent=(S.stats.gpu_devices||[]).map(g=>g.name).join(', ')||'장치 없음';$('#logs').textContent=S.logs.join('\n')||'로그가 없습니다.';folders()}catch(e){$('#state').textContent='API 오류'}}
-function folders(){$('#folders').innerHTML=(S.allowed_folders||[]).map((x,i)=>`<div class="item"><span>${esc(x)}</span><button class="danger" onclick="removeFolder(${i})">삭제</button></div>`).join('')||'<p class="muted">등록된 디렉터리가 없습니다.</p>'}async function save(f){try{await api('/api/folders',{method:'POST',body:JSON.stringify({folders:f})});status()}catch(e){alert(e.message)}}window.removeFolder=i=>save(S.allowed_folders.filter((_,n)=>n!==i));$('#add').onclick=()=>{let v=$('#folder').value.trim();if(v)save([...(S.allowed_folders||[]),v]);$('#folder').value=''};
+function folders(){$('#folders').innerHTML=(S.shared_folders||[]).map((x,i)=>`<div class="item"><span>${esc(x)}</span><button class="danger" onclick="removeFolder(${i})">삭제</button></div>`).join('')||'<p class="muted">등록된 디렉터리가 없습니다.</p>'}async function save(f){try{await api('/api/folders',{method:'POST',body:JSON.stringify({folders:f})});status()}catch(e){alert(e.message)}}window.removeFolder=i=>save(S.shared_folders.filter((_,n)=>n!==i));$('#add').onclick=()=>{let v=$('#folder').value.trim();if(v)save([...(S.shared_folders||[]),v]);$('#folder').value=''};
 $('#register').onclick=async()=>{try{$('#setupMsg').textContent='등록 중…';await api('/api/register',{method:'POST',body:JSON.stringify({server_url:$('#server').value,username:$('#user').value,password:$('#pass').value,device_name:$('#name').value})});$('#pass').value='';$('#setupMsg').textContent='등록 완료';status()}catch(e){$('#setupMsg').textContent=e.message;$('#setupMsg').className='msg bad'}};
 async function models(){try{let d=await api('/api/models');$('#modelMsg').textContent='Ollama 연결됨';$('#ollamaInstall').innerHTML='';$('#modelList').innerHTML=(d.models||[]).map(m=>`<div class="item"><b>${esc(m.name)}</b><button class="danger" onclick="delModel('${esc(m.name)}')">삭제</button></div>`).join('')||'<p class="muted">설치된 모델 없음</p>'}catch(e){let i=await api('/api/ollama/install');$('#modelMsg').textContent='Ollama가 실행 중이 아닙니다.';$('#modelMsg').className='msg bad';$('#ollamaInstall').innerHTML=`<p>${esc(i.instructions)}</p><p><a href="${i.download_url}" target="_blank"><button>Ollama 공식 다운로드</button></a></p>`}}window.delModel=async n=>{if(confirm(n+' 삭제?')){await api('/api/models/delete',{method:'POST',body:JSON.stringify({name:n})});models()}};window.pullModel=async n=>{await api('/api/models/pull',{method:'POST',body:JSON.stringify({name:n})});jobs()};$('#refresh').onclick=models;$('#search').onclick=async()=>{try{$('#modelMsg').textContent='공식 라이브러리 검색 중…';let d=await api('/api/models/search?q='+encodeURIComponent($('#model').value));$('#searchList').innerHTML=d.models.map(m=>`<div class="item"><span><b>${esc(m.name)}</b> <small class="muted">${esc(m.performance)} ${esc(m.tags.join(' · '))}</small><br>${esc(m.description)}<br><a href="${m.url}" target="_blank" class="muted">상세 정보</a></span><button onclick="pullModel('${esc(m.name)}')">다운로드</button></div>`).join('')||'<p class="muted">검색 결과가 없습니다.</p>';$('#modelMsg').textContent=d.models.length+'개 모델'}catch(e){$('#modelMsg').textContent=e.message}};
 async function jobs(){let d=await api('/api/jobs');$('#jobs').innerHTML=d.jobs.map(j=>`<div class="item"><span><b>${esc(j.label)}</b><br><small class="${j.status==='failed'?'bad':'muted'}">${esc(j.error||j.message)} · ${j.percent||0}%</small><br><progress max="100" value="${j.percent||0}" style="width:280px;max-width:100%"></progress></span><b>${esc(j.status)}</b></div>`).join('')||'<p class="muted">다운로드 내역이 없습니다.</p>'}
@@ -35,6 +35,34 @@ def tool_states():
 def watch(p):
     for line in p.stdout: LOGS.append(line.rstrip())
 
+def start_worker_process():
+    global PROCESS
+    if PROCESS and PROCESS.poll() is None:
+        return False
+    PROCESS = subprocess.Popen(
+        [sys.executable, "-m", "agent", "run"],
+        cwd=str(Path(__file__).parents[1]),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    threading.Thread(target=watch, args=(PROCESS,), daemon=True).start()
+    return True
+
+def stop_worker_process():
+    global PROCESS
+    if not PROCESS or PROCESS.poll() is not None:
+        return False
+    PROCESS.terminate()
+    try:
+        PROCESS.wait(timeout=8)
+    except subprocess.TimeoutExpired:
+        PROCESS.kill()
+        PROCESS.wait(timeout=3)
+    PROCESS = None
+    return True
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*_): pass
     def reply(self,data,status=200):
@@ -45,7 +73,7 @@ class Handler(BaseHTTPRequestHandler):
             if self.path=="/":
                 b=HTML.encode();self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Content-Length",str(len(b)));self.send_header("Content-Security-Policy","default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'");self.end_headers();self.wfile.write(b);return
             c=cfg.load()
-            if self.path=="/api/status": self.reply({"registered":bool(c.get("api_key")),"running":bool(PROCESS and PROCESS.poll() is None),"server_url":c["server_url"],"device_name":c["device_name"],"allowed_folders":c.get("allowed_folders",[]),"specs":collect_specs(),"stats":collect_runtime_stats(),"logs":list(LOGS)});return
+            if self.path=="/api/status": self.reply({"registered":bool(c.get("api_key")),"running":bool(PROCESS and PROCESS.poll() is None),"server_url":c["server_url"],"device_name":c["device_name"],"shared_folders":c.get("shared_folders",[]),"specs":collect_specs(),"stats":collect_runtime_stats(),"logs":list(LOGS)});return
             if self.path=="/api/models": r=httpx.get(c["ollama_url"].rstrip('/')+'/api/tags',timeout=5);r.raise_for_status();self.reply(r.json());return
             if self.path=="/api/ollama/install": self.reply(ollama_install_info());return
             if self.path=="/api/jobs": self.reply({"jobs":get_jobs()});return
@@ -62,22 +90,55 @@ class Handler(BaseHTTPRequestHandler):
         try:
             d=self.body();c=cfg.load()
             if self.path=="/api/register":
-                server=str(d.get("server_url","")).rstrip('/');user=str(d.get("username","")).strip();password=str(d.get("password","")).strip()
-                if not all((server,user,password)):raise ValueError("서버 주소, 아이디, 비밀번호를 입력하세요.")
-                r=httpx.post(server+'/auth/login',data={"username":user,"password":password},timeout=15);r.raise_for_status();name=str(d.get("device_name","")).strip() or platform.node() or "내 기기";r=httpx.post(server+'/devices',json={"name":name,"specs":collect_specs()},headers={"Authorization":'Bearer '+r.json()["access_token"]},timeout=15);r.raise_for_status();x=r.json();c.update(server_url=server,device_id=x["id"],device_name=x["name"],api_key=x["api_key"]);cfg.save(c);LOGS.append('기기 등록 완료: '+x["name"]);self.reply({"ok":True});return
+                server = str(d.get("server_url", "")).rstrip("/")
+                user = str(d.get("username", "")).strip()
+                password = str(d.get("password", "")).strip()
+                if not all((server, user, password)):
+                    raise ValueError("서버 주소, 아이디, 비밀번호를 입력하세요.")
+                login = httpx.post(
+                    server + "/auth/login",
+                    data={"username": user, "password": password},
+                    timeout=15,
+                )
+                login.raise_for_status()
+                name = str(d.get("device_name", "")).strip() or platform.node() or "내 기기"
+                registration = httpx.post(
+                    server + "/devices",
+                    json={"name": name, "specs": collect_specs()},
+                    headers={"Authorization": "Bearer " + login.json()["access_token"]},
+                    timeout=15,
+                )
+                registration.raise_for_status()
+                registered = registration.json()
+                was_running = bool(PROCESS and PROCESS.poll() is None)
+                if was_running:
+                    stop_worker_process()
+                c.update(
+                    server_url=server,
+                    device_id=registered["id"],
+                    device_name=registered["name"],
+                    api_key=registered["api_key"],
+                )
+                cfg.save(c)
+                if was_running:
+                    start_worker_process()
+                    LOGS.append("새 인증 키로 Worker 재시작")
+                LOGS.append("기기 등록 완료: " + registered["name"])
+                self.reply({"ok": True})
+                return
             if self.path=="/api/folders":
                 folders=[]
                 for raw in d.get("folders",[]):
                     p=Path(raw).expanduser().resolve()
                     if not p.is_dir():raise ValueError('존재하지 않는 디렉터리: '+str(raw))
                     if str(p) not in folders:folders.append(str(p))
-                c["allowed_folders"]=folders;cfg.save(c);self.reply({"folders":folders});return
+                c["shared_folders"]=folders;cfg.save(c);self.reply({"folders":folders});return
             if self.path=="/api/worker/start":
                 if not c.get("api_key"):raise ValueError("먼저 Worker를 등록하세요.")
-                if not PROCESS or PROCESS.poll() is not None:PROCESS=subprocess.Popen([sys.executable,'-m','agent','run'],cwd=str(Path(__file__).parents[1]),stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1);threading.Thread(target=watch,args=(PROCESS,),daemon=True).start()
+                start_worker_process()
                 self.reply({"ok":True});return
             if self.path=="/api/worker/stop":
-                if PROCESS and PROCESS.poll() is None:PROCESS.terminate();PROCESS.wait(timeout=8);LOGS.append('Worker 중지')
+                if stop_worker_process(): LOGS.append("Worker 중지")
                 self.reply({"ok":True});return
             if self.path in {"/api/models/pull","/api/models/delete"}:
                 name=str(d.get("name","")).strip()

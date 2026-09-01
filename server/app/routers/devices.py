@@ -3,7 +3,9 @@
 기기 등록은 Worker CLI가 사용자 로그인 토큰으로 호출한다.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import secrets
+
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from .. import models, schemas
@@ -47,16 +49,23 @@ def _directory_out(directory: models.SharedDirectory, local_path: str) -> dict:
 @router.post("", response_model=schemas.DeviceRegisterOut, status_code=201)
 def register_device(
     body: schemas.DeviceRegister,
+    response: Response,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    dup = (
+    existing = (
         db.query(models.Device)
         .filter(models.Device.user_id == user.id, models.Device.name == body.name)
         .first()
     )
-    if dup:
-        raise HTTPException(409, "같은 이름의 기기가 이미 등록되어 있습니다.")  # e601
+    if existing:
+        # Reconnect the logical Worker so assignments and mounts keep their device ID.
+        existing.specs = {**(existing.specs or {}), **body.specs}
+        existing.api_key = secrets.token_hex(24)
+        db.commit()
+        db.refresh(existing)
+        response.status_code = status.HTTP_200_OK
+        return _to_out(existing, with_key=True)
     device = models.Device(
         user_id=user.id,
         name=body.name,

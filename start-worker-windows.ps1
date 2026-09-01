@@ -107,7 +107,7 @@ function Invoke-Compose {
     $Arguments = @("compose") + (Get-ComposeFiles $SelectedMode) + @("--profile", "worker-ui") + $ComposeArguments
     if (-not $Quiet) {
         Write-Mars ("docker " + ($Arguments -join " "))
-        & docker @Arguments 2>&1 | Out-Host
+        & docker @Arguments
     } else {
         & docker @Arguments *> $null
     }

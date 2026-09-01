@@ -55,7 +55,7 @@ def next_task(
         response.status_code = 204
         return None
     execution = db.get(models.Execution, task.execution_id)
-    directory_ids = directory_access.task_directory_ids(task.allowed_folders)
+    directory_ids = task.directory_ids or []
     directory_paths = directory_access.local_paths_for_device(
         db, device.id, directory_ids
     )
@@ -89,7 +89,7 @@ def next_task(
         agent_name=task.agent_name,
         role_prompt=task.role_prompt,
         model=task.model or "",
-        directory_paths=directory_paths if directory_ids else task.allowed_folders or [],
+        directory_paths=directory_paths,
         uploaded_files=[
             {"id": uploaded.id, "original_name": uploaded.original_name}
             for uploaded in uploaded_files

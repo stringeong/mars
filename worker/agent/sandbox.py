@@ -62,19 +62,19 @@ def _normalize(folders: list[str]) -> list[Path]:
     return result
 
 
-def is_allowed(path: str | Path, allowed_folders: list[str]) -> bool:
+def is_allowed(path: str | Path, permitted_roots: list[str]) -> bool:
     try:
         target = Path(path).expanduser().resolve()
     except OSError:
         return False
-    for base in _normalize(allowed_folders):
+    for base in _normalize(permitted_roots):
         if target == base or base in target.parents:
             return True
     return False
 
 
-def read_file(path: str, allowed_folders: list[str]) -> str:
-    if not is_allowed(path, allowed_folders):
+def read_file(path: str, permitted_roots: list[str]) -> str:
+    if not is_allowed(path, permitted_roots):
         raise SandboxError(f"허용된 폴더 밖의 경로입니다: {path}")
     p = Path(path).expanduser().resolve()
     if not p.is_file():
@@ -174,7 +174,7 @@ SKIP_DIRS = {
 MAX_DIRS_VISITED = 2_000  # 순회할 디렉터리 수 상한 (안전장치)
 
 
-def list_files(allowed_folders: list[str], max_entries: int = 200) -> list[str]:
+def list_files(permitted_roots: list[str], max_entries: int = 200) -> list[str]:
     """허용 폴더 내 텍스트 파일 목록 (에이전트 컨텍스트 제공용).
 
     rglob 전체 순회 대신 디렉터리 단위로 돌면서 상한에 도달하면 즉시 멈춘다 —
@@ -182,7 +182,7 @@ def list_files(allowed_folders: list[str], max_entries: int = 200) -> list[str]:
     """
     entries: list[str] = []
     visited = 0
-    for base in _normalize(allowed_folders):
+    for base in _normalize(permitted_roots):
         if not base.is_dir():
             continue
         stack = [base]

@@ -48,15 +48,6 @@ def local_paths_for_device(
     return result
 
 
-def task_directory_ids(accesses: list) -> list[int]:
-    """Read directory IDs from new task records while accepting legacy paths."""
-    return [
-        access["directory_id"]
-        for access in accesses or []
-        if isinstance(access, dict) and isinstance(access.get("directory_id"), int)
-    ]
-
-
 def _agent_nodes(graph: dict) -> list[dict]:
     return [
         node for node in graph.get("nodes", [])

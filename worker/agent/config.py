@@ -11,7 +11,7 @@ DEFAULTS = {
     "device_id": None,
     "device_name": "",
     "api_key": "",
-    "allowed_folders": [],
+    "shared_folders": [],
     "ollama_url": "http://localhost:11434",
     "default_model": "qwen3:4b",
     "poll_interval_sec": 3,

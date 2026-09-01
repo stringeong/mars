@@ -78,7 +78,7 @@ def test_shared_directory_task_can_be_claimed_by_any_user_device(
 
     orchestrator.create_tasks_for_execution(db, execution)
     task = execution.tasks[0]
-    assert task.allowed_folders == [{"directory_id": directory.id}]
+    assert task.directory_ids == [directory.id]
 
     claimed = orchestrator.claim_next_task(db, worker)
     assert claimed is not None

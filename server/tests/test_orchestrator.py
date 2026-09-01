@@ -42,7 +42,7 @@ class TestCreateTasks:
         assert task.agent_name == "에이전트 a"
         assert task.role_prompt == "a 역할"
         assert task.model == "gemma3:4b"
-        assert task.allowed_folders == []
+        assert task.directory_ids == []
 
 
 class TestDeviceOnline:

@@ -14,8 +14,8 @@ PREVIEW_CHARS = 500  # 파일 선별 시 LLM에게 보여줄 미리보기 길이
 
 
 def _directory_paths(task: dict) -> list[str]:
-    """Read the current protocol field while accepting legacy payloads."""
-    return task.get("directory_paths") or task.get("allowed_folders") or []
+    """Return server-resolved paths permitted for this task."""
+    return task.get("directory_paths") or []
 
 
 def _uploaded_file_paths(task: dict) -> list[str]:

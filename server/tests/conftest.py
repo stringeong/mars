@@ -60,7 +60,7 @@ def make_directory(db):
 
 @pytest.fixture()
 def make_device(db):
-    def _make(user, name="기기", last_heartbeat=None, allowed_folders=None):
+    def _make(user, name="기기", last_heartbeat=None):
         device = models.Device(
             user_id=user.id,
             name=name,
@@ -98,7 +98,7 @@ def node(node_id, **extra):
         "name": f"에이전트 {node_id}",
         "role_prompt": f"{node_id} 역할",
         "model": "",
-        "allowed_folders": [],
+        "directory_ids": [],
         **extra,
     }
 

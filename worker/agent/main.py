@@ -129,7 +129,7 @@ def cmd_register(args: argparse.Namespace) -> None:
         headers={"Authorization": f"Bearer {token}"},
         timeout=15,
     )
-    if resp.status_code != 201:
+    if resp.status_code not in {200, 201}:
         print(f"기기 등록 실패: {resp.json().get('detail', resp.text)}")  # e601/e701
         sys.exit(1)
     data = resp.json()

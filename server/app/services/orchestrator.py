@@ -38,9 +38,8 @@ def create_tasks_for_execution(db: Session, execution: models.Execution) -> None
             agent_name=node.get("name", node["id"]),
             role_prompt=node.get("role_prompt", ""),
             model=node.get("model", ""),
-            allowed_folders=[
-                {"directory_id": directory.id}
-                for directory in directories_by_agent[node["id"]]
+            directory_ids=[
+                directory.id for directory in directories_by_agent[node["id"]]
             ],
             status=status,
             input_context="",
@@ -106,7 +105,7 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
         db.query(
             models.TaskRecord.id,
             models.TaskRecord.node_id,
-            models.TaskRecord.allowed_folders,
+            models.TaskRecord.directory_ids,
             models.Execution.graph_snapshot,
         )
         .join(models.Execution, models.TaskRecord.execution_id == models.Execution.id)
@@ -120,13 +119,12 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
         .all()
     )
     candidate_ids = []
-    for task_id, node_id, accesses, graph_snapshot in candidate_rows:
+    for task_id, node_id, directory_ids, graph_snapshot in candidate_rows:
         required_device = directory_access.required_device_by_agent(
             graph_snapshot or {}
         ).get(node_id)
-        directory_ids = directory_access.task_directory_ids(accesses)
         local_paths = directory_access.local_paths_for_device(
-            db, device.id, directory_ids
+            db, device.id, directory_ids or []
         )
         if (
             (required_device is None or required_device == device.id)

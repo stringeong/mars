@@ -51,8 +51,6 @@ class Device(Base):
     name: Mapped[str] = mapped_column(String(128))
     # Worker가 자동 수집한 사양 (os, cpu, ram_gb, hostname ...)
     specs: Mapped[dict] = mapped_column(JSON, default=dict)
-    # 이 기기에서 에이전트가 접근을 허용받은 폴더 목록 (절대경로)
-    #allowed_folders: Mapped[list] = mapped_column(JSON, default=list)
     # Worker Agent 인증용 키
     api_key: Mapped[str] = mapped_column(String(64), default=lambda: secrets.token_hex(24), unique=True)
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -193,7 +191,7 @@ class Service(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     name: Mapped[str] = mapped_column(String(255))
     description: Mapped[str] = mapped_column(Text, default="")
-    # {"nodes": [{"id","name","role_prompt","model","allowed_folders",...}],
+    # {"nodes": [{"id","name","role_prompt","model","directory_ids",...}],
     #  "edges": [{"source","target"}]}
     graph: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
@@ -236,7 +234,7 @@ class TaskRecord(Base):
     agent_name: Mapped[str] = mapped_column(String(128))
     role_prompt: Mapped[str] = mapped_column(Text, default="")
     model: Mapped[str] = mapped_column(String(64), default="")
-    allowed_folders: Mapped[list] = mapped_column(JSON, default=list)
+    directory_ids: Mapped[list] = mapped_column(JSON, default=list)
     # blocked(선행 대기) -> ready(할당 대기) -> running -> done | failed
     status: Mapped[str] = mapped_column(String(16), default="blocked", index=True)
     assigned_device_id: Mapped[int | None] = mapped_column(ForeignKey("devices.id"), nullable=True)
