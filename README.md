@@ -80,6 +80,31 @@ Docker 기반 Worker UI와 Ollama를 함께 실행하면 OCR, Office, Git Tool�
 ./start-worker.sh stop
 ```
 
+#### Windows에서 실행
+
+Docker Desktop을 설치하고 Linux containers 모드로 둔 뒤, 탐색기에서
+`start-worker.cmd`를 더블클릭하면 된다. Docker Desktop이 꺼져 있으면 자동으로 시작하며,
+GPU를 감지해 NVIDIA는 Docker GPU, AMD는 Windows에서 실행 중인 Ollama를 사용한다.
+사용 가능한 GPU 실행 방식이 없거나 시작에 실패하면 CPU로 자동 전환한다.
+
+명령 프롬프트에서 실행 모드를 직접 지정할 수도 있다.
+
+```bat
+start-worker.cmd detect    rem 자동 감지 결과 확인
+start-worker.cmd auto      rem GPU 자동 감지, 실패 시 CPU (기본값)
+start-worker.cmd cpu       rem CPU 강제
+start-worker.cmd nvidia    rem NVIDIA GPU 강제
+start-worker.cmd native    rem Windows Ollama 강제 (AMD 권장)
+start-worker.cmd status    rem 컨테이너 상태 확인
+start-worker.cmd stop      rem Worker UI와 Ollama 중지
+```
+
+- NVIDIA: 최신 Windows NVIDIA 드라이버와 Docker Desktop WSL 2 백엔드가 필요하다.
+- AMD: [Windows용 Ollama](https://ollama.com/download/windows)를 설치하고 먼저 실행한 뒤
+  `start-worker.cmd native` 또는 `start-worker.cmd auto`를 사용한다.
+- 실행 후 Worker UI는 http://127.0.0.1:8765 에서 열린다.
+- 스크립트 종료 시 창을 자동으로 닫아야 한다면 `set MARS_NO_PAUSE=1`을 먼저 실행한다.
+
 - 스캔 PDF OCR을 사용하려면 Tesseract가 필요합니다. Ubuntu/Debian은 `sudo apt install tesseract-ocr tesseract-ocr-kor`, macOS는 `brew install tesseract tesseract-lang`으로 설치합니다. Docker Worker 이미지에는 자동 설치됩니다.
 - 등록 정보는 `worker/agent_config.json` 에 저장됩니다.
 - 워크플로우에 연결한 공유 디렉터리만 Worker의 파일 접근 허용 목록에 들어갑니다.
