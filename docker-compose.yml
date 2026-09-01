@@ -57,6 +57,8 @@ services:
     volumes:
       - worker-config:/data
       - ${MARS_WORKER_SHARED_DIR:-./worker/shared}:/shared
+    devices:
+      - /dev/dri:/dev/dri
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -74,11 +76,12 @@ services:
       PYTHONUNBUFFERED: "1"
       MARS_CONFIG_PATH: /data/agent_config.json
       MARS_OLLAMA_URL: http://ollama:11434
-      MARS_DEFAULT_MODEL: ${MARS_WORKER_MODEL:-qwen3:4b}
       MARS_ALLOW_CONTAINER_BIND: "1"
     volumes:
       - worker-config:/data
       - ${MARS_WORKER_SHARED_DIR:-./worker/shared}:/shared
+    devices:
+      - /dev/dri:/dev/dri
     ports:
       - "127.0.0.1:${MARS_WORKER_UI_PORT:-8765}:8765"
     depends_on:

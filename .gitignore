@@ -6,9 +6,7 @@ venv/
 *.db-shm
 *.db-wal
 node_modules/
-build/
 dist/
-MARS-Worker-Launcher.spec
 .env
 worker/agent_config.json
 uploads/
@@ -29,9 +27,6 @@ DEPLOYMENT_PLAN.local.md
 
 # Local implementation status document (not committed)
 docs/current-implementation.md
-
-# Local launcher preferences (credentials are never stored)
-.mars-launcher.json
 
 # Local deployment backups
 .local-backups/

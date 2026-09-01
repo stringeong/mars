@@ -1,2 +1,0 @@
-# Windows EXE packaging only. Tkinter is bundled with the standard Windows Python installer.
-pyinstaller>=6.0,<7.0
