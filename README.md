@@ -65,7 +65,19 @@ Docker 기반 Worker UI와 Ollama를 함께 실행하면 OCR, Office, Git Tool�
 호스트 관리자 권한 없이 사용할 수 있습니다.
 
 ```bash
-docker compose --profile worker-ui up --build -d worker-ui
+./start-worker.sh
+```
+
+`start-worker.sh`는 기본적으로 GPU를 자동 감지한다. Windows/Linux NVIDIA는 Docker GPU 연결, Linux AMD는 ROCm과 `/dev/kfd`·`/dev/dri`, Windows AMD는 호스트에서 실행 중인 네이티브 Ollama를 사용한다. 선택한 GPU 구성이 실패하면 CPU 모드로 자동 재시도한다. 기본 `docker-compose.yml`에는 필수 GPU 장치가 없어 GPU가 없는 환경에서도 실행된다.
+
+```bash
+./start-worker.sh auto     # GPU 자동 감지, 실패 시 CPU
+./start-worker.sh cpu      # CPU 강제
+./start-worker.sh nvidia   # NVIDIA 강제
+./start-worker.sh amd      # Linux AMD ROCm 강제
+./start-worker.sh native   # Windows 네이티브 Ollama 강제
+./start-worker.sh detect   # 감지 결과만 확인
+./start-worker.sh stop
 ```
 
 - 스캔 PDF OCR을 사용하려면 Tesseract가 필요합니다. Ubuntu/Debian은 `sudo apt install tesseract-ocr tesseract-ocr-kor`, macOS는 `brew install tesseract tesseract-lang`으로 설치합니다. Docker Worker 이미지에는 자동 설치됩니다.

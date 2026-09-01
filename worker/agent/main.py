@@ -7,6 +7,7 @@
 
 import argparse
 import getpass
+import os
 import platform
 import re
 import shutil
@@ -26,8 +27,10 @@ from . import sandbox
 
 def collect_specs() -> dict:
     """기기 정보 자동 수집 (UC-103 F1-303)."""
+    gpu_mode = os.getenv("MARS_GPU_MODE", "cpu")
     return {
         "hostname": platform.node(),
+        "gpu_mode": gpu_mode,
         "os": f"{platform.system()} {platform.release()}",
         "cpu": platform.processor() or platform.machine(),
         "cpu_count": psutil.cpu_count(logical=True),
@@ -85,6 +88,13 @@ def collect_runtime_stats() -> dict:
             stats["gpu_percent"] = max(values)
             stats["gpu_source"] = "drm"
     stats["gpu_devices"] = collect_gpu_devices()
+    stats["gpu_mode"] = os.getenv("MARS_GPU_MODE", "cpu")
+    if not stats["gpu_devices"] and stats["gpu_mode"] != "cpu":
+        stats["gpu_devices"] = [{
+            "vendor": stats["gpu_mode"],
+            "name": f"Ollama GPU ({stats['gpu_mode']})",
+            "id": stats["gpu_mode"],
+        }]
     return stats
 
 

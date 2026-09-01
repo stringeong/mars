@@ -1,0 +1,10 @@
+services:
+  worker-ui:
+    environment:
+      MARS_GPU_MODE: amd-rocm
+
+  ollama:
+    image: ollama/ollama:rocm
+    devices:
+      - /dev/kfd:/dev/kfd
+      - /dev/dri:/dev/dri

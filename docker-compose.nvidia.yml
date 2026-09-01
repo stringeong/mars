@@ -1,0 +1,7 @@
+services:
+  worker-ui:
+    environment:
+      MARS_GPU_MODE: nvidia
+
+  ollama:
+    gpus: all

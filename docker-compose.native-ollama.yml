@@ -1,0 +1,6 @@
+services:
+  worker-ui:
+    environment:
+      MARS_OLLAMA_URL: http://host.docker.internal:11434
+      MARS_GPU_MODE: native-windows
+    depends_on: !reset []
