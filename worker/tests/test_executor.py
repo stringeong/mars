@@ -76,7 +76,7 @@ def folder(tmp_path):
 
 class TestSelectRelevantFiles:
     def _task(self, folder):
-        return {"role_prompt": "이력서를 다듬어라", "allowed_folders": [str(folder)]}
+        return {"role_prompt": "이력서를 다듬어라", "directory_paths": [str(folder)]}
 
     def test_single_file_skips_llm(self, folder, monkeypatch):
         def boom(*a, **kw):
@@ -141,12 +141,12 @@ class TestBuildMessages:
         for i in range(n_files):
             (folder / f"f{i}.txt").write_text(f"파일 {i} 내용")
 
-        task = {"role_prompt": "역할", "allowed_folders": [str(folder)]}
+        task = {"role_prompt": "역할", "directory_paths": [str(folder)]}
         messages = executor._build_messages(task, CONFIG)
         user = messages[1]["content"]
 
-        assert "[이 작업에 사용할 로컬 파일 목록]" in user
-        assert user.count("- " + str(folder)) == n_files  # 목록에는 전부
+        assert "[이 작업에 사용할 파일 목록]" in user
+        assert user.count("- " + str(folder)) == executor.FILE_CONTEXT_LIMIT  # 목록도 선택 상한 적용
         assert user.count("### ") == executor.FILE_CONTEXT_LIMIT  # 발췌는 상한까지만
 
     def test_file_content_truncated_to_4000_chars(self, folder, monkeypatch):
@@ -154,12 +154,12 @@ class TestBuildMessages:
             executor, "_select_relevant_files", lambda task, files, config: files
         )
         (folder / "big.txt").write_text("가" * 5000)
-        task = {"role_prompt": "역할", "allowed_folders": [str(folder)]}
+        task = {"role_prompt": "역할", "directory_paths": [str(folder)]}
         user = executor._build_messages(task, CONFIG)[1]["content"]
         assert "가" * 4000 in user
         assert "가" * 4001 not in user
 
     def test_empty_folder_adds_no_file_sections(self, folder):
-        task = {"role_prompt": "역할", "allowed_folders": [str(folder)]}
+        task = {"role_prompt": "역할", "directory_paths": [str(folder)]}
         user = executor._build_messages(task, CONFIG)[1]["content"]
         assert "로컬 파일" not in user

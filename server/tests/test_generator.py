@@ -110,13 +110,13 @@ class TestGenerateWorkflow:
         assert len(calls) == 1
         assert calls[0]["options"]["temperature"] == 0.3
         assert calls[0]["messages"][1]["content"] == "문서 요약"
-        # id 없는 노드에 agent{i} 부여, model/allowed_folders 필드 보강
+        # id 없는 노드에 agent{i} 부여, model/directory_ids 필드 보강
         assert [n["id"] for n in graph["nodes"]] == ["reader", "agent1"]
         for n in graph["nodes"]:
             assert n["model"] == ""
-            assert n["allowed_folders"] == []
+            assert n["directory_ids"] == []
         # source가 빈 간선은 제거된다
-        assert graph["edges"] == [{"source": "reader", "target": "agent1"}]
+        assert graph["edges"] == [{"source": "reader", "target": "agent1", "relation": "workflow"}]
 
     def test_cyclic_reply_retries_then_falls_back(self, fake_ollama):
         calls, replies = fake_ollama
@@ -129,7 +129,7 @@ class TestGenerateWorkflow:
         assert [c["options"]["temperature"] for c in calls] == [0.3, 0.1]
         assert dag.validate_graph(graph)  # 폴백은 항상 유효한 DAG
         for n in graph["nodes"]:
-            assert "model" in n and "allowed_folders" in n
+            assert "model" in n and "directory_ids" in n
 
     def test_garbage_reply_falls_back(self, fake_ollama):
         calls, replies = fake_ollama
@@ -165,7 +165,7 @@ CURRENT_GRAPH = {
     "nodes": [
         {
             "id": "agent1", "name": "수집", "role_prompt": "수집하라",
-            "model": "gemma3:4b", "allowed_folders": ["/docs"],
+            "model": "gemma3:4b", "directory_ids": [1],
             "position": {"x": 10, "y": 20},
         },
     ],
@@ -191,10 +191,10 @@ class TestReviseWorkflow:
         kept = revised["nodes"][0]
         assert kept["role_prompt"] == "더 꼼꼼히 수집하라"  # 지시 반영
         assert kept["model"] == "gemma3:4b"
-        assert kept["allowed_folders"] == ["/docs"]
+        assert kept["directory_ids"] == [1]
         assert kept["position"] == {"x": 10, "y": 20}
         new = revised["nodes"][1]
-        assert new["model"] == "" and new["allowed_folders"] == []
+        assert new["model"] == "" and new["directory_ids"] == []
         assert revised["edges"] == [{"source": "agent1", "target": "agent2"}]
 
     def test_empty_role_prompt_falls_back_to_previous(self, fake_ollama):
