@@ -98,7 +98,7 @@ src/
 | Agent 범위 — Selected Workflows | +1 |
 | Agent 범위 — All Workflows | +0 |
 
-합산 3~4점 → **High**, 1~2점 → **Medium**, 0점 → **Low**
+합산 3-4점 → High, 1-2점 → Medium, 0점 → Low
 
 새로 등록한 기기의 CPU/RAM 사용량은 0%가 아니라 낮은 유휴(idle) baseline 값으로 시작합니다 — 실제
 컴퓨터는 완전히 아무것도 안 해도 OS 백그라운드 프로세스 때문에 항상 소량의 리소스를 사용하기 때문입니다.
