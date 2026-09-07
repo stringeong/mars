@@ -125,14 +125,15 @@ npm run dev
 
 서버와 워커는 pytest로 테스트한다. CI(GitHub Actions)에서 매 PR마다
 서버/워커 테스트와 웹 타입체크·빌드가 실행된다.
+각 스위트가 구체적으로 무엇을 검증하는지는 [docs/테스트_가이드.md](docs/테스트_가이드.md) 참고.
 
 ```bash
-# 서버 (DAG 검증, 오케스트레이터, 생성기 파싱)
+# 서버 (DAG 검증, 오케스트레이터, 생성기, 인증/JWT, API 통합)
 cd server
 pip install -r requirements-dev.txt
 pytest
 
-# 워커 (폴더 화이트리스트 sandbox)
+# 워커 (폴더 화이트리스트 sandbox, 실행기)
 cd worker
 pip install -r requirements-dev.txt
 pytest

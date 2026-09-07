@@ -31,3 +31,7 @@ docs/current-implementation.md
 
 # Local deployment backups
 .local-backups/
+
+# Python test coverage
+.coverage
+htmlcov/
