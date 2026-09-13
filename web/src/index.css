@@ -1,0 +1,76 @@
+@import '@xyflow/react/dist/style.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-surface text-ink-900 antialiased;
+  font-feature-settings: 'tnum' 1;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #d7daf3;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* React Flow theme overrides to match M.A.R.S canvas */
+.react-flow__attribution {
+  display: none;
+}
+.react-flow__controls {
+  box-shadow: 0 1px 2px rgba(15, 18, 38, 0.04), 0 8px 24px rgba(15, 18, 38, 0.06);
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #e5e7fd;
+}
+.react-flow__controls button {
+  background: #fff;
+  border-bottom: 1px solid #eef1fb;
+}
+.react-flow__controls button:hover {
+  background: #f1f2fe;
+}
+.react-flow__edge-path {
+  stroke: #b7bcec;
+  stroke-width: 1.75;
+}
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:hover .react-flow__edge-path {
+  stroke: #6366f1;
+}
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  background: #6366f1;
+  border: 2px solid #fff;
+}
+.react-flow__node {
+  cursor: grab;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
