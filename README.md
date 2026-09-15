@@ -67,6 +67,23 @@ npm run dev
 - http://localhost:5173 접속 → 회원가입 → 로그인
 - 서버 주소는 `web/.env` 의 `VITE_API_URL` (기본 `http://localhost:8000`).
 
+## 테스트
+
+서버와 워커는 pytest로 테스트한다. CI(GitHub Actions)에서 매 PR마다
+서버/워커 테스트와 웹 타입체크·빌드가 실행된다.
+
+```bash
+# 서버 (DAG 검증, 오케스트레이터, 생성기 파싱)
+cd server
+pip install -r requirements-dev.txt
+pytest
+
+# 워커 (폴더 화이트리스트 sandbox)
+cd worker
+pip install -r requirements-dev.txt
+pytest
+```
+
 ## 핵심 흐름 (요구사항 추적)
 
 1. 회원가입/로그인 (UC-101, UC-102) — JWT 인증
