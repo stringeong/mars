@@ -61,7 +61,7 @@ python -m agent run
 http://127.0.0.1:8765 를 여세요. Setup, Models, Tools, Status 화면에서 등록,
 Ollama 모델 관리, 승인된 Tool 설치, 공유 디렉터리 및 Worker 실행 상태를 관리할 수 있습니다.
 
-Docker 기반 Worker UI와 Ollama를 함께 실행하면 OCR, Office, Git Tool이 이미지에 포함되므로
+Docker 기반 Worker UI와 Ollama를 함께 실행하면 OCR과 Office Tool이 이미지에 포함되므로
 호스트 관리자 권한 없이 사용할 수 있습니다.
 
 ```bash
