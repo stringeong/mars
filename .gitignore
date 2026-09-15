@@ -32,6 +32,9 @@ docs/current-implementation.md
 # Local deployment backups
 .local-backups/
 
+# Codex-generated artifacts
+.codex-artifacts/
+
 # Python test coverage
 .coverage
 htmlcov/
