@@ -6,7 +6,8 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..security import get_current_user
-from ..services import dag, orchestrator, directory_access
+from ..services import dag, orchestrator, directory_access, transfers
+from ..services.cloud_executor import process_ready_cloud_tasks
 
 router = APIRouter(tags=["executions"])
 
@@ -32,6 +33,21 @@ def _validate_uploaded_files(db: Session, user_id: int, graph: dict) -> None:
     }
     if owned_ids != file_ids:
         raise HTTPException(422, "A selected uploaded file is unavailable.")
+
+
+@router.post("/services/{service_id}/executions/preview")
+def preview_execution(
+    service_id: int,
+    body: schemas.ExecutionPreview,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = db.get(models.Service, service_id)
+    if service is None or service.user_id != user.id:
+        raise HTTPException(404, "서비스를 찾을 수 없습니다.")
+    items = transfers.describe_transfers(service.graph)
+    token = transfers.issue_consent(db, user.id, service.id, service.graph, body.run_prompt, items) if items else None
+    return {"requires_consent": bool(items), "consent_token": token, "transfers": items}
 
 
 @router.post(
@@ -61,8 +77,12 @@ def start_execution(
 
     # F2-403: 실행 전 사용 가능한 기기 확인
     _validate_uploaded_files(db, user.id, service.graph)
+    transfer_items = transfers.describe_transfers(service.graph)
+    if transfer_items and not transfers.consume_consent(db, body.consent_token, user.id, service.id, service.graph, body.run_prompt):
+        raise HTTPException(428, "외부 전송 내용을 확인하고 동의해 주세요.")
     devices = db.query(models.Device).filter(models.Device.user_id == user.id).all()
-    if not any(orchestrator.device_is_online(d) for d in devices):
+    has_local_nodes = any(n.get("type", "agent") == "agent" and not transfers.is_cloud_node(n) for n in service.graph.get("nodes", []))
+    if has_local_nodes and not any(orchestrator.device_is_online(d) for d in devices):
         raise HTTPException(409, "사용 가능한(온라인) 기기가 없습니다. Worker Agent를 실행해 주세요.")
 
     execution = models.Execution(
@@ -75,6 +95,8 @@ def start_execution(
     db.flush()
     orchestrator.create_tasks_for_execution(db, execution)
     db.commit()
+    db.refresh(execution)
+    process_ready_cloud_tasks(db, user.id)
     db.refresh(execution)
     return _to_out(execution)
 

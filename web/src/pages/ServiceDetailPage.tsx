@@ -9,6 +9,13 @@ import { AgentNode, Device, Graph, Service, SharedDirectory, UploadedFile, Workf
 
 const nodeTypes = { agent: AgentBlockNode }
 
+
+const CLOUD_MODELS = {
+  openai: ['gpt-5-mini', 'gpt-5', 'gpt-4.1-mini', 'gpt-4.1'],
+  anthropic: ['claude-sonnet-4-5', 'claude-opus-4-1', 'claude-haiku-3-5'],
+  gemini: ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-2.5-pro'],
+} as const
+
 function asAgents(graph: Graph): AgentNode[] {
   const legacyDirectories = new Map(
     graph.nodes.filter((node): node is Extract<WorkflowNode, { type: 'directory' }> => node.type === 'directory')
@@ -58,6 +65,20 @@ export default function ServiceDetailPage() {
   const directoryById = useMemo(() => new Map(directories.map((directory) => [directory.id, directory])), [directories])
   const deviceById = useMemo(() => new Map(devices.map((device) => [device.id, device])), [devices])
   const uploadedFileById = useMemo(() => new Map(uploadedFiles.map((file) => [file.id, file])), [uploadedFiles])
+  const selectedProvider = selectedAgent?.provider || 'ollama'
+  const modelOptions = useMemo(() => {
+    if (selectedProvider !== 'ollama') return [...CLOUD_MODELS[selectedProvider]]
+    const relevantDevices = selectedAgent?.worker_id
+      ? devices.filter((device) => device.id === selectedAgent.worker_id)
+      : devices.filter((device) => device.online)
+    return [...new Set(relevantDevices.flatMap((device) => {
+      const models = device.specs.models
+      return Array.isArray(models) ? models.filter((model): model is string => typeof model === 'string') : []
+    }))].sort()
+  }, [devices, selectedAgent?.worker_id, selectedProvider])
+  const visibleModelOptions = selectedAgent?.model && !modelOptions.includes(selectedAgent.model)
+    ? [selectedAgent.model, ...modelOptions]
+    : modelOptions
 
   const nodeData = useCallback((agent: AgentNode) => ({
     label: agent.name,
@@ -256,8 +277,13 @@ export default function ServiceDetailPage() {
           <div className="row spread"><h2 style={{ margin: 0 }}>에이전트 블록</h2><button className="btn sm danger" onClick={deleteAgent}>삭제</button></div>
           <label>이름</label><input value={selectedAgent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
           <label>역할 프롬프트</label><textarea rows={5} value={selectedAgent.role_prompt} onChange={(event) => updateAgent({ role_prompt: event.target.value })} />
-          <label>모델</label><input placeholder="비우면 Worker 기본값" value={selectedAgent.model} onChange={(event) => updateAgent({ model: event.target.value })} />
-          <label>컴퓨팅 자원 (Worker)</label><select value={selectedAgent.worker_id ?? ''} onChange={(event) => updateAgent({ worker_id: event.target.value ? Number(event.target.value) : null })}><option value="">자동 배정</option>{devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.online ? ' · 온라인' : ' · 오프라인'}</option>)}</select>
+          <label>실행 위치</label><select value={selectedAgent.provider || 'ollama'} onChange={(event) => { const provider = event.target.value as 'ollama' | 'openai' | 'anthropic' | 'gemini'; updateAgent({ provider, executor: provider === 'ollama' ? 'local' : 'cloud', worker_id: provider === 'ollama' ? selectedAgent.worker_id : null, model: '' }) }}><option value="ollama">Local Worker · Ollama</option><option value="openai">Cloud · OpenAI</option><option value="anthropic">Cloud · Anthropic</option><option value="gemini">Cloud · Google Gemini</option></select>
+          <label>모델</label><select value={selectedAgent.model} onChange={(event) => updateAgent({ model: event.target.value })}>
+            <option value="">{selectedProvider === 'ollama' ? 'Worker 기본 모델' : '공급자 기본 모델'}</option>
+            {visibleModelOptions.map((model) => <option value={model} key={model}>{model}</option>)}
+          </select>
+          {selectedProvider === 'ollama' && !modelOptions.length && <small className="muted">온라인 Worker에서 설치된 Ollama 모델을 아직 보고하지 않았습니다.</small>}
+          <label>컴퓨팅 자원 (Worker)</label><select disabled={(selectedAgent.provider || 'ollama') !== 'ollama'} value={selectedAgent.worker_id ?? ''} onChange={(event) => updateAgent({ worker_id: event.target.value ? Number(event.target.value) : null })}><option value="">자동 배정</option>{devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.online ? ' · 온라인' : ' · 오프라인'}</option>)}</select>
           <label>공유 디렉터리</label>
           <div className="resource-picker directory-resource-picker">
             {directories.length ? directories.map((directory) => <label key={directory.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.directory_ids ?? []).includes(directory.id)} onChange={(event) => updateAgent({ directory_ids: event.target.checked ? [...(selectedAgent.directory_ids ?? []), directory.id] : (selectedAgent.directory_ids ?? []).filter((directoryId) => directoryId !== directory.id) })} /><span><strong>{directory.alias}</strong><small>{directory.local_path}</small></span></label>) : <span className="muted">등록된 공유 디렉터리가 없습니다.</span>}

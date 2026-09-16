@@ -59,9 +59,9 @@ def search_library(query: str) -> list[dict]:
     return results
 
 
-def create_job(kind: str, label: str, target) -> dict:
+def create_job(kind: str, label: str, target, **metadata) -> dict:
     job_id = uuid.uuid4().hex
-    job = {"id": job_id, "kind": kind, "label": label, "status": "queued", "message": "대기 중", "percent": 0, "completed": 0, "total": 0, "error": "", "created_at": datetime.now().isoformat(timespec="seconds")}
+    job = {**metadata, "id": job_id, "kind": kind, "label": label, "status": "queued", "message": "대기 중", "percent": 0, "completed": 0, "total": 0, "error": "", "created_at": datetime.now().isoformat(timespec="seconds")}
     with _lock:
         _jobs[job_id] = job
     def runner():

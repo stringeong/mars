@@ -41,6 +41,53 @@ class User(Base):
     )
 
 
+class LLMCredential(Base):
+    """Encrypted, user-owned cloud LLM credentials."""
+    __tablename__ = "llm_credentials"
+    __table_args__ = (UniqueConstraint("user_id", "provider", name="uq_llm_credential_user_provider"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    provider: Mapped[str] = mapped_column(String(32))
+    encrypted_api_key: Mapped[str] = mapped_column(Text)
+    encrypted_admin_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key_last4: Mapped[str] = mapped_column(String(4), default="")
+    default_model: Mapped[str] = mapped_column(String(128), default="")
+    monthly_budget_usd: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="unverified")
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class LLMUsage(Base):
+    """Token usage observed by M.A.R.S for a cloud request."""
+    __tablename__ = "llm_usage"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    execution_id: Mapped[int | None] = mapped_column(ForeignKey("executions.id"), nullable=True, index=True)
+    task_id: Mapped[int | None] = mapped_column(ForeignKey("tasks.id"), nullable=True, index=True)
+    provider: Mapped[str] = mapped_column(String(32), index=True)
+    model: Mapped[str] = mapped_column(String(128))
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cached_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class ExternalTransferConsent(Base):
+    """Short-lived approval bound to an exact workflow snapshot and prompt."""
+    __tablename__ = "external_transfer_consents"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    token: Mapped[str] = mapped_column(String(96), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    service_id: Mapped[int] = mapped_column(ForeignKey("services.id"), index=True)
+    request_digest: Mapped[str] = mapped_column(String(64))
+    transfers: Mapped[list] = mapped_column(JSON, default=list)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Device(Base):
     """사용자가 등록한 Worker Node."""
 

@@ -4,7 +4,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import ALLOWED_HOSTS, ALLOWED_ORIGINS, IS_PRODUCTION
 from .database import Base, engine
-from .routers import auth, devices, executions, files, services, worker
+from .routers import auth, devices, executions, files, services, settings, worker
 
 Base.metadata.create_all(bind=engine)
 
@@ -32,6 +32,7 @@ app.include_router(devices.router)
 app.include_router(services.router)
 app.include_router(executions.router)
 app.include_router(files.router)
+app.include_router(settings.router)
 app.include_router(worker.router)
 
 

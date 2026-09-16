@@ -189,4 +189,6 @@ def submit_result(
     device.last_heartbeat = models.utcnow()
     orchestrator.complete_task(db, task, body.status, body.output, body.error)
     db.commit()
+    from ..services.cloud_executor import process_ready_cloud_tasks
+    process_ready_cloud_tasks(db, device.user_id)
     return {"ok": True}

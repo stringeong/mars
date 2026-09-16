@@ -4,6 +4,8 @@ export interface AgentNode {
   name: string
   role_prompt: string
   model: string
+  executor?: 'local' | 'cloud'
+  provider?: 'ollama' | 'openai' | 'anthropic' | 'gemini'
   worker_id?: number | null
   directory_ids?: number[]
   uploaded_file_ids?: number[]

@@ -29,6 +29,7 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 - DB는 `server/mars.db` (SQLite) 에 자동 생성됩니다.
 - 프롬프트→워크플로우 생성에 Ollama를 사용합니다. Ollama가 없으면 규칙 기반 폴백으로 동작합니다.
   - `OLLAMA_URL` (기본 `http://localhost:11434`), `MARS_DEFAULT_MODEL` (기본 `gemma3:4b`) 환경변수로 변경 가능.
+  - 클라우드 LLM 키 암호화는 `MARS_CREDENTIAL_ENCRYPTION_KEY`(Fernet 키)를 권장합니다. 미설정 시 `MARS_SECRET_KEY`에서 파생합니다.
 - `--host 0.0.0.0` 은 같은 네트워크의 다른 기기(팀원 노트북 등)가 Worker로 접속할 수 있게 합니다.
   로컬에서만 쓸 거면 생략해도 됩니다.
 

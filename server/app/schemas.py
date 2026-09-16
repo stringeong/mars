@@ -132,6 +132,8 @@ class AgentNode(BaseModel):
     name: str
     role_prompt: str = ""
     model: str = ""
+    executor: Literal["local", "cloud"] = "local"
+    provider: Literal["ollama", "openai", "anthropic", "gemini"] = "ollama"
     worker_id: int | None = None
     directory_ids: list[int] = Field(default_factory=list)
     uploaded_file_ids: list[int] = Field(default_factory=list)
@@ -196,6 +198,38 @@ class ServiceOut(BaseModel):
 
 class ExecutionCreate(BaseModel):
     run_prompt: str = Field(min_length=1, description="이번 실행에 대한 지시")
+    consent_token: str | None = None
+
+
+class ExecutionPreview(BaseModel):
+    run_prompt: str = Field(min_length=1)
+
+
+class ProviderCredentialUpdate(BaseModel):
+    api_key: str | None = Field(default=None, min_length=8)
+    admin_key: str | None = Field(default=None, min_length=8)
+    default_model: str = Field(default="", max_length=128)
+    monthly_budget_usd: int | None = Field(default=None, ge=1, le=1_000_000)
+
+
+class ProviderCredentialOut(BaseModel):
+    provider: Literal["openai", "anthropic", "gemini"]
+    configured: bool
+    masked_key: str = ""
+    has_admin_key: bool = False
+    default_model: str = ""
+    monthly_budget_usd: int | None = None
+    status: str = "unverified"
+    last_verified_at: UTCDateTime | None = None
+
+
+class UsageSummaryOut(BaseModel):
+    provider: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+    requests: int = 0
+
 
 
 class TaskOut(BaseModel):

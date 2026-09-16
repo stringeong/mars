@@ -11,6 +11,7 @@ import FilesPage from './pages/FilesPage'
 import HistoryPage from './pages/HistoryPage'
 import LoginPage from './pages/LoginPage'
 import MarketplacePage from './pages/MarketplacePage'
+import SettingsPage from './pages/SettingsPage'
 import ServiceDetailPage from './pages/ServiceDetailPage'
 import ServicesPage from './pages/ServicesPage'
 import WorkflowRunPage from './pages/WorkflowRunPage'
@@ -54,7 +55,7 @@ export default function App() {
           <Route path="/devices" element={<RequireAuth><DevicesPage /></RequireAuth>} />
           <Route path="/files" element={<RequireAuth><FilesPage /></RequireAuth>} />
           <Route path="/history" element={<RequireAuth><HistoryPage /></RequireAuth>} />
-          <Route path="/marketplace" element={<RequireAuth><MarketplacePage /></RequireAuth>} />
+          <Route path="/settings" element={<RequireAuth><SettingsPage /></RequireAuth>} />
           <Route path="/executions/:id" element={<RequireAuth><ExecutionPage /></RequireAuth>} />
         </Routes>
         {authed && location.pathname !== '/login' && <DeviceMonitor />}

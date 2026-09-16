@@ -15,6 +15,7 @@ IS_PRODUCTION = ENVIRONMENT == "production"
 
 # JWT 서명 키. 운영 환경에서는 반드시 환경변수로 주입한다.
 SECRET_KEY = os.environ.get("MARS_SECRET_KEY", "dev-secret-key-change-me")
+CREDENTIAL_ENCRYPTION_KEY = os.environ.get("MARS_CREDENTIAL_ENCRYPTION_KEY", "").strip()
 _WEAK_SECRET_KEYS = {
     "",
     "dev-secret-key-change-me",

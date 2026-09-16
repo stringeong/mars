@@ -72,6 +72,14 @@ def device_has_capacity(device: models.Device) -> bool:
     return True
 
 
+def device_has_model(device: models.Device, model: str) -> bool:
+    """An empty model uses the Worker default; named models must be installed."""
+    if not model:
+        return True
+    available = (device.specs or {}).get("models")
+    return True if not isinstance(available, list) else model in available
+
+
 def reclaim_stale_tasks(db: Session, user_id: int) -> None:
     """하트비트가 끊긴 기기에 할당된 running 작업을 ready로 되돌린다."""
     rows = (
@@ -106,6 +114,7 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
             models.TaskRecord.id,
             models.TaskRecord.node_id,
             models.TaskRecord.directory_ids,
+            models.TaskRecord.model,
             models.Execution.graph_snapshot,
         )
         .join(models.Execution, models.TaskRecord.execution_id == models.Execution.id)
@@ -119,7 +128,11 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
         .all()
     )
     candidate_ids = []
-    for task_id, node_id, directory_ids, graph_snapshot in candidate_rows:
+    for task_id, node_id, directory_ids, model, graph_snapshot in candidate_rows:
+        from .transfers import is_cloud_node
+        node = next((n for n in (graph_snapshot or {}).get("nodes", []) if n.get("id") == node_id), {})
+        if is_cloud_node(node):
+            continue
         required_device = directory_access.required_device_by_agent(
             graph_snapshot or {}
         ).get(node_id)
@@ -129,6 +142,7 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
         if (
             (required_device is None or required_device == device.id)
             and device_has_capacity(device)
+            and device_has_model(device, model or "")
             and local_paths is not None
         ):
             candidate_ids.append(task_id)
@@ -157,29 +171,26 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
             break
     if task is None:
         return None
-    # 실행 프롬프트 + 선행 출력들을 입력 컨텍스트로 구성
+    populate_task_context(db, task)
+    return task
+
+
+def populate_task_context(db: Session, task: models.TaskRecord) -> None:
+    """Build prompt context from the run prompt and completed parent outputs."""
     execution = db.get(models.Execution, task.execution_id)
     parents = dag.parents_of(execution.graph_snapshot).get(task.node_id, [])
     parts: list[str] = []
     if execution.run_prompt:
         parts.append(f"[사용자 실행 요청]\n{execution.run_prompt}")
     if parents:
-        parent_tasks = {
-            t.node_id: t
-            for t in db.query(models.TaskRecord)
-            .filter(
-                models.TaskRecord.execution_id == execution.id,
-                models.TaskRecord.node_id.in_(parents),
-            )
-            .all()
-        }
-        for pid in parents:
-            pt = parent_tasks.get(pid)
-            if pt and pt.output:
-                parts.append(f"[이전 단계: {pt.agent_name}의 결과]\n{pt.output}")
+        parent_tasks = {t.node_id: t for t in db.query(models.TaskRecord).filter(models.TaskRecord.execution_id == execution.id, models.TaskRecord.node_id.in_(parents)).all()}
+        for parent_id in parents:
+            parent = parent_tasks.get(parent_id)
+            if parent and parent.output:
+                parts.append(f"[이전 단계: {parent.agent_name}의 결과]\n{parent.output}")
     task.input_context = "\n\n".join(parts)
     db.flush()
-    return task
+
 
 def complete_task(
     db: Session, task: models.TaskRecord, status: str, output: str, error: str

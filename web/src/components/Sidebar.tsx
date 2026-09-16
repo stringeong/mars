@@ -10,6 +10,7 @@ const navItems = [
   { to: '/files', label: 'Files', icon: 'files' as const },
   { to: '/history', label: 'Run history', icon: 'history' as const },
   { to: '/marketplace', label: 'Marketplace', icon: 'marketplace' as const },
+  { to: '/settings', label: 'Settings', icon: 'settings' as const },
 ]
 
 export default function Sidebar({ recentHistory }: { recentHistory: ExecutionListItem[] }) {

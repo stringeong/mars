@@ -24,6 +24,10 @@ from . import config as cfg
 from . import executor
 from . import sandbox
 
+_MODEL_CACHE: tuple[float, list[str]] = (0.0, [])
+_MODEL_CACHE_SECONDS = 30
+
+
 
 def collect_specs() -> dict:
     """기기 정보 자동 수집 (UC-103 F1-303)."""
@@ -36,7 +40,24 @@ def collect_specs() -> dict:
         "cpu_count": psutil.cpu_count(logical=True),
         "ram_gb": round(psutil.virtual_memory().total / 1024**3, 1),
         "gpus": collect_gpu_devices(),
+        "models": collect_ollama_models(cfg.load().get("ollama_url", "http://localhost:11434")),
     }
+
+
+def collect_ollama_models(ollama_url: str) -> list[str]:
+    """Return installed Ollama model names, with a short cache for heartbeats."""
+    global _MODEL_CACHE
+    cached_at, cached_models = _MODEL_CACHE
+    if time.monotonic() - cached_at < _MODEL_CACHE_SECONDS:
+        return cached_models
+    try:
+        response = httpx.get(ollama_url.rstrip("/") + "/api/tags", timeout=3)
+        response.raise_for_status()
+        names = sorted({str(item.get("name")) for item in response.json().get("models", []) if item.get("name")})
+        _MODEL_CACHE = (time.monotonic(), names)
+    except (httpx.HTTPError, ValueError, TypeError):
+        _MODEL_CACHE = (time.monotonic(), [])
+    return _MODEL_CACHE[1]
 
 
 def collect_gpu_devices() -> list[dict]:
@@ -89,6 +110,7 @@ def collect_runtime_stats() -> dict:
             stats["gpu_source"] = "drm"
     stats["gpu_devices"] = collect_gpu_devices()
     stats["gpu_mode"] = os.getenv("MARS_GPU_MODE", "cpu")
+    stats["models"] = collect_ollama_models(cfg.load().get("ollama_url", "http://localhost:11434"))
     if not stats["gpu_devices"] and stats["gpu_mode"] != "cpu":
         stats["gpu_devices"] = [{
             "vendor": stats["gpu_mode"],
