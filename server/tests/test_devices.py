@@ -98,3 +98,34 @@ def test_reregister_endpoint_returns_200_and_same_device(db, make_user):
     assert reconnected.status_code == status.HTTP_200_OK
     assert reconnected.json()["id"] == created.json()["id"]
     assert reconnected.json()["api_key"] != created.json()["api_key"]
+
+
+def test_list_device_models_normalizes_worker_report(db, make_user, make_device):
+    user = make_user()
+    worker = make_device(user, name="model-worker")
+    worker.specs = {
+        "models": ["qwen3:4b", "", "qwen3:4b", "gemma3:4b", 123],
+        "default_model": "qwen3:4b",
+    }
+    db.commit()
+
+    result = devices.list_device_models(worker.id, user, db)
+
+    assert result["device_id"] == worker.id
+    assert result["models"] == ["gemma3:4b", "qwen3:4b"]
+    assert result["default_model"] == "qwen3:4b"
+    assert result["synced_at"] == worker.last_heartbeat
+
+
+def test_list_device_models_rejects_other_user(db, make_user, make_device):
+    owner = make_user(email="model-owner@example.com", username="model-owner")
+    intruder = make_user(email="model-other@example.com", username="model-other")
+    worker = make_device(owner)
+    db.commit()
+
+    from fastapi import HTTPException
+    import pytest
+
+    with pytest.raises(HTTPException) as exc:
+        devices.list_device_models(worker.id, intruder, db)
+    assert exc.value.status_code == 404

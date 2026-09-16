@@ -43,6 +43,15 @@ export interface Service {
   updated_at: string
 }
 
+export interface DeviceModels {
+  device_id: number
+  device_name: string
+  online: boolean
+  models: string[]
+  default_model: string | null
+  synced_at: string | null
+}
+
 export interface Device {
   id: number
   name: string

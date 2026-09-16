@@ -85,6 +85,31 @@ def list_devices(
     return [_to_out(d) for d in devices]
 
 
+@router.get("/{device_id}/models", response_model=schemas.DeviceModelsOut)
+def list_device_models(
+    device_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    device = db.get(models.Device, device_id)
+    if device is None or device.user_id != user.id:
+        raise HTTPException(404, "기기를 찾을 수 없습니다.")
+    specs = device.specs or {}
+    raw_models = specs.get("models") or []
+    normalized = sorted({str(model).strip() for model in raw_models if isinstance(model, str) and model.strip()})
+    default_model = specs.get("default_model")
+    if not isinstance(default_model, str) or not default_model.strip():
+        default_model = None
+    return {
+        "device_id": device.id,
+        "device_name": device.name,
+        "online": device_is_online(device),
+        "models": normalized,
+        "default_model": default_model,
+        "synced_at": device.last_heartbeat,
+    }
+
+
 @router.patch("/{device_id}", response_model=schemas.DeviceOut)
 def update_device(
     device_id: int,

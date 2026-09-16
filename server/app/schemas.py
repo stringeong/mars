@@ -71,6 +71,15 @@ class DeviceUpdate(BaseModel):
     resource_limits: ResourceLimits | None = None
 
 
+class DeviceModelsOut(BaseModel):
+    device_id: int
+    device_name: str
+    online: bool
+    models: list[str] = Field(default_factory=list)
+    default_model: str | None = None
+    synced_at: UTCDateTime | None = None
+
+
 #----------- SharedDirectory ----------
 
 class SharedDirectoryCreate(BaseModel):

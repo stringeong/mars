@@ -41,6 +41,7 @@ def collect_specs() -> dict:
         "ram_gb": round(psutil.virtual_memory().total / 1024**3, 1),
         "gpus": collect_gpu_devices(),
         "models": collect_ollama_models(cfg.load().get("ollama_url", "http://localhost:11434")),
+        "default_model": cfg.load().get("default_model", ""),
     }
 
 
@@ -111,6 +112,7 @@ def collect_runtime_stats() -> dict:
     stats["gpu_devices"] = collect_gpu_devices()
     stats["gpu_mode"] = os.getenv("MARS_GPU_MODE", "cpu")
     stats["models"] = collect_ollama_models(cfg.load().get("ollama_url", "http://localhost:11434"))
+    stats["default_model"] = cfg.load().get("default_model", "")
     if not stats["gpu_devices"] and stats["gpu_mode"] != "cpu":
         stats["gpu_devices"] = [{
             "vendor": stats["gpu_mode"],

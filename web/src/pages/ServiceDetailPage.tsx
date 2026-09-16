@@ -2,10 +2,10 @@ import { addEdge, Background, Connection, Controls, Edge, MarkerType, Node, Reac
 import '@xyflow/react/dist/style.css'
 import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { api, getDeviceDirectories } from '../api'
+import { api, getDeviceDirectories, getDeviceModels } from '../api'
 import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
-import { AgentNode, Device, Graph, Service, SharedDirectory, UploadedFile, WorkflowNode } from '../types'
+import { AgentNode, Device, DeviceModels, Graph, Service, SharedDirectory, UploadedFile, WorkflowNode } from '../types'
 
 const nodeTypes = { agent: AgentBlockNode }
 
@@ -47,6 +47,9 @@ export default function ServiceDetailPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
   const [devices, setDevices] = useState<Device[]>([])
+  const [deviceModels, setDeviceModels] = useState<Record<number, DeviceModels>>({})
+  const [syncVersion, setSyncVersion] = useState(0)
+  const [syncing, setSyncing] = useState(false)
   const [directories, setDirectories] = useState<SharedDirectory[]>([])
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [fileUploading, setFileUploading] = useState(false)
@@ -71,14 +74,12 @@ export default function ServiceDetailPage() {
     const relevantDevices = selectedAgent?.worker_id
       ? devices.filter((device) => device.id === selectedAgent.worker_id)
       : devices.filter((device) => device.online)
-    return [...new Set(relevantDevices.flatMap((device) => {
-      const models = device.specs.models
-      return Array.isArray(models) ? models.filter((model): model is string => typeof model === 'string') : []
-    }))].sort()
-  }, [devices, selectedAgent?.worker_id, selectedProvider])
+    return [...new Set(relevantDevices.flatMap((device) => deviceModels[device.id]?.models ?? []))].sort()
+  }, [devices, deviceModels, selectedAgent?.worker_id, selectedProvider])
   const visibleModelOptions = selectedAgent?.model && !modelOptions.includes(selectedAgent.model)
     ? [selectedAgent.model, ...modelOptions]
     : modelOptions
+  const selectedDeviceModelInfo = selectedAgent?.worker_id ? deviceModels[selectedAgent.worker_id] : undefined
 
   const nodeData = useCallback((agent: AgentNode) => ({
     label: agent.name,
@@ -107,16 +108,19 @@ export default function ServiceDetailPage() {
   useEffect(() => {
     async function load() {
       try {
+        setSyncing(true)
         const [loadedService, loadedDevices, files] = await Promise.all([
           api.get<Service>(`/services/${id}`),
           api.get<Device[]>('/devices'),
           api.get<UploadedFile[]>('/files'),
         ])
         const directoryGroups = await Promise.all(loadedDevices.map((device) => getDeviceDirectories(device.id)))
+        const modelGroups = await Promise.all(loadedDevices.map((device) => getDeviceModels(device.id)))
         setService(loadedService)
         setSvcName(loadedService.name)
         setSvcDesc(loadedService.description)
         setDevices(loadedDevices)
+        setDeviceModels(Object.fromEntries(modelGroups.map((item) => [item.device_id, item])))
         setDirectories(directoryGroups.flat())
         setUploadedFiles(files)
         const loadedAgents = asAgents(loadedService.graph)
@@ -126,10 +130,12 @@ export default function ServiceDetailPage() {
         setEdges(loadedService.graph.edges.filter((edge) => !edge.relation || edge.relation === 'workflow').map((edge) => ({ ...edge, id: `${edge.source}-${edge.target}`, markerEnd: { type: MarkerType.ArrowClosed } })))
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : '불러오기 실패')
+      } finally {
+        setSyncing(false)
       }
     }
     load()
-  }, [id, setEdges, setNodes])
+  }, [id, setEdges, setNodes, syncVersion])
 
   useEffect(() => {
     setNodes((current) => current.map((node) => ({ ...node, data: agents[node.id] ? nodeData(agents[node.id]) : node.data })))
@@ -255,7 +261,7 @@ export default function ServiceDetailPage() {
   return <div className="builder-page">
     <header className="builder-header">
       <div><div className="breadcrumb">M.A.R.S <span>/</span> Workflows <span>/</span> Builder</div><h1>{svcName}</h1><p>{svcDesc || 'Build and assign a distributed multi-agent workflow.'}</p></div>
-      <div className="builder-header-actions"><button className="btn ghost" onClick={() => navigate('/services')}>All workflows</button><button className="btn" onClick={save}>Save changes</button></div>
+      <div className="builder-header-actions"><button className="btn ghost" disabled={syncing} onClick={() => { if (confirm('서버의 최신 워크플로우와 Worker 정보로 다시 불러올까요? 저장하지 않은 변경은 사라집니다.')) setSyncVersion((version) => version + 1) }}>{syncing ? '동기화 중…' : '↻ 서버와 재동기화'}</button><button className="btn ghost" onClick={() => navigate('/services')}>All workflows</button><button className="btn" onClick={save}>Save changes</button></div>
     </header>
     {message && <div style={{ color: 'var(--success)', marginBottom: 8 }}>{message}</div>}
     {error && <div className="error">{error}</div>}
@@ -278,12 +284,14 @@ export default function ServiceDetailPage() {
           <label>이름</label><input value={selectedAgent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
           <label>역할 프롬프트</label><textarea rows={5} value={selectedAgent.role_prompt} onChange={(event) => updateAgent({ role_prompt: event.target.value })} />
           <label>실행 위치</label><select value={selectedAgent.provider || 'ollama'} onChange={(event) => { const provider = event.target.value as 'ollama' | 'openai' | 'anthropic' | 'gemini'; updateAgent({ provider, executor: provider === 'ollama' ? 'local' : 'cloud', worker_id: provider === 'ollama' ? selectedAgent.worker_id : null, model: '' }) }}><option value="ollama">Local Worker · Ollama</option><option value="openai">Cloud · OpenAI</option><option value="anthropic">Cloud · Anthropic</option><option value="gemini">Cloud · Google Gemini</option></select>
+          <label>컴퓨팅 자원 (Worker)</label><select disabled={selectedProvider !== 'ollama'} value={selectedAgent.worker_id ?? ''} onChange={(event) => updateAgent({ worker_id: event.target.value ? Number(event.target.value) : null, model: '' })}><option value="">자동 배정</option>{devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.online ? ' · 온라인' : ' · 오프라인'}</option>)}</select>
           <label>모델</label><select value={selectedAgent.model} onChange={(event) => updateAgent({ model: event.target.value })}>
-            <option value="">{selectedProvider === 'ollama' ? 'Worker 기본 모델' : '공급자 기본 모델'}</option>
+            <option value="">{selectedProvider === 'ollama' ? selectedDeviceModelInfo?.default_model ? `Worker 기본 모델 · ${selectedDeviceModelInfo.default_model}` : 'Worker 기본 모델' : '공급자 기본 모델'}</option>
             {visibleModelOptions.map((model) => <option value={model} key={model}>{model}</option>)}
           </select>
-          {selectedProvider === 'ollama' && !modelOptions.length && <small className="muted">온라인 Worker에서 설치된 Ollama 모델을 아직 보고하지 않았습니다.</small>}
-          <label>컴퓨팅 자원 (Worker)</label><select disabled={(selectedAgent.provider || 'ollama') !== 'ollama'} value={selectedAgent.worker_id ?? ''} onChange={(event) => updateAgent({ worker_id: event.target.value ? Number(event.target.value) : null })}><option value="">자동 배정</option>{devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.online ? ' · 온라인' : ' · 오프라인'}</option>)}</select>
+          {selectedProvider === 'ollama' && !selectedAgent.worker_id && <small className="muted">Worker를 선택하면 해당 기기에 설치된 모델만 표시됩니다. 자동 배정은 온라인 Worker 모델의 합집합입니다.</small>}
+          {selectedProvider === 'ollama' && selectedAgent.worker_id && !modelOptions.length && <small className="muted">선택한 Worker가 설치된 Ollama 모델을 아직 서버에 보고하지 않았습니다. Worker 실행 상태를 확인한 뒤 재동기화하세요.</small>}
+          {selectedDeviceModelInfo?.synced_at && <small className="muted">모델 동기화: {new Date(selectedDeviceModelInfo.synced_at).toLocaleString()}</small>}
           <label>공유 디렉터리</label>
           <div className="resource-picker directory-resource-picker">
             {directories.length ? directories.map((directory) => <label key={directory.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.directory_ids ?? []).includes(directory.id)} onChange={(event) => updateAgent({ directory_ids: event.target.checked ? [...(selectedAgent.directory_ids ?? []), directory.id] : (selectedAgent.directory_ids ?? []).filter((directoryId) => directoryId !== directory.id) })} /><span><strong>{directory.alias}</strong><small>{directory.local_path}</small></span></label>) : <span className="muted">등록된 공유 디렉터리가 없습니다.</span>}

@@ -1,4 +1,4 @@
-import { SharedDirectory } from "./types"
+import { DeviceModels, SharedDirectory } from "./types"
 
 const API_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '')
 
@@ -66,4 +66,8 @@ export function getDeviceDirectories(deviceId: number) {
   return api.get<SharedDirectory[]>(
     `/devices/${deviceId}/directories`,
   )
+}
+
+export function getDeviceModels(deviceId: number) {
+  return api.get<DeviceModels>(`/devices/${deviceId}/models`)
 }
