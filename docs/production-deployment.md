@@ -18,6 +18,7 @@
 ```dotenv
 MARS_ENV=production
 MARS_SECRET_KEY=<openssl-rand-hex-32 결과>
+MARS_CREDENTIAL_ENCRYPTION_KEY=<Fernet.generate_key 결과>
 MARS_ALLOWED_ORIGINS=https://mars.example.com
 MARS_ALLOWED_HOSTS=mars.example.com
 MARS_TLS_CERT_FILE=/etc/letsencrypt/live/mars.example.com/fullchain.pem
@@ -26,7 +27,7 @@ MARS_HTTP_PORT=80
 MARS_HTTPS_PORT=443
 ```
 
-`MARS_SECRET_KEY`는 32자 이상이어야 하며 기본 예시 값은 거부된다. Origin과 Host의 `*` wildcard도 거부되고, 운영 Origin은 HTTPS만 허용된다. 여러 값은 쉼표로 구분한다.
+`MARS_SECRET_KEY`는 32자 이상이어야 하며, `MARS_CREDENTIAL_ENCRYPTION_KEY`는 클라우드 LLM API 키 암호화에 사용하는 별도 Fernet 키다. 운영 DB를 복구할 때도 동일한 키가 필요하다.  기본 예시 값은 거부된다. Origin과 Host의 `*` wildcard도 거부되고, 운영 Origin은 HTTPS만 허용된다. 여러 값은 쉼표로 구분한다.
 
 ## 3. 기동과 확인
 
@@ -34,6 +35,7 @@ MARS_HTTPS_PORT=443
 docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
+docker compose -f docker-compose.yml -f docker-compose.prod.yml logs --tail=50 cloud-worker
 curl -I http://mars.example.com/
 curl https://mars.example.com/api/
 ```

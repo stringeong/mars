@@ -7,7 +7,6 @@ from .. import models, schemas
 from ..database import get_db
 from ..security import get_current_user
 from ..services import dag, orchestrator, directory_access, transfers
-from ..services.cloud_executor import process_ready_cloud_tasks
 
 router = APIRouter(tags=["executions"])
 
@@ -95,8 +94,6 @@ def start_execution(
     db.flush()
     orchestrator.create_tasks_for_execution(db, execution)
     db.commit()
-    db.refresh(execution)
-    process_ready_cloud_tasks(db, user.id)
     db.refresh(execution)
     return _to_out(execution)
 

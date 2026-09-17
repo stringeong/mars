@@ -66,9 +66,12 @@ def make_directory(db):
 @pytest.fixture()
 def make_device(db):
     def _make(user, name="기기", last_heartbeat=None):
+        digest = f"{db.query(models.Device).count() + 1:064x}"
         device = models.Device(
             user_id=user.id,
             name=name,
+            api_key=digest,
+            api_key_hash=digest,
             last_heartbeat=last_heartbeat,
         )
         db.add(device)

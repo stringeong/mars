@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..config import UPLOAD_DIR
+from ..security import hash_device_key
 from ..services import directory_access, orchestrator
 
 router = APIRouter(prefix="/worker", tags=["worker"])
@@ -22,7 +23,9 @@ def get_device(
     x_device_key: str = Header(...), db: Session = Depends(get_db)
 ) -> models.Device:
     device = (
-        db.query(models.Device).filter(models.Device.api_key == x_device_key).first()
+        db.query(models.Device)
+        .filter(models.Device.api_key_hash == hash_device_key(x_device_key))
+        .first()
     )
     if device is None:
         raise HTTPException(401, "기기 인증에 실패했습니다.")
@@ -189,6 +192,4 @@ def submit_result(
     device.last_heartbeat = models.utcnow()
     orchestrator.complete_task(db, task, body.status, body.output, body.error)
     db.commit()
-    from ..services.cloud_executor import process_ready_cloud_tasks
-    process_ready_cloud_tasks(db, device.user_id)
     return {"ok": True}

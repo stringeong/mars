@@ -7,6 +7,7 @@ services:
     environment:
       MARS_ENV: ${MARS_ENV:-development}
       MARS_SECRET_KEY: ${MARS_SECRET_KEY:-dev-secret-key-change-me}
+      MARS_CREDENTIAL_ENCRYPTION_KEY: ${MARS_CREDENTIAL_ENCRYPTION_KEY:-}
       MARS_ALLOWED_ORIGINS: ${MARS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
       MARS_ALLOWED_HOSTS: ${MARS_ALLOWED_HOSTS:-localhost,127.0.0.1}
       MARS_DATABASE_URL: sqlite:////data/mars.db
@@ -33,6 +34,28 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  cloud-worker:
+    build:
+      context: ./server
+    container_name: mars-cloud-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.cloud_worker"]
+    environment:
+      MARS_ENV: ${MARS_ENV:-development}
+      MARS_SECRET_KEY: ${MARS_SECRET_KEY:-dev-secret-key-change-me}
+      MARS_CREDENTIAL_ENCRYPTION_KEY: ${MARS_CREDENTIAL_ENCRYPTION_KEY:-}
+      MARS_ALLOWED_ORIGINS: ${MARS_ALLOWED_ORIGINS:-http://localhost:5173,http://127.0.0.1:5173}
+      MARS_ALLOWED_HOSTS: ${MARS_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      MARS_DATABASE_URL: sqlite:////data/mars.db
+      MARS_UPLOAD_DIR: /data/uploads
+      MARS_CLOUD_POLL_SECONDS: ${MARS_CLOUD_POLL_SECONDS:-1}
+      MARS_CLOUD_TASK_TIMEOUT: ${MARS_CLOUD_TASK_TIMEOUT:-300}
+    volumes:
+      - mars-data:/data
+    depends_on:
+      server:
+        condition: service_healthy
 
   web:
     build:

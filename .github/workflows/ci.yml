@@ -20,6 +20,9 @@ jobs:
           cache: pip
           cache-dependency-path: server/requirements*.txt
       - run: pip install -r requirements-dev.txt
+      - run: alembic upgrade head
+        env:
+          MARS_DATABASE_URL: sqlite:////tmp/mars-ci.db
       - run: pytest -v
 
   worker-tests:

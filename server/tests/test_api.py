@@ -175,11 +175,13 @@ class TestServiceEndpoints:
         r = client.post(f"/services/{service['id']}/validate", headers=auth)
         assert r.json() == {"valid": True, "order": ["a", "b", "c"]}
 
-    def test_duplicate_device_name_rejected(self, client):
+    def test_duplicate_device_name_reconnects_and_rotates_key(self, client):
         auth = signup_and_login(client)
-        register_device(client, auth, name="노트북")
+        first_key = register_device(client, auth, name="노트북")["X-Device-Key"]
         r = client.post("/devices", json={"name": "노트북"}, headers=auth)
-        assert r.status_code == 409
+        assert r.status_code == 200
+        assert r.json()["api_key"] != first_key
+        assert client.post("/worker/heartbeat", headers={"X-Device-Key": first_key}).status_code == 401
 
 
 class TestExecutionGuards:
@@ -327,3 +329,19 @@ class TestUserIsolation:
             client.get(f"/executions/{execution['id']}", headers=intruder).status_code
             == 404
         )
+
+
+def test_device_registration_persists_only_key_digest(client, db):
+    from app import models
+
+    auth = signup_and_login(client, username="digest-user", email="digest@example.com")
+    response = client.post("/devices", json={"name": "secure-worker"}, headers=auth)
+    assert response.status_code == 201
+    raw_key = response.json()["api_key"]
+    device = db.query(models.Device).filter_by(name="secure-worker").one()
+    assert raw_key != device.api_key
+    assert raw_key != device.api_key_hash
+    assert device.api_key == device.api_key_hash
+    assert client.post(
+        "/worker/heartbeat", headers={"X-Device-Key": raw_key}
+    ).status_code == 200

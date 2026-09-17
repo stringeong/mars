@@ -27,6 +27,17 @@ def load() -> dict:
 
 
 def save(config: dict) -> None:
-    CONFIG_PATH.write_text(
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = CONFIG_PATH.with_name(CONFIG_PATH.name + ".tmp")
+    temporary.write_text(
         json.dumps(config, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    try:
+        temporary.chmod(0o600)
+    except OSError:
+        pass
+    os.replace(temporary, CONFIG_PATH)
+    try:
+        CONFIG_PATH.chmod(0o600)
+    except OSError:
+        pass

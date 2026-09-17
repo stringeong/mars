@@ -10,14 +10,14 @@ from sqlalchemy.orm import Session
 
 from .. import models, schemas
 from ..database import get_db
-from ..security import get_current_user
+from ..security import get_current_user, hash_device_key
 from ..services import directory_access
 from ..services.orchestrator import device_is_online
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
 
-def _to_out(device: models.Device, with_key: bool = False) -> dict:
+def _to_out(device: models.Device, api_key: str | None = None) -> dict:
     specs = device.specs or {}
     data = {
         "id": device.id,
@@ -27,8 +27,8 @@ def _to_out(device: models.Device, with_key: bool = False) -> dict:
         "last_heartbeat": device.last_heartbeat,
         "online": device_is_online(device),
     }
-    if with_key:
-        data["api_key"] = device.api_key
+    if api_key is not None:
+        data["api_key"] = api_key
     return data
 
 
@@ -61,20 +61,27 @@ def register_device(
     if existing:
         # Reconnect the logical Worker so assignments and mounts keep their device ID.
         existing.specs = {**(existing.specs or {}), **body.specs}
-        existing.api_key = secrets.token_hex(24)
+        api_key = secrets.token_hex(24)
+        digest = hash_device_key(api_key)
+        existing.api_key = digest
+        existing.api_key_hash = digest
         db.commit()
         db.refresh(existing)
         response.status_code = status.HTTP_200_OK
-        return _to_out(existing, with_key=True)
+        return _to_out(existing, api_key=api_key)
+    api_key = secrets.token_hex(24)
+    digest = hash_device_key(api_key)
     device = models.Device(
         user_id=user.id,
         name=body.name,
         specs=body.specs,
+        api_key=digest,
+        api_key_hash=digest,
     )
     db.add(device)
     db.commit()
     db.refresh(device)
-    return _to_out(device, with_key=True)
+    return _to_out(device, api_key=api_key)
 
 
 @router.get("", response_model=list[schemas.DeviceOut])

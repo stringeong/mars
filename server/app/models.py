@@ -1,4 +1,3 @@
-import secrets
 from datetime import datetime, timezone
 
 from sqlalchemy import (
@@ -98,8 +97,10 @@ class Device(Base):
     name: Mapped[str] = mapped_column(String(128))
     # Worker가 자동 수집한 사양 (os, cpu, ram_gb, hostname ...)
     specs: Mapped[dict] = mapped_column(JSON, default=dict)
-    # Worker Agent 인증용 키
-    api_key: Mapped[str] = mapped_column(String(64), default=lambda: secrets.token_hex(24), unique=True)
+    # Raw Worker keys are returned once and never persisted. ``api_key`` is a
+    # digest-only compatibility column retained for pre-migration databases.
+    api_key: Mapped[str] = mapped_column(String(64), unique=True)
+    api_key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 

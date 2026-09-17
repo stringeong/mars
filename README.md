@@ -22,10 +22,13 @@ Linux 서버에 Docker Compose로 배포하는 절차는 [Linux 서버 실행 �
 cd server
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 - API 문서: http://localhost:8000/docs
+- 클라우드 LLM 노드를 사용하면 별도 터미널에서 `python -m app.cloud_worker`를 실행합니다. Docker Compose에서는 `cloud-worker` 서비스가 자동으로 실행됩니다.
+- DB 스키마는 Alembic으로 관리되며 Docker 서버 시작 시 `alembic upgrade head`가 자동 실행됩니다.
 - DB는 `server/mars.db` (SQLite) 에 자동 생성됩니다.
 - 프롬프트→워크플로우 생성에 Ollama를 사용합니다. Ollama가 없으면 규칙 기반 폴백으로 동작합니다.
   - `OLLAMA_URL` (기본 `http://localhost:11434`), `MARS_DEFAULT_MODEL` (기본 `gemma3:4b`) 환경변수로 변경 가능.

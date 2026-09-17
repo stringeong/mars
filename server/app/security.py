@@ -1,3 +1,4 @@
+import hashlib
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -21,6 +22,11 @@ def hash_password(password: str) -> str:
 
 def verify_password(plain: str, hashed: str) -> bool:
     return pwd_context.verify(plain, hashed)
+
+
+def hash_device_key(key: str) -> str:
+    """Return the non-reversible representation stored for a Worker key."""
+    return hashlib.sha256(key.encode()).hexdigest()
 
 
 def create_access_token(user_id: int) -> str:

@@ -195,7 +195,7 @@ class TestReviseWorkflow:
         assert kept["position"] == {"x": 10, "y": 20}
         new = revised["nodes"][1]
         assert new["model"] == "" and new["directory_ids"] == []
-        assert revised["edges"] == [{"source": "agent1", "target": "agent2"}]
+        assert revised["edges"] == [{"source": "agent1", "target": "agent2", "relation": "workflow"}]
 
     def test_empty_role_prompt_falls_back_to_previous(self, fake_ollama):
         calls, replies = fake_ollama

@@ -37,7 +37,7 @@ def describe_transfers(graph: dict) -> list[dict]:
         transfers.append({"node_id": node_id, "node_name": node.get("name", node_id), "provider": provider, "type": "user_input"})
         file_ids = [v for v in node.get("uploaded_file_ids", []) if isinstance(v, int)]
         if file_ids:
-            transfers.append({"node_id": node_id, "node_name": node.get("name", node_id), "provider": provider, "type": "original_file", "file_ids": file_ids})
+            transfers.append({"node_id": node_id, "node_name": node.get("name", node_id), "provider": provider, "type": "file_text", "file_ids": file_ids})
         derived = []
         for parent_id in parents.get(node_id, []):
             parent = nodes.get(parent_id, {})

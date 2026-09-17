@@ -1,3 +1,5 @@
+import os
+from datetime import timedelta
 import httpx
 from sqlalchemy.orm import Session
 
@@ -53,36 +55,117 @@ def _call(provider: str, key: str, model: str, system: str, user: str) -> tuple[
             "cached_tokens": metadata.get("cachedContentTokenCount", 0),
         }
 
+CLOUD_TASK_TIMEOUT_SECONDS = max(
+    180, int(os.getenv("MARS_CLOUD_TASK_TIMEOUT", "300"))
+)
 
-def process_ready_cloud_tasks(db: Session, user_id: int | None = None) -> None:
-    from . import orchestrator
 
-    while True:
-        query = db.query(models.TaskRecord).join(models.Execution).filter(models.TaskRecord.status == "ready", models.Execution.status == "running")
-        if user_id is not None:
-            query = query.filter(models.Execution.user_id == user_id)
-        task = next((t for t in query.order_by(models.TaskRecord.id).all() if is_cloud_node(_node_for(t.execution, t.node_id))), None)
-        if task is None:
-            return
-        execution = task.execution
-        node = _node_for(execution, task.node_id)
-        provider = provider_for(node)
-        credential = db.query(models.LLMCredential).filter_by(user_id=execution.user_id, provider=provider).first()
-        if credential is None:
-            orchestrator.complete_task(db, task, "failed", "", f"{provider} API 키가 설정되지 않았습니다.")
-            db.flush()
+def reclaim_stale_cloud_tasks(db: Session) -> None:
+    cutoff = models.utcnow() - timedelta(seconds=CLOUD_TASK_TIMEOUT_SECONDS)
+    stale = (
+        db.query(models.TaskRecord)
+        .join(models.Execution)
+        .filter(
+            models.TaskRecord.status == "running",
+            models.TaskRecord.assigned_device_id.is_(None),
+            models.TaskRecord.started_at < cutoff,
+            models.Execution.status == "running",
+        )
+        .all()
+    )
+    for task in stale:
+        if is_cloud_node(_node_for(task.execution, task.node_id)):
+            task.status = "ready"
+            task.started_at = None
+    db.commit()
+
+
+
+def claim_next_cloud_task(db: Session) -> models.TaskRecord | None:
+    """Atomically claim one ready cloud task across cloud-worker processes."""
+    reclaim_stale_cloud_tasks(db)
+    candidates = (
+        db.query(models.TaskRecord)
+        .join(models.Execution)
+        .filter(
+            models.TaskRecord.status == "ready",
+            models.Execution.status == "running",
+        )
+        .order_by(models.TaskRecord.id)
+        .limit(50)
+        .all()
+    )
+    for candidate in candidates:
+        if not is_cloud_node(_node_for(candidate.execution, candidate.node_id)):
             continue
-        task.status = "running"
-        task.started_at = models.utcnow()
-        orchestrator.populate_task_context(db, task)
-        model = str(node.get("model") or credential.default_model)
-        if model.startswith(provider + ":"):
-            model = model.split(":", 1)[1]
-        user_message = task.input_context or execution.run_prompt
-        try:
-            output, usage = _call(provider, decrypt_secret(credential.encrypted_api_key), model, task.role_prompt or "You are a helpful assistant.", user_message)
-            db.add(models.LLMUsage(user_id=execution.user_id, execution_id=execution.id, task_id=task.id, provider=provider, model=model, input_tokens=usage.get("input_tokens", 0), output_tokens=usage.get("output_tokens", 0), cached_tokens=usage.get("cached_tokens", 0)))
-            orchestrator.complete_task(db, task, "done", output, "")
-        except Exception as exc:
-            orchestrator.complete_task(db, task, "failed", "", f"클라우드 LLM 호출 실패: {type(exc).__name__}")
+        claimed = (
+            db.query(models.TaskRecord)
+            .filter(
+                models.TaskRecord.id == candidate.id,
+                models.TaskRecord.status == "ready",
+            )
+            .update(
+                {"status": "running", "started_at": models.utcnow()},
+                synchronize_session=False,
+            )
+        )
+        if claimed:
+            db.commit()
+            return db.get(models.TaskRecord, candidate.id)
+        db.rollback()
+    return None
+
+
+def process_one_ready_cloud_task(db: Session) -> bool:
+    from . import orchestrator
+    from .file_context import cloud_file_context
+
+    task = claim_next_cloud_task(db)
+    if task is None:
+        return False
+    execution = task.execution
+    node = _node_for(execution, task.node_id)
+    provider = provider_for(node)
+    credential = db.query(models.LLMCredential).filter_by(
+        user_id=execution.user_id, provider=provider
+    ).first()
+    if credential is None:
+        orchestrator.complete_task(
+            db, task, "failed", "", f"{provider} API 키가 설정되지 않았습니다."
+        )
         db.commit()
+        return True
+
+    orchestrator.populate_task_context(db, task)
+    model = str(node.get("model") or credential.default_model)
+    if model.startswith(provider + ":"):
+        model = model.split(":", 1)[1]
+    user_message = task.input_context or execution.run_prompt
+    try:
+        attached = cloud_file_context(db, execution.user_id, node)
+        if attached:
+            user_message = f"{user_message}\n\n{attached}"
+        output, usage = _call(
+            provider,
+            decrypt_secret(credential.encrypted_api_key),
+            model,
+            task.role_prompt or "You are a helpful assistant.",
+            user_message,
+        )
+        db.add(models.LLMUsage(
+            user_id=execution.user_id,
+            execution_id=execution.id,
+            task_id=task.id,
+            provider=provider,
+            model=model,
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            cached_tokens=usage.get("cached_tokens", 0),
+        ))
+        orchestrator.complete_task(db, task, "done", output, "")
+    except Exception as exc:
+        orchestrator.complete_task(
+            db, task, "failed", "", f"클라우드 LLM 호출 실패: {type(exc).__name__}"
+        )
+    db.commit()
+    return True
