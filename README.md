@@ -103,6 +103,18 @@ start-worker.cmd status    rem 컨테이너 상태 확인
 start-worker.cmd stop      rem Worker UI와 Ollama 중지
 ```
 
+등록할 서버까지의 네트워크 연결을 시작 전에 확인하려면 서버 주소를 함께 지정한다.
+
+```bat
+start-worker.cmd auto -ServerUrl https://marsflowlab.com/api
+```
+
+Worker는 서버에 하트비트와 작업 요청을 보내는 pull 방식이므로 개인 PC의 인바운드
+포트를 열거나 공유기에서 포트포워딩할 필요가 없다. 위 옵션은 서버 호스트의 DNS와
+TCP 포트 연결을 검사하며, 연결할 수 없으면 VPN·서버 방화벽·Windows 아웃바운드
+정책 확인 방법을 안내한다. Worker UI `8765`와 Ollama `11434`는 보안을 위해 계속
+`127.0.0.1`에만 바인딩된다.
+
 - NVIDIA: 최신 Windows NVIDIA 드라이버와 Docker Desktop WSL 2 백엔드가 필요하다.
 - AMD: [Windows용 Ollama](https://ollama.com/download/windows)를 설치하고 먼저 실행한 뒤
   `start-worker.cmd native` 또는 `start-worker.cmd auto`를 사용한다.

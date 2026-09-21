@@ -7,7 +7,7 @@ from pathlib import Path
 CONFIG_PATH = Path(os.getenv("MARS_CONFIG_PATH", Path(__file__).resolve().parent.parent / "agent_config.json"))
 
 DEFAULTS = {
-    "server_url": "http://localhost:8000",
+    "server_url": "https://marsflowlab.com/api",
     "device_id": None,
     "device_name": "",
     "api_key": "",

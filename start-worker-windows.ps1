@@ -1,6 +1,8 @@
 ﻿param(
     [ValidateSet("auto", "cpu", "nvidia", "native", "detect", "stop", "status", "help")]
-    [string]$Mode = "auto"
+    [string]$Mode = "auto",
+
+    [string]$ServerUrl = ""
 )
 
 Set-StrictMode -Version Latest
@@ -19,7 +21,7 @@ function Write-Mars {
 
 function Show-Usage {
     Write-Host @"
-사용법: start-worker.cmd [auto|cpu|nvidia|native|detect|stop|status]
+사용법: start-worker.cmd [auto|cpu|nvidia|native|detect|stop|status] [-ServerUrl URL]
   auto     GPU를 감지하고 실패 시 CPU로 폴백 (기본값)
   cpu      내장 Ollama를 CPU 모드로 실행
   nvidia   NVIDIA GPU를 Docker Ollama에 연결
@@ -27,7 +29,35 @@ function Show-Usage {
   detect   자동 감지 결과만 출력
   stop     Worker UI와 Ollama 중지
   status   현재 컨테이너 상태 표시
+
+선택 사항:
+  -ServerUrl URL  Worker가 등록될 서버의 DNS 및 TCP 연결을 미리 확인
+
+예: start-worker.cmd auto -ServerUrl https://marsflowlab.com/api
 "@
+}
+
+function Test-WorkerServerConnection {
+    param([string]$Url)
+
+    if ([string]::IsNullOrWhiteSpace($Url)) { return }
+
+    try {
+        $Uri = [System.Uri]$Url
+    } catch {
+        throw "서버 주소 형식이 올바르지 않습니다: $Url"
+    }
+    if (-not $Uri.IsAbsoluteUri -or $Uri.Scheme -notin @("http", "https") -or -not $Uri.Host) {
+        throw "서버 주소는 http:// 또는 https://로 시작해야 합니다: $Url"
+    }
+
+    $Port = $Uri.Port
+    Write-Mars "서버 연결 확인: $($Uri.Host):$Port"
+    $Result = Test-NetConnection -ComputerName $Uri.Host -Port $Port -WarningAction SilentlyContinue
+    if (-not $Result.TcpTestSucceeded) {
+        throw "서버 $($Uri.Host):$Port 에 연결할 수 없습니다. DNS, VPN, 서버 방화벽 또는 Windows 아웃바운드 정책을 확인해 주세요. Worker PC의 인바운드 포트를 열 필요는 없습니다."
+    }
+    Write-Mars "서버 TCP 연결 확인 완료 (Worker PC 인바운드 포트 개방 불필요)"
 }
 
 function Get-DockerDesktopPath {
@@ -200,6 +230,8 @@ try {
         Show-Usage
         exit 0
     }
+
+    Test-WorkerServerConnection $ServerUrl
 
     Wait-DockerEngine
 
