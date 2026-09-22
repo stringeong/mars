@@ -285,7 +285,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_reg = sub.add_parser("register", help="이 기기를 M.A.R.S에 등록")
-    p_reg.add_argument("--server", default="http://localhost:8000", help="서버 주소")
+    p_reg.add_argument("--server", default=cfg.DEFAULTS["server_url"], help="서버 주소")
     p_reg.set_defaults(func=cmd_register)
 
     p_run = sub.add_parser("run", help="에이전트 실행 (하트비트 + 작업 처리)")

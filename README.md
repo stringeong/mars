@@ -86,21 +86,24 @@ Docker 기반 Worker UI와 Ollama를 함께 실행하면 OCR과 Office Tool이 �
 
 #### Windows에서 실행
 
-Docker Desktop을 설치하고 Linux containers 모드로 둔 뒤, 탐색기에서
-`start-worker.cmd`를 더블클릭하면 된다. Docker Desktop이 꺼져 있으면 자동으로 시작하며,
-GPU를 감지해 NVIDIA는 Docker GPU, AMD는 Windows에서 실행 중인 Ollama를 사용한다.
-사용 가능한 GPU 실행 방식이 없거나 시작에 실패하면 CPU로 자동 전환한다.
+탐색기에서 `start-worker.cmd`를 더블클릭하면 Windows 네이티브 모드로 실행된다.
+BIOS 가상화, WSL 2, Docker Desktop은 필요하지 않다. 최초 실행에는 Python 3.11 이상과
+[Windows용 Ollama](https://ollama.com/download/windows)가 필요하며, 설치되지 않았다면
+스크립트가 공식 다운로드 페이지와 설치 방법을 안내한다. Python 패키지는
+`worker\.venv`에 격리해 설치하고 설정과 로그는 `%LOCALAPPDATA%\MarsFlowLab\Worker`에 저장한다.
 
 명령 프롬프트에서 실행 모드를 직접 지정할 수도 있다.
 
 ```bat
-start-worker.cmd detect    rem 자동 감지 결과 확인
-start-worker.cmd auto      rem GPU 자동 감지, 실패 시 CPU (기본값)
-start-worker.cmd cpu       rem CPU 강제
-start-worker.cmd nvidia    rem NVIDIA GPU 강제
-start-worker.cmd native    rem Windows Ollama 강제 (AMD 권장)
-start-worker.cmd status    rem 컨테이너 상태 확인
-start-worker.cmd stop      rem Worker UI와 Ollama 중지
+start-worker.cmd auto      rem Windows 네이티브 실행 (기본값)
+start-worker.cmd native    rem Windows 네이티브 실행
+start-worker.cmd setup     rem Python 가상환경과 패키지만 준비
+start-worker.cmd detect    rem Python/Ollama 준비 상태 확인
+start-worker.cmd status    rem 네이티브/Ollama/Docker 상태 확인
+start-worker.cmd stop      rem 네이티브 및 Docker Worker 중지
+start-worker.cmd docker    rem 기존 Docker GPU 자동 감지 모드
+start-worker.cmd cpu       rem 기존 Docker CPU 모드
+start-worker.cmd nvidia    rem 기존 Docker NVIDIA 모드
 ```
 
 등록할 서버까지의 네트워크 연결을 시작 전에 확인하려면 서버 주소를 함께 지정한다.
@@ -115,14 +118,13 @@ TCP 포트 연결을 검사하며, 연결할 수 없으면 VPN·서버 방화벽
 정책 확인 방법을 안내한다. Worker UI `8765`와 Ollama `11434`는 보안을 위해 계속
 `127.0.0.1`에만 바인딩된다.
 
-- NVIDIA: 최신 Windows NVIDIA 드라이버와 Docker Desktop WSL 2 백엔드가 필요하다.
-- AMD: [Windows용 Ollama](https://ollama.com/download/windows)를 설치하고 먼저 실행한 뒤
-  `start-worker.cmd native` 또는 `start-worker.cmd auto`를 사용한다.
+- Windows Ollama가 사용 가능한 CPU/GPU를 자동으로 선택한다.
+- 기존 Docker 실행은 `start-worker.cmd docker`로 명시적으로 선택한다.
 - 실행 후 Worker UI는 http://127.0.0.1:8765 에서 열린다.
 - 스크립트 종료 시 창을 자동으로 닫아야 한다면 `set MARS_NO_PAUSE=1`을 먼저 실행한다.
 
 - 스캔 PDF OCR을 사용하려면 Tesseract가 필요합니다. Ubuntu/Debian은 `sudo apt install tesseract-ocr tesseract-ocr-kor`, macOS는 `brew install tesseract tesseract-lang`으로 설치합니다. Docker Worker 이미지에는 자동 설치됩니다.
-- 등록 정보는 `worker/agent_config.json` 에 저장됩니다.
+- Windows 네이티브 등록 정보는 `%LOCALAPPDATA%\MarsFlowLab\Worker\agent_config.json`에 저장됩니다. 기존 `worker/agent_config.json`은 최초 실행 때 자동 이전됩니다.
 - 워크플로우에 연결한 공유 디렉터리만 Worker의 파일 접근 허용 목록에 들어갑니다.
 - 하나의 디렉터리를 여러 Worker가 처리할 때는, 기기 관리에서 같은 디렉터리 별명을 각 Worker에 등록하고 각 Worker의 실제 로컬 경로를 입력합니다. 예: Linux `/shared/project`, Windows `D:\team\project`.
 

@@ -1,10 +1,10 @@
-"""Worker Agent 설정 파일 관리 (worker/agent_config.json)."""
+"""Worker Agent 설정 파일 관리."""
 
 import json
 import os
-from pathlib import Path
+from .paths import config_path
 
-CONFIG_PATH = Path(os.getenv("MARS_CONFIG_PATH", Path(__file__).resolve().parent.parent / "agent_config.json"))
+CONFIG_PATH = config_path()
 
 DEFAULTS = {
     "server_url": "https://marsflowlab.com/api",
@@ -22,6 +22,7 @@ def load() -> dict:
         config = {**DEFAULTS, **json.loads(CONFIG_PATH.read_text(encoding="utf-8"))}
     else:
         config = dict(DEFAULTS)
+    config["server_url"] = os.getenv("MARS_SERVER_URL", config["server_url"])
     config["ollama_url"] = os.getenv("MARS_OLLAMA_URL", config["ollama_url"])
     return config
 
