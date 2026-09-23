@@ -68,9 +68,9 @@ function Test-WorkerServerConnection {
     Write-Mars "서버 연결 확인: $($Uri.Host):$Port"
     $Result = Test-NetConnection -ComputerName $Uri.Host -Port $Port -WarningAction SilentlyContinue
     if (-not $Result.TcpTestSucceeded) {
-        throw "서버 $($Uri.Host):$Port 에 연결할 수 없습니다. DNS, VPN, 서버 방화벽 또는 Windows 아웃바운드 정책을 확인해 주세요. Worker PC의 인바운드 포트를 열 필요는 없습니다."
+        throw "서버 $($Uri.Host):$Port 에 연결할 수 없습니다. DNS, VPN, 서버 방화벽 또는 Windows 아웃바운드 정책을 확인해 주세요."
     }
-    Write-Mars "서버 TCP 연결 확인 완료 (Worker PC 인바운드 포트 개방 불필요)"
+    Write-Mars "서버 TCP 연결 확인 완료"
 }
 
 function Initialize-NativeDirectories {

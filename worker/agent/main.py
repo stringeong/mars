@@ -229,7 +229,7 @@ def cmd_run(_args: argparse.Namespace) -> None:
     server = config["server_url"]
     headers = {"X-Device-Key": config["api_key"]}
     interval = config.get("poll_interval_sec", 3)
-    print(f"[M.A.R.S Worker] {config['device_name']} — {server} 폴링 시작 (Ctrl+C로 종료)")
+    print(f"[M.A.R.S Worker] {config['device_name']} - {server} 폴링 시작 (Ctrl+C로 종료)")
 
     while True:
         try:
@@ -241,16 +241,16 @@ def cmd_run(_args: argparse.Namespace) -> None:
             )
             if resp.status_code == 200 and resp.content and resp.text != "null":
                 task = resp.json()
-                print(f"▶ 작업 수신: #{task['task_id']} {task['agent_name']}")
+                print(f"[RECEIVED] 작업 수신: #{task['task_id']} {task['agent_name']}")
                 staging_dir = None
                 try:
                     staging_dir = stage_uploaded_files(server, headers, task)
                     output = executor.run_task(task, config)
                     result = {"status": "done", "output": output, "error": ""}
-                    print(f"✔ 작업 완료: #{task['task_id']} ({len(output)}자)")
+                    print(f"[DONE] 작업 완료: #{task['task_id']} ({len(output)}자)")
                 except Exception as e:  # LLM 실패 등 -> 서버에 실패 보고
                     result = {"status": "failed", "output": "", "error": str(e)}
-                    print(f"✘ 작업 실패: #{task['task_id']} — {e}")
+                    print(f"[ERROR] 작업 실패: #{task['task_id']} - {e}")
                 finally:
                     if staging_dir:
                         shutil.rmtree(staging_dir, ignore_errors=True)
