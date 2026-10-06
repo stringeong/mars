@@ -45,6 +45,66 @@ def heartbeat(
     return {"ok": True, "device_id": device.id}
 
 
+@router.patch("/device", response_model=schemas.DeviceOut)
+def update_own_device(
+    body: schemas.DeviceUpdate,
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    """Allow a Worker key to rename only the device it authenticates."""
+    if body.name is None:
+        raise HTTPException(422, "변경할 기기 이름을 입력하세요.")
+    name = body.name.strip()
+    if not name or len(name) > 128:
+        raise HTTPException(422, "기기 이름은 1~128자로 입력하세요.")
+    duplicate = (
+        db.query(models.Device)
+        .filter(
+            models.Device.user_id == device.user_id,
+            models.Device.name == name,
+            models.Device.id != device.id,
+        )
+        .first()
+    )
+    if duplicate:
+        raise HTTPException(409, "같은 이름의 기기가 이미 등록되어 있습니다.")
+    device.name = name
+    db.commit()
+    db.refresh(device)
+    specs = device.specs or {}
+    return {
+        "id": device.id,
+        "name": device.name,
+        "specs": specs,
+        "resource_limits": specs.get("resource_limits") or {},
+        "last_heartbeat": device.last_heartbeat,
+        "online": orchestrator.device_is_online(device),
+    }
+
+
+@router.delete("/device", status_code=204)
+def delete_own_device(
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    """Remove the authenticated Worker registration from its workspace."""
+    running = (
+        db.query(models.TaskRecord)
+        .filter(
+            models.TaskRecord.assigned_device_id == device.id,
+            models.TaskRecord.status == "running",
+        )
+        .first()
+    )
+    if running:
+        raise HTTPException(409, "실행 중인 작업이 있어 등록을 해제할 수 없습니다.")
+    db.query(models.TaskRecord).filter(
+        models.TaskRecord.assigned_device_id == device.id
+    ).update({"assigned_device_id": None}, synchronize_session=False)
+    db.delete(device)
+    db.commit()
+
+
 @router.post("/tasks/next", response_model=schemas.WorkerTaskOut | None)
 def next_task(
     response: Response,

@@ -149,6 +149,27 @@ class TestAuthGuards:
         assert r.status_code == 401
 
 
+    def test_worker_key_can_rename_own_device(self, client):
+        auth = signup_and_login(client)
+        key = register_device(client, auth, name="기존 이름")
+
+        r = client.patch("/worker/device", json={"name": "새 이름"}, headers=key)
+
+        assert r.status_code == 200
+        assert r.json()["name"] == "새 이름"
+        assert client.get("/devices", headers=auth).json()[0]["name"] == "새 이름"
+
+    def test_worker_key_can_unregister_own_device(self, client):
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+
+        r = client.delete("/worker/device", headers=key)
+
+        assert r.status_code == 204
+        assert client.get("/devices", headers=auth).json() == []
+        assert client.post("/worker/heartbeat", headers=key).status_code == 401
+
+
 class TestServiceEndpoints:
     def test_blank_prompt_rejected(self, client):
         auth = signup_and_login(client)

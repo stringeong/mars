@@ -22,6 +22,7 @@ import psutil
 
 from . import config as cfg
 from . import executor
+from . import runtime_state
 from . import sandbox
 
 _MODEL_CACHE: tuple[float, list[str]] = (0.0, [])
@@ -230,6 +231,7 @@ def cmd_run(_args: argparse.Namespace) -> None:
     headers = {"X-Device-Key": config["api_key"]}
     interval = config.get("poll_interval_sec", 3)
     print(f"[M.A.R.S Worker] {config['device_name']} - {server} 폴링 시작 (Ctrl+C로 종료)")
+    runtime_state.write(status="idle")
 
     while True:
         try:
@@ -241,6 +243,16 @@ def cmd_run(_args: argparse.Namespace) -> None:
             )
             if resp.status_code == 200 and resp.content and resp.text != "null":
                 task = resp.json()
+                runtime_state.write(
+                    status="running",
+                    task={
+                        "task_id": task["task_id"],
+                        "execution_id": task["execution_id"],
+                        "agent_name": task["agent_name"],
+                        "model": task.get("model") or config.get("default_model", ""),
+                        "started_at": time.time(),
+                    },
+                )
                 print(f"[RECEIVED] 작업 수신: #{task['task_id']} {task['agent_name']}")
                 staging_dir = None
                 try:
@@ -260,6 +272,7 @@ def cmd_run(_args: argparse.Namespace) -> None:
                     json=result,
                     timeout=15,
                 )
+                runtime_state.write(status="idle")
             else:
                 # 대기 중에도 주기적으로 상태(사양) 보고
                 httpx.post(
@@ -269,6 +282,7 @@ def cmd_run(_args: argparse.Namespace) -> None:
                     timeout=15,
                 )
         except KeyboardInterrupt:
+            runtime_state.clear()
             print("\n종료합니다.")
             return
         except Exception as e:
@@ -276,6 +290,7 @@ def cmd_run(_args: argparse.Namespace) -> None:
         try:
             time.sleep(interval)
         except KeyboardInterrupt:
+            runtime_state.clear()
             print("\n종료합니다.")
             return
 

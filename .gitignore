@@ -38,3 +38,6 @@ docs/current-implementation.md
 # Python test coverage
 .coverage
 htmlcov/
+
+# Local Docker test environment (never commit)
+.mars_test/
