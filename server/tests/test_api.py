@@ -125,6 +125,15 @@ class TestHappyPath:
             )
             assert r.status_code == 200
 
+        # 타임라인: 단계·연결선·배정 워커 이름이 함께 온다 (4번 개선)
+        body = client.get(f"/executions/{execution['id']}", headers=auth).json()
+        assert body["stages"] == [["a"], ["b"], ["c"]]
+        assert body["final_node_ids"] == ["c"]
+        assert sorted((e["source"], e["target"]) for e in body["edges"]) == [("a", "b"), ("b", "c")]
+        assert [(t["node_id"], t["depth"], t["assigned_device_name"], t["executor"]) for t in body["tasks"]] == [
+            ("a", 0, "노트북", "local"), ("b", 1, "노트북", "local"), ("c", 2, "노트북", "local"),
+        ]
+
         # 더 줄 작업이 없으면 204
         assert client.post("/worker/tasks/next", headers=key).status_code == 204
 

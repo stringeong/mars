@@ -458,3 +458,65 @@ tr.clickable:hover { background: #f8fafc; }
 .recent-workflow-row { display: flex; align-items: center; gap: 6px; border-top: 1px solid #f0f1f5; }
 .recent-workflow-row .recent-workflow { flex: 1; min-width: 0; border-top: 0; }
 .recent-workflow-actions { display: flex; gap: 4px; }
+
+/* 실행 타임라인: 상태 표시(아이콘+이름), 단계 보기, 간트 보기 */
+.task-status { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid; border-radius: 999px; font-size: 11px; font-weight: 750; white-space: nowrap; }
+.task-status i { font-style: normal; }
+.task-status.blocked { border-color: #cbd5e1; background: #f1f5f9; color: #475569; }
+.task-status.ready { border-color: #fcd34d; background: #fffbeb; color: #92400e; }
+.task-status.running { border-color: #93c5fd; background: #eff6ff; color: #1e40af; }
+.task-status.done { border-color: #86efac; background: #f0fdf4; color: #166534; }
+.task-status.failed { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
+.timeline-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; }
+.view-toggle { display: inline-flex; flex: none; padding: 3px; border: 1px solid #e4e7ee; border-radius: 10px; background: #f8f9fc; }
+.view-toggle button { padding: 6px 12px; border: 0; border-radius: 8px; background: none; color: var(--muted); font: inherit; font-size: 12px; font-weight: 700; cursor: pointer; }
+.view-toggle button.active { background: #fff; color: #4338ca; box-shadow: 0 1px 4px rgba(25, 33, 61, .1); }
+.task-status-summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 12px 0 10px; }
+.stage-view { width: 100%; border: 1px solid #e4e7ee; border-radius: 12px; background: #fcfcfd; }
+.stage-label { display: grid; gap: 1px; width: 220px; padding: 4px 2px; border-bottom: 2px solid #e0e7ff; }
+.stage-label strong { color: #4338ca; font-size: 13px; }
+.stage-label span { color: var(--muted); font-size: 11px; }
+.stage-task { display: grid; gap: 7px; width: 220px; padding: 10px 12px; border: 1px solid #e4e7ee; border-left: 4px solid #cbd5e1; border-radius: 10px; background: #fff; box-shadow: 0 2px 8px rgba(25, 33, 61, .05); font-size: 12px; }
+.stage-task.ready { border-left-color: #f59e0b; }
+.stage-task.running { border-left-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+.stage-task.done { border-left-color: #16a34a; }
+.stage-task.failed { border-left-color: #dc2626; }
+.stage-task-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.stage-task-head strong { overflow: hidden; color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.stage-task .task-status { justify-self: start; }
+.stage-task dl { display: grid; grid-template-columns: 1fr 1fr; gap: 3px 10px; margin: 0; }
+.stage-task dl div { display: flex; gap: 5px; min-width: 0; }
+.stage-task dt { flex: none; color: var(--muted); }
+.stage-task dd { margin: 0; overflow: hidden; color: #334155; text-overflow: ellipsis; white-space: nowrap; }
+.stage-handle { opacity: 0; }
+.stage-edge path { stroke: #cbd5e1; stroke-width: 2px; }
+.stage-edge.done path { stroke: #86efac; }
+@media (prefers-reduced-motion: reduce) { .react-flow__edge.animated path { animation: none; } }
+.gantt { display: grid; gap: 10px; }
+.gantt-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.gantt-legend small { margin-left: auto; color: var(--muted); font-size: 11px; }
+.gantt-chart { display: grid; gap: 6px; padding: 10px 12px 14px; border: 1px solid #e4e7ee; border-radius: 12px; background: #fcfcfd; }
+.gantt-axis, .gantt-lane { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 10px; align-items: center; }
+.gantt-lane-label { overflow: hidden; color: #334155; font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.gantt-track { position: relative; height: 34px; }
+.gantt-axis .gantt-track { height: 18px; }
+.gantt-tick { position: absolute; top: 0; transform: translateX(-50%); color: var(--muted); font-size: 10px; white-space: nowrap; }
+.gantt-tick:first-child { transform: none; }
+.gantt-tick:last-child { transform: translateX(-100%); }
+.gantt-gridline { position: absolute; top: 0; bottom: 0; width: 1px; background: #eef0f4; }
+.gantt-bar { position: absolute; top: 5px; height: 24px; display: flex; align-items: center; padding: 0 7px; border: 1px solid; border-left-width: 3px; border-radius: 4px; font-size: 11px; font-weight: 650; cursor: default; outline-offset: 2px; }
+.gantt-bar > span { display: flex; gap: 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.gantt-bar > span i { font-style: normal; }
+.gantt-bar.blocked { border-color: #94a3b8; background: #f1f5f9; color: #475569; }
+.gantt-bar.ready { border-color: #d97706; background: #fffbeb; color: #92400e; }
+.gantt-bar.running { border-color: #2563eb; background: repeating-linear-gradient(135deg, #eff6ff 0 6px, #dbeafe 6px 12px); color: #1e40af; }
+.gantt-bar.done { border-color: #16a34a; background: #f0fdf4; color: #166534; }
+.gantt-bar.failed { border-color: #dc2626; background: #fef2f2; color: #991b1b; }
+.gantt-tip { position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 5; display: none; min-width: 220px; padding: 8px 10px; border: 1px solid #e4e7ee; border-radius: 8px; background: #fff; box-shadow: 0 8px 22px rgba(25, 33, 61, .14); color: var(--text); font-weight: 500; }
+.gantt-tip strong, .gantt-tip span { display: block; white-space: nowrap; }
+.gantt-tip span { margin-top: 2px; color: #475569; }
+.gantt-bar:hover .gantt-tip, .gantt-bar:focus .gantt-tip { display: block; }
+.gantt-waiting { margin: 0; color: var(--muted); font-size: 12px; }
+
+.stage-view { position: relative; }
+.stage-pan-hint { position: absolute; right: 10px; bottom: 8px; z-index: 4; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, .92); color: var(--muted); font-size: 11px; pointer-events: none; }

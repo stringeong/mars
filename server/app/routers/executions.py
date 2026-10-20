@@ -163,12 +163,34 @@ def start_execution(
     orchestrator.create_tasks_for_execution(db, execution)
     db.commit()
     db.refresh(execution)
-    return _to_out(execution)
+    return _to_out(db, execution)
 
 
-def _to_out(execution: models.Execution) -> schemas.ExecutionOut:
+def _to_out(db: Session, execution: models.Execution) -> schemas.ExecutionOut:
     out = schemas.ExecutionOut.model_validate(execution)
     out.progress = orchestrator.execution_progress(execution)
+    # 타임라인을 단계(열)와 의존선으로 그릴 수 있게 실행 당시 그래프에서 계산한다
+    graph = execution.graph_snapshot or {}
+    out.stages = dag.stages(graph)
+    out.edges = [
+        {"source": parent, "target": child}
+        for child, parents in dag.parents_of(graph).items()
+        for parent in parents
+    ]
+    out.final_node_ids = dag.result_node_ids(graph)
+    depth = {node_id: index for index, node_ids in enumerate(out.stages) for node_id in node_ids}
+    nodes = {node["id"]: node for node in graph.get("nodes", [])}
+    device_ids = {task.assigned_device_id for task in out.tasks if task.assigned_device_id}
+    names = dict(
+        db.query(models.Device.id, models.Device.name).filter(models.Device.id.in_(device_ids)).all()
+    ) if device_ids else {}
+    for task in out.tasks:
+        node = nodes.get(task.node_id, {})
+        cloud = transfers.is_cloud_node(node)
+        task.depth = depth.get(task.node_id)
+        task.assigned_device_name = names.get(task.assigned_device_id)
+        task.executor = "cloud" if cloud else "local"
+        task.provider = transfers.provider_for(node) if cloud else None
     return out
 
 
@@ -208,7 +230,7 @@ def get_execution(
     orchestrator.reclaim_stale_tasks(db, user.id)
     db.commit()
     db.refresh(execution)
-    return _to_out(execution)
+    return _to_out(db, execution)
 
 
 @router.post("/executions/{execution_id}/cancel", response_model=schemas.ExecutionOut)
@@ -225,4 +247,4 @@ def cancel_execution(
     orchestrator.cancel_execution(db, execution)  # UC-204 s201
     db.commit()
     db.refresh(execution)
-    return _to_out(execution)
+    return _to_out(db, execution)

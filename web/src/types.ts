@@ -174,6 +174,10 @@ export interface Task {
   error: string | null
   started_at: string | null
   finished_at: string | null
+  depth?: number | null
+  assigned_device_name?: string | null
+  executor?: 'local' | 'cloud'
+  provider?: string | null
 }
 
 export interface Execution {
@@ -189,6 +193,9 @@ export interface Execution {
   input_files?: RunInputRecord[] | null
   progress: number
   tasks: Task[]
+  stages?: string[][]
+  edges?: { source: string; target: string }[]
+  final_node_ids?: string[]
 }
 
 export interface ExecutionListItem {

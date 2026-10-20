@@ -1,4 +1,42 @@
-import { GenerationInfo, RunInputRecord, ValidationIssue, ValidationResult } from './types'
+import { GenerationInfo, RunInputRecord, Task, ValidationIssue, ValidationResult } from './types'
+
+/** 작업 상태. 색만으로 구분하지 않도록 아이콘과 이름을 함께 쓴다. */
+export const TASK_STATUS: Record<string, { label: string; icon: string }> = {
+  blocked: { label: '선행 대기', icon: '⏸' },
+  ready: { label: '워커 대기', icon: '◷' },
+  running: { label: '실행 중', icon: '▶' },
+  done: { label: '완료', icon: '✓' },
+  failed: { label: '실패', icon: '✕' },
+}
+
+export function taskStatus(status: string) {
+  return TASK_STATUS[status] ?? { label: status, icon: '•' }
+}
+
+export function formatDuration(ms: number) {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+  if (seconds < 60) return `${seconds}초`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}분 ${seconds % 60}초`
+  return `${Math.floor(minutes / 60)}시간 ${minutes % 60}분`
+}
+
+export function formatClock(value: string | null | undefined) {
+  return value ? new Date(value).toLocaleTimeString() : '—'
+}
+
+/** 실행 중이면 지금까지 걸린 시간을 보여준다 */
+export function taskDuration(task: Task, now: number) {
+  if (!task.started_at) return '—'
+  const end = task.finished_at ? new Date(task.finished_at).getTime() : now
+  return formatDuration(end - new Date(task.started_at).getTime())
+}
+
+export function taskWorkerLabel(task: Task) {
+  if (task.executor === 'cloud') return `클라우드 · ${PROVIDER_LABELS[task.provider ?? ''] ?? task.provider ?? '외부 API'}`
+  if (task.assigned_device_id) return task.assigned_device_name ?? `삭제된 워커 #${task.assigned_device_id}`
+  return task.status === 'blocked' ? '배정 전' : '배정 대기'
+}
 
 export const PROVIDER_LABELS: Record<string, string> = {
   ollama: 'Ollama',

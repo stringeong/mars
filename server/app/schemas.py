@@ -299,6 +299,11 @@ class TaskOut(BaseModel):
     error: str | None
     started_at: UTCDateTime | None
     finished_at: UTCDateTime | None
+    # 실행 타임라인용: DAG 깊이(0부터), 배정 워커 이름, 실행 위치
+    depth: int | None = None
+    assigned_device_name: str | None = None
+    executor: str = "local"
+    provider: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -316,6 +321,10 @@ class ExecutionOut(BaseModel):
     input_files: list[dict] | None = None
     progress: float = 0.0
     tasks: list[TaskOut] = Field(default_factory=list)
+    # 실행 스냅샷의 DAG 단계(같은 단계는 동시에 실행 가능)와 블록 간 연결
+    stages: list[list[str]] = Field(default_factory=list)
+    edges: list[dict] = Field(default_factory=list)
+    final_node_ids: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
