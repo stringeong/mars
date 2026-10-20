@@ -100,6 +100,7 @@ async def generate_service(
         dag.validate_graph(graph)
     except dag.DagError as e:
         raise HTTPException(422, f"유효한 서비스를 생성하지 못했습니다: {e}")  # e401
+    graph = dag.apply_auto_flags(graph)
     service = models.Service(
         user_id=user.id,
         name=graph.pop("name", "새 서비스"),
@@ -150,7 +151,8 @@ def update_service(
 ):
     service = _get_owned(service_id, user, db)
     if body.graph is not None:
-        graph = body.graph.model_dump()
+        # 연결이 바뀌었을 수 있으므로 직접 지정하지 않은 최종 블록·파일 필요 값을 다시 계산한다
+        graph = dag.apply_auto_flags(body.graph.model_dump())
         try:
             dag.validate_graph(graph)  # UC-202 e301 실행 불가 구성 차단
         except dag.DagError as e:

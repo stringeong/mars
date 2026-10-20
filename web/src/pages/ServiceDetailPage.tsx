@@ -7,7 +7,7 @@ import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
 import ValidationPanel from '../components/ValidationPanel'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
 import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { blockingErrors, generationLabel, issuesByNode } from '../workflow'
+import { applyAutoFlags, blockingErrors, FlagExplanation, generationLabel, issuesByNode } from '../workflow'
 
 const nodeTypes = { agent: AgentBlockNode }
 
@@ -39,6 +39,21 @@ function asAgents(graph: Graph): AgentNode[] {
 
 function layout(agents: AgentNode[]): Record<string, { x: number; y: number }> {
   return Object.fromEntries(agents.map((agent, index) => [agent.id, { x: 60 + (index % 3) * 280, y: 70 + Math.floor(index / 3) * 230 }]))
+}
+
+/** 자동으로 정해진 값을 보여주고, 바꾸면 '직접 지정'으로 남긴다. */
+function FlagToggle({ label, checked, explanation, onChange, onReset }: {
+  label: string
+  checked: boolean
+  explanation?: FlagExplanation
+  onChange: (checked: boolean) => void
+  onReset: () => void
+}) {
+  return <div className="flag-toggle">
+    <label className="toggle-row"><input type="checkbox" checked={checked} onChange={(event) => onChange(event.target.checked)} />{label}<span className={`flag-source ${explanation?.manual ? 'manual' : 'auto'}`}>{explanation?.manual ? '직접 지정' : '자동'}</span></label>
+    {explanation && <small className="flag-reason">{explanation.reason}</small>}
+    {explanation?.manual && <button type="button" className="text-button flag-reset" onClick={onReset}>자동으로 되돌리기</button>}
+  </div>
 }
 
 export default function ServiceDetailPage() {
@@ -167,6 +182,22 @@ export default function ServiceDetailPage() {
     }
   }
 
+  // 연결·블록·직접 지정 값이 바뀌면 최종 블록과 파일 필요 기본값을 다시 계산한다 (직접 지정한 값은 그대로)
+  const flagInputsKey = useMemo(() => JSON.stringify({
+    agents: Object.values(agents).map((agent) => [agent.id, agent.name, agent.final_hint, agent.needs_file_hint, agent.final_manual && agent.final, agent.final_manual, agent.needs_file_manual && agent.needs_file, agent.needs_file_manual]),
+    edges: edges.map((edge) => [edge.source, edge.target]),
+  }), [agents, edges])
+  const flagReasons = useMemo(() => applyAutoFlags(Object.values(agents), edges).reasons, [flagInputsKey])
+
+  useEffect(() => {
+    const current = Object.values(agents)
+    if (!current.length) return
+    const next = applyAutoFlags(current, edges).agents
+    if (next.some((agent) => agent.final !== !!agents[agent.id]?.final || agent.needs_file !== !!agents[agent.id]?.needs_file)) {
+      setAgents(Object.fromEntries(next.map((agent) => [agent.id, agent])))
+    }
+  }, [flagInputsKey])
+
   // 블록 위치를 뺀 구성이 바뀌면 잠시 뒤 서버에서 다시 검사한다
   const graphKey = useMemo(() => JSON.stringify({
     agents: Object.values(agents).map(({ position: _position, ...agent }) => agent),
@@ -187,12 +218,13 @@ export default function ServiceDetailPage() {
     setAgents((current) => ({ ...current, [selectedAgent.id]: { ...selectedAgent, ...patch } }))
   }
 
-  // 최종 블록은 하나만 둔다
+  // 최종 블록은 하나만 둔다. 직접 지정하면 다른 블록의 직접 지정은 풀고 자동 규칙에 맡긴다.
   function setFinal(checked: boolean) {
     if (!selectedAgent) return
     setAgents((current) => Object.fromEntries(Object.entries(current).map(([agentId, agent]) => [
       agentId,
-      { ...agent, final: agentId === selectedAgent.id ? checked : checked ? false : agent.final },
+      agentId === selectedAgent.id ? { ...agent, final: checked, final_manual: true }
+        : checked && agent.final_manual ? { ...agent, final_manual: false } : agent,
     ])))
   }
 
@@ -341,8 +373,8 @@ export default function ServiceDetailPage() {
           <div className="row spread"><h2 style={{ margin: 0 }}>에이전트 블록</h2><button className="btn sm danger" onClick={deleteAgent}>삭제</button></div>
           {selectedIssues.length > 0 && <ul className="validation-list node-issues">{selectedIssues.map((issue, index) => <li key={`${issue.code}-${index}`} className={issue.severity}>{issue.message}</li>)}</ul>}
           <label>이름</label><input value={selectedAgent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
-          <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.final} onChange={(event) => setFinal(event.target.checked)} />최종 블록 (이 블록의 출력이 실행 결과가 됩니다)</label>
-          <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.needs_file} onChange={(event) => updateAgent({ needs_file: event.target.checked })} />사용자 파일 필요 (파일이 없으면 실행할 수 없습니다)</label>
+          <FlagToggle label="최종 블록 (출력이 실행 결과가 됨)" checked={!!selectedAgent.final} explanation={flagReasons[selectedAgent.id]?.final} onChange={setFinal} onReset={() => updateAgent({ final_manual: false })} />
+          <FlagToggle label="사용자 파일 필요" checked={!!selectedAgent.needs_file} explanation={flagReasons[selectedAgent.id]?.needsFile} onChange={(checked) => updateAgent({ needs_file: checked, needs_file_manual: true })} onReset={() => updateAgent({ needs_file_manual: false })} />
           {inputSlots.filter((slot) => (selectedAgent.input_slot_ids ?? []).includes(slot.id)).map((slot) => <div className="slot-inline node-slot" key={slot.id}><span title={slot.format}>파일 슬롯 · {slot.description}</span><small className={slot.file_ids.length + slot.directory_ids.length ? 'ok' : 'empty'}>{slot.file_ids.length + slot.directory_ids.length ? `${slot.file_ids.length + slot.directory_ids.length}개 연결` : '비어 있음'}</small></div>)}
           <label>역할 프롬프트</label><textarea rows={5} value={selectedAgent.role_prompt} onChange={(event) => updateAgent({ role_prompt: event.target.value })} />
           <label>실행 위치</label><select value={selectedAgent.provider || 'ollama'} onChange={(event) => { const provider = event.target.value as 'ollama' | 'openai' | 'anthropic' | 'gemini'; updateAgent({ provider, executor: provider === 'ollama' ? 'local' : 'cloud', worker_id: provider === 'ollama' ? selectedAgent.worker_id : null, model: '' }) }}><option value="ollama">Local Worker · Ollama</option><option value="openai">Cloud · OpenAI</option><option value="anthropic">Cloud · Anthropic</option><option value="gemini">Cloud · Google Gemini</option></select>

@@ -338,6 +338,37 @@ def result_node_ids(graph: dict) -> list[str]:
     return marked or terminal_nodes(graph)
 
 
+def apply_auto_flags(graph: dict) -> dict:
+    """최종 블록과 '사용자 파일 필요'를 규칙으로 정한 복사본. 직접 지정한 값(*_manual)은 바꾸지 않는다.
+
+    - 파일 필요: 생성기가 필요하다고 했거나(needs_file_hint) 들어오는 연결이 없는 블록
+    - 최종 블록: 직접 지정한 최종 블록이 있으면 그 블록만. 없으면 끝나는 블록 중 생성기가 고른
+      블록(final_hint), 그것도 없으면 가장 뒤 단계(같으면 블록 순서상 뒤)의 끝나는 블록 하나
+    """
+    result = copy.deepcopy(graph)
+    agents = _agent_nodes(result)
+    parents = parents_of(result)
+    for node in agents:
+        if not node.get("needs_file_manual"):
+            node["needs_file"] = bool(node.get("needs_file_hint")) or not parents.get(node["id"])
+        if not node.get("final_manual"):
+            node["final"] = False
+    if any(node.get("final_manual") and node.get("final") for node in agents):
+        return result
+    # 직접 최종 블록에서 뺀 블록은 후보에서 제외한다
+    excluded = {node["id"] for node in agents if node.get("final_manual")}
+    sinks = [node_id for node_id in terminal_nodes(result) if node_id not in excluded]
+    if not sinks:
+        return result
+    levels = _levels(result)
+    order = {node["id"]: index for index, node in enumerate(agents)}
+    hinted = {node["id"] for node in agents if node.get("final_hint")}
+    candidates = [node_id for node_id in sinks if node_id in hinted] or sinks
+    chosen = max(candidates, key=lambda node_id: (levels.get(node_id, -1), order[node_id]))
+    next(node for node in agents if node["id"] == chosen)["final"] = True
+    return result
+
+
 def input_sources(graph: dict, node: dict) -> tuple[list[int], list[int]]:
     """블록이 직접 읽는 (업로드 파일 id, 공유 디렉터리 id). 파일 슬롯과 디렉터리 간선을 포함한다."""
     file_ids = [v for v in node.get("uploaded_file_ids") or [] if isinstance(v, int)]

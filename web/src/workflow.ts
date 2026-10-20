@@ -1,4 +1,73 @@
-import { GenerationInfo, RunInputRecord, Task, ValidationIssue, ValidationResult } from './types'
+import { AgentNode, GenerationInfo, RunInputRecord, Task, ValidationIssue, ValidationResult } from './types'
+
+export type FlagExplanation = { manual: boolean; reason: string }
+export type AutoFlagReasons = { needsFile: FlagExplanation; final: FlagExplanation }
+
+function longestPathLevels(ids: string[], pairs: { source: string; target: string }[]) {
+  const indegree = new Map(ids.map((id) => [id, 0]))
+  const children = new Map<string, string[]>(ids.map((id) => [id, []]))
+  pairs.forEach(({ source, target }) => { children.get(source)!.push(target); indegree.set(target, indegree.get(target)! + 1) })
+  const level = new Map(ids.map((id) => [id, 0]))
+  const done = new Map<string, number>()
+  const queue = ids.filter((id) => indegree.get(id) === 0)
+  while (queue.length) {
+    const current = queue.shift()!
+    done.set(current, level.get(current)!)
+    for (const child of children.get(current)!) {
+      level.set(child, Math.max(level.get(child)!, level.get(current)! + 1))
+      indegree.set(child, indegree.get(child)! - 1)
+      if (indegree.get(child) === 0) queue.push(child)
+    }
+  }
+  return done
+}
+
+/**
+ * 서버 dag.apply_auto_flags와 같은 규칙으로 최종 블록·사용자 파일 필요를 정하고 이유를 함께 돌려준다.
+ * 직접 지정한 값(*_manual)은 바꾸지 않는다.
+ */
+export function applyAutoFlags(agents: AgentNode[], edges: { source: string; target: string }[]) {
+  const ids = agents.map((agent) => agent.id)
+  const known = new Set(ids)
+  const pairs = edges.filter((edge) => known.has(edge.source) && known.has(edge.target))
+  const hasParent = new Set(pairs.map((edge) => edge.target))
+  const hasChild = new Set(pairs.map((edge) => edge.source))
+  const levels = longestPathLevels(ids, pairs)
+  const next = agents.map((agent) => ({
+    ...agent,
+    needs_file: agent.needs_file_manual ? !!agent.needs_file : !!agent.needs_file_hint || !hasParent.has(agent.id),
+    final: agent.final_manual ? !!agent.final : false,
+  }))
+  const manualFinal = next.find((agent) => agent.final_manual && agent.final)
+  const sinks = manualFinal ? [] : next.filter((agent) => !hasChild.has(agent.id) && !agent.final_manual)
+  const hinted = sinks.filter((agent) => agent.final_hint)
+  const candidates = hinted.length ? hinted : sinks
+  // 가장 뒤 단계, 같으면 블록 순서상 뒤의 블록
+  const chosen = candidates.reduce<AgentNode | undefined>((best, agent) => (
+    !best || (levels.get(agent.id) ?? -1) >= (levels.get(best.id) ?? -1) ? agent : best
+  ), undefined)
+  if (chosen) next.find((agent) => agent.id === chosen.id)!.final = true
+
+  const reasons: Record<string, AutoFlagReasons> = {}
+  for (const agent of next) {
+    const needsFile: FlagExplanation = agent.needs_file_manual
+      ? { manual: true, reason: agent.needs_file ? '직접 지정: 실행할 때 파일이 필요합니다.' : '직접 지정: 파일 없이 실행 프롬프트나 앞 단계 결과로 실행합니다.' }
+      : agent.needs_file_hint ? { manual: false, reason: '생성기가 사용자 파일을 직접 읽는 블록으로 정했습니다.' }
+        : !hasParent.has(agent.id) ? { manual: false, reason: '들어오는 연결이 없어 파일이 필요합니다.' }
+          : { manual: false, reason: '앞 단계 결과를 입력으로 받습니다.' }
+    let final: FlagExplanation
+    if (agent.final_manual) final = { manual: true, reason: agent.final ? '직접 최종 블록으로 지정했습니다.' : '직접 최종 블록에서 뺐습니다.' }
+    else if (manualFinal) final = { manual: false, reason: `'${manualFinal.name}' 블록을 직접 최종 블록으로 지정했습니다.` }
+    else if (chosen?.id === agent.id) {
+      final = { manual: false, reason: hinted.length ? '생성기가 최종 블록으로 정했습니다.'
+        : sinks.length > 1 ? `끝나는 블록 ${sinks.length}개 중 가장 뒤 단계 블록이라 최종 블록으로 정했습니다.`
+          : '끝나는 블록이라 최종 블록으로 정했습니다.' }
+    } else if (!hasChild.has(agent.id)) final = { manual: false, reason: chosen ? `'${chosen.name}' 블록이 최종 블록으로 정해졌습니다.` : '최종 블록을 정할 수 없습니다.' }
+    else final = { manual: false, reason: '뒤에 이어지는 블록이 있어 최종 블록이 아닙니다.' }
+    reasons[agent.id] = { needsFile, final }
+  }
+  return { agents: next, reasons }
+}
 
 /** 작업 상태. 색만으로 구분하지 않도록 아이콘과 이름을 함께 쓴다. */
 export const TASK_STATUS: Record<string, { label: string; icon: string }> = {

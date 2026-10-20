@@ -162,14 +162,24 @@ def _agent_node(node: dict, index: int) -> dict:
         "uploaded_file_ids": node.get("uploaded_file_ids") or [],
         "final": _truthy(node.get("final")),
         "needs_file": _truthy(node.get("needs_file")),
+        # 생성기가 정한 값은 hint로 보관하고, 실제 값은 dag.apply_auto_flags가 정한다
+        "final_hint": _truthy(node.get("final_hint", node.get("final"))),
+        "needs_file_hint": _truthy(node.get("needs_file_hint", node.get("needs_file"))),
+        "final_manual": bool(node.get("final_manual")),
+        "needs_file_manual": bool(node.get("needs_file_manual")),
         "input_slot_ids": list(node.get("input_slot_ids") or []),
         **({"position": node["position"]} if node.get("position") is not None else {}),
     }
 
 
 def _input_slots(raw_nodes: list[dict], nodes: list[dict]) -> list[dict]:
-    """needs_file 블록의 파일 안내를 슬롯으로 묶는다. 같은 file_key를 쓰는 블록은 한 슬롯을 함께 읽는다."""
+    """needs_file 블록의 파일 안내를 슬롯으로 묶는다. 같은 file_key를 쓰는 블록은 한 슬롯을 함께 읽는다.
+
+    생성기가 설명을 주지 않은 블록(들어오는 연결이 없어 자동으로 파일이 필요해진 블록 등)은
+    "〈블록 이름〉 입력 파일" 슬롯을 받는다.
+    """
     slots: dict[str, dict] = {}
+    first_names: dict[str, str] = {}
     for raw, node in zip(raw_nodes, nodes):
         if not node["needs_file"]:
             continue
@@ -181,26 +191,13 @@ def _input_slots(raw_nodes: list[dict], nodes: list[dict]) -> list[dict]:
             "file_ids": [],
             "directory_ids": [],
         })
+        first_names.setdefault(slot["id"], node["name"])
         slot["description"] = slot["description"] or str(raw.get("file_description") or "").strip()
         slot["format"] = slot["format"] or str(raw.get("file_format") or "").strip()
         node["input_slot_ids"] = [slot["id"]]
     for slot in slots.values():
-        slot["description"] = slot["description"] or "사용자 파일"
+        slot["description"] = slot["description"] or f"{first_names[slot['id']]} 입력 파일"
     return list(slots.values())
-
-
-def _mark_final(graph: dict) -> dict:
-    """끝나는 블록이 하나면 최종 블록으로 표시한다. 여럿이면 사용자가 고르도록 비워 둔다."""
-    from . import dag
-
-    finals = [n for n in graph["nodes"] if n.get("final")]
-    sinks = set(dag.terminal_nodes(graph))
-    for node in finals:
-        if node["id"] not in sinks:
-            node["final"] = False
-    if not any(n.get("final") for n in graph["nodes"]) and len(sinks) == 1:
-        next(n for n in graph["nodes"] if n["id"] in sinks)["final"] = True
-    return graph
 
 
 def _workflow_edge(edge: dict) -> dict:
@@ -251,21 +248,22 @@ async def _generate_once(prompt: str, choice: GeneratorChoice, temperature: floa
     raw_nodes = data.get("nodes") or []
     if not raw_nodes:
         raise ValueError("에이전트가 비어 있음")
-    nodes = [_agent_node(n, i) for i, n in enumerate(raw_nodes)]
     graph = {
         "name": data.get("name") or "새 서비스",
         "description": data.get("description") or prompt,
-        "nodes": nodes,
+        "nodes": [_agent_node(n, i) for i, n in enumerate(raw_nodes)],
         "edges": [
             _workflow_edge(e)
             for e in (data.get("edges") or [])
             if e.get("source") and e.get("target")
         ],
-        "input_slots": _input_slots(raw_nodes, nodes),
     }
     # LLM이 순환 그래프 등 실행 불가능한 구성을 제안하면 여기서 예외 발생
     dag.validate_graph(graph)
-    return _mark_final(graph), usage
+    # 최종 블록은 정확히 하나로, 들어오는 연결이 없는 블록은 파일 필요로 맞춘 뒤 슬롯을 만든다
+    graph = dag.apply_auto_flags(graph)
+    graph["input_slots"] = _input_slots(raw_nodes, graph["nodes"])
+    return graph, usage
 
 
 def _connection_message(exc: httpx.HTTPError, choice: GeneratorChoice) -> str:
@@ -325,19 +323,21 @@ async def generate_workflow(prompt: str, choice: GeneratorChoice | None = None) 
 
 def fallback_workflow(prompt: str, reason: str = "") -> tuple[dict, dict]:
     """사용자가 생성 실패 후 고른 규칙 기반 기본 워크플로우."""
+    from . import dag
+
     fb = _fallback_graph(prompt)
-    graph = {
+    graph = dag.apply_auto_flags({
         "name": fb["name"],
         "description": fb["description"],
         "goal": fb["goal"],
         "nodes": [_agent_node(n, i) for i, n in enumerate(fb["nodes"])],
         "edges": [_workflow_edge(edge) for edge in fb["edges"]],
-        "input_slots": [],
-    }
+    })
+    graph["input_slots"] = _input_slots(fb["nodes"], graph["nodes"])
     info = {"source": "fallback", "location": None, "provider": None, "model": None, "generated_at": _now()}
     if reason.strip():
         info["fallback_reason"] = reason.strip()[:300]
-    return _mark_final(graph), info
+    return graph, info
 
 
 async def list_local_models() -> dict:
@@ -434,10 +434,16 @@ async def revise_workflow(graph: dict, instruction: str) -> dict:
             "uploaded_file_ids": prev.get("uploaded_file_ids", []),
             "final": bool(prev.get("final")),
             "needs_file": bool(prev.get("needs_file")),
+            "final_hint": bool(prev.get("final_hint")),
+            "needs_file_hint": bool(prev.get("needs_file_hint")),
+            "final_manual": bool(prev.get("final_manual")),
+            "needs_file_manual": bool(prev.get("needs_file_manual")),
             "input_slot_ids": prev.get("input_slot_ids", []),
             "position": prev.get("position"),
         })
-    revised = _mark_final({
+    from . import dag
+
+    revised = dag.apply_auto_flags({
         "nodes": merged_nodes,
         "edges": [
             _workflow_edge(e)

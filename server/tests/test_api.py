@@ -22,6 +22,8 @@ def client(db, monkeypatch):
         graph = copy.deepcopy(LINEAR)
         graph["name"] = "테스트 서비스"
         graph["description"] = prompt
+        # 시작 블록 a는 사용자가 '파일 필요'를 해제해 실행 프롬프트만으로 실행하는 블록이다
+        graph["nodes"][0].update(needs_file=False, needs_file_manual=True)
         GENERATE_CALLS.append(choice)
         return graph, {
             "source": "llm",
@@ -149,6 +151,39 @@ class TestHappyPath:
         assert len(items) == 1
         assert items[0]["service_name"] == "테스트 서비스"
         assert items[0]["status"] == "completed"
+
+
+class TestAutoFlags:
+    """최종 블록·파일 필요는 자동으로 정하고, 사용자가 직접 지정한 값은 덮어쓰지 않는다."""
+
+    def test_save_recomputes_flags_from_connections(self, client):
+        auth = signup_and_login(client)
+        service = create_service(client, auth)
+        graph = editable_graph(service)
+        # a -> b -> c 에 a -> x 를 더하면 끝나는 블록이 c, x 두 개가 된다
+        graph["nodes"].append({"id": "x", "type": "agent", "name": "요약"})
+        graph["edges"].append({"source": "a", "target": "x"})
+        r = client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
+        assert r.status_code == 200, r.text
+        nodes = {n["id"]: n for n in r.json()["graph"]["nodes"]}
+        # 가장 뒤 단계의 끝 블록 c가 최종 블록, x는 최종 블록에 닿지 않는다는 경고
+        assert [i for i, n in nodes.items() if n["final"]] == ["c"]
+        assert [w["node_ids"] for w in r.json()["validation"]["warnings"]] == [["x"]]
+        # a는 직접 해제한 값이 유지되고, 들어오는 연결이 있는 b·c·x는 파일이 필요 없다
+        assert {i: n["needs_file"] for i, n in nodes.items()} == {"a": False, "b": False, "c": False, "x": False}
+
+    def test_manual_values_survive_connection_changes(self, client):
+        auth = signup_and_login(client)
+        service = create_service(client, auth)
+        graph = editable_graph(service)
+        graph["nodes"][1].update(final=True, final_manual=True)      # b를 직접 최종 블록으로
+        graph["nodes"][0].update(needs_file_manual=False)             # a는 다시 자동으로
+        r = client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
+        nodes = {n["id"]: n for n in r.json()["graph"]["nodes"]}
+        assert [i for i, n in nodes.items() if n["final"]] == ["b"]
+        # 들어오는 연결이 없는 a는 자동으로 파일 필요 → 파일 누락 오류
+        assert nodes["a"]["needs_file"] is True
+        assert {e["code"] for e in r.json()["validation"]["errors"]} == {"missing_file"}
 
 
 class TestGenerationChoice:
@@ -307,7 +342,7 @@ class TestServiceEndpoints:
         service = create_service(client, auth)
         draft = editable_graph(service)
         draft["edges"].append({"source": "a", "target": "c"})
-        draft["nodes"][1]["needs_file"] = True
+        draft["nodes"][1].update(needs_file=True, needs_file_manual=True)
         r = client.post(f"/services/{service['id']}/validate", json={"graph": draft}, headers=auth)
         assert {e["code"] for e in r.json()["errors"]} == {"no_input", "missing_file"}
 
@@ -387,7 +422,7 @@ class TestExecutionGuards:
         client.post("/worker/heartbeat", headers=key)
         service = create_service(client, auth)
         graph = editable_graph(service)
-        graph["nodes"][1]["needs_file"] = True
+        graph["nodes"][1].update(needs_file=True, needs_file_manual=True)
         assert client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth).status_code == 200
 
         r = client.post(
@@ -404,7 +439,7 @@ class TestExecutionGuards:
         client.post("/worker/heartbeat", headers=key)
         service = create_service(client, auth)
         graph = editable_graph(service)
-        graph["nodes"].append({"id": "x", "type": "agent", "name": "고립", "uploaded_file_ids": []})
+        graph["nodes"].append({"id": "x", "type": "agent", "name": "고립", "needs_file_manual": True})
         graph["nodes"][2]["final"] = True
         assert client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth).status_code == 200
 

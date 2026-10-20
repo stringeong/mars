@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, getDeviceDirectories, getDeviceModels } from '../api'
 import ValidationPanel from '../components/ValidationPanel'
 import { AgentNode, CloudProvider, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { blockingErrors, generationLabel, issuesByNode, PROVIDER_LABELS } from '../workflow'
+import { applyAutoFlags, blockingErrors, generationLabel, issuesByNode, PROVIDER_LABELS } from '../workflow'
 
 type Provider = NonNullable<AgentNode['provider']>
 type ProviderStatus = { provider: CloudProvider; configured: boolean; default_model: string }
@@ -88,6 +88,7 @@ export default function WorkflowSetupPage() {
   const stageOf = useMemo(() => new Map((validation?.stages ?? []).flatMap((ids, index) => ids.map((nodeId) => [nodeId, index] as const))), [validation])
   const hasParent = useMemo(() => new Set((graph?.edges ?? []).filter((edge) => (edge.relation ?? 'workflow') === 'workflow').map((edge) => edge.target)), [graph])
   const nodeNames = useMemo(() => Object.fromEntries(agents.map((agent) => [agent.id, agent.name])), [agents])
+  const flagReasons = useMemo(() => applyAutoFlags(agents, (graph?.edges ?? []).filter((edge) => (edge.relation ?? 'workflow') === 'workflow')).reasons, [agents, graph])
 
   function patchGraph(update: (current: Graph) => Graph) {
     setGraph((current) => (current ? update(current) : current))
@@ -114,8 +115,9 @@ export default function WorkflowSetupPage() {
       return {
         ...current,
         input_slots: [...(current.input_slots ?? []), slot],
+        // 자동으로 파일이 필요하지 않던 블록에 슬롯을 만들면 사용자가 직접 지정한 것으로 남긴다
         nodes: current.nodes.map((item) => (item.id === node.id && isAgent(item)
-          ? { ...item, needs_file: true, input_slot_ids: [...(item.input_slot_ids ?? []), slot.id] }
+          ? { ...item, needs_file: true, needs_file_manual: item.needs_file ? item.needs_file_manual : true, input_slot_ids: [...(item.input_slot_ids ?? []), slot.id] }
           : item)),
       }
     })
@@ -288,6 +290,7 @@ export default function WorkflowSetupPage() {
                     <td className="setup-block-cell">
                       <strong>{node.name}</strong>
                       <span>{stage !== undefined ? `${stage + 1}단계` : '단계 없음'}{node.final && <b className="mini-final">FINAL</b>}</span>
+                      {node.needs_file && <small className="flag-reason" title={flagReasons[node.id]?.needsFile.reason}>파일 필요 · {flagReasons[node.id]?.needsFile.manual ? '직접 지정' : '자동'}</small>}
                     </td>
                     <td>
                       <select value={provider} onChange={(event) => {

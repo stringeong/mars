@@ -12,6 +12,11 @@ export interface AgentNode {
   final?: boolean
   needs_file?: boolean
   input_slot_ids?: string[]
+  // 생성기가 제안한 값과 사용자가 직접 지정했는지 (자동 규칙은 직접 지정한 값을 덮어쓰지 않는다)
+  final_hint?: boolean
+  needs_file_hint?: boolean
+  final_manual?: boolean
+  needs_file_manual?: boolean
   position?: { x: number; y: number } | null
 }
 

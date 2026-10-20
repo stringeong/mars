@@ -304,3 +304,51 @@ def test_expand_input_slots_copies_slot_sources_into_blocks():
     assert expanded["nodes"][1].get("uploaded_file_ids", []) == []
     # 원본 그래프는 바뀌지 않는다
     assert graph["nodes"][0]["uploaded_file_ids"] == [5]
+
+
+class TestApplyAutoFlags:
+    """최종 블록·파일 필요 자동 규칙. 직접 지정한 값(*_manual)은 바꾸지 않는다."""
+
+    @staticmethod
+    def _flags(graph, key):
+        return {n["id"]: n[key] for n in dag.apply_auto_flags(graph)["nodes"]}
+
+    def test_start_blocks_need_files_unless_hinted_or_manual(self):
+        graph = graph_of(["a", "b", "c"], [("a", "b"), ("b", "c")])
+        assert self._flags(graph, "needs_file") == {"a": True, "b": False, "c": False}
+        graph["nodes"][1]["needs_file_hint"] = True               # 생성기가 b도 파일을 읽는다고 함
+        graph["nodes"][0].update(needs_file=False, needs_file_manual=True)  # a는 직접 해제
+        assert self._flags(graph, "needs_file") == {"a": False, "b": True, "c": False}
+
+    def test_single_sink_becomes_final(self):
+        assert self._flags(LINEAR, "final") == {"a": False, "b": False, "c": True}
+
+    def test_deepest_sink_wins_and_ties_go_to_later_block(self):
+        # a -> b -> d, a -> c : 끝 블록 c(1단계)와 d(2단계) 중 d
+        graph = graph_of(["a", "b", "c", "d"], [("a", "b"), ("b", "d"), ("a", "c")])
+        assert self._flags(graph, "final")["d"] is True
+        # a -> b, a -> c : 같은 단계면 블록 순서상 뒤의 c
+        graph = graph_of(["a", "b", "c"], [("a", "b"), ("a", "c")])
+        assert self._flags(graph, "final") == {"a": False, "b": False, "c": True}
+
+    def test_generator_hint_among_sinks_is_kept_and_non_sink_hint_ignored(self):
+        graph = graph_of(["a", "b", "c"], [("a", "b"), ("a", "c")])
+        graph["nodes"][1]["final_hint"] = True
+        assert self._flags(graph, "final") == {"a": False, "b": True, "c": False}
+        graph = graph_of(["a", "b"], [("a", "b")])
+        graph["nodes"][0]["final_hint"] = True                       # 끝 블록이 아니면 무시
+        assert self._flags(graph, "final") == {"a": False, "b": True}
+
+    def test_manual_final_overrides_and_manual_unset_excludes(self):
+        graph = graph_of(["a", "b", "c"], [("a", "b"), ("b", "c")])
+        graph["nodes"][2]["final"] = True                            # 자동으로 정해졌던 값
+        graph["nodes"][1].update(final=True, final_manual=True)      # 직접 지정
+        assert self._flags(graph, "final") == {"a": False, "b": True, "c": False}
+        graph = graph_of(["a", "b", "c"], [("a", "b"), ("a", "c")])
+        graph["nodes"][2].update(final=False, final_manual=True)     # c는 직접 해제
+        assert self._flags(graph, "final") == {"a": False, "b": True, "c": False}
+
+    def test_original_graph_is_not_changed(self):
+        graph = graph_of(["a", "b"], [("a", "b")])
+        dag.apply_auto_flags(graph)
+        assert "final" not in graph["nodes"][1] and "needs_file" not in graph["nodes"][0]

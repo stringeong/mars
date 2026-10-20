@@ -35,9 +35,9 @@ def _validate_uploaded_files(db: Session, user_id: int, graph: dict) -> None:
 
 
 def _run_graph(service: models.Service, inputs: schemas.RunInputs) -> dict:
-    """이번 실행의 입력 파일을 반영한 그래프(슬롯은 아직 펼치지 않음)."""
+    """이번 실행의 입력 파일과 최종 블록·파일 필요 자동 규칙을 반영한 그래프(슬롯은 아직 펼치지 않음)."""
     try:
-        return dag.apply_run_inputs(service.graph, inputs.slots, inputs.nodes)
+        return dag.apply_auto_flags(dag.apply_run_inputs(service.graph, inputs.slots, inputs.nodes))
     except dag.DagError as e:
         raise HTTPException(422, f"실행 입력이 올바르지 않습니다: {e}")
 

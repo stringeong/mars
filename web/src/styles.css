@@ -520,3 +520,13 @@ tr.clickable:hover { background: #f8fafc; }
 
 .stage-view { position: relative; }
 .stage-pan-hint { position: absolute; right: 10px; bottom: 8px; z-index: 4; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, .92); color: var(--muted); font-size: 11px; pointer-events: none; }
+
+/* 최종 블록·파일 필요 자동 지정 */
+.flag-toggle { display: grid; gap: 2px; margin-top: 6px; }
+.flag-toggle .toggle-row { margin-top: 4px; }
+.flag-source { margin-left: auto; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; }
+.flag-source.auto { background: #eef2ff; color: #4338ca; }
+.flag-source.manual { background: #fff7ed; color: #9a3412; }
+.flag-reason { display: block; padding-left: 22px; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.setup-block-cell .flag-reason { padding-left: 0; margin-top: 2px; }
+.flag-reset { justify-self: start; margin-left: 18px; font-size: 11px; }

@@ -59,6 +59,8 @@ class TestFallbackGraph:
         assert info["model"] is None
         assert [n["id"] for n in graph["nodes"] if n["final"]] == ["writer"]
         assert graph["goal"] == "여행 계획"
+        # 첫 블록은 들어오는 연결이 없어 자동으로 파일 필요가 된다 (해제하면 프롬프트만으로 실행)
+        assert graph["input_slots"][0]["description"] == "정보 수집 에이전트 입력 파일"
 
     def test_fallback_name_truncates_long_prompt(self):
         graph = _fallback_graph("긴 프롬프트 " * 50)
@@ -139,6 +141,37 @@ class TestGenerateWorkflow:
 
         assert {n["id"]: n["final"] for n in graph["nodes"]} == {"reader": False, "agent1": True}
         assert dag.inspect_graph(graph, run_prompt="요약")["final_node_ids"] == ["agent1"]
+
+    def test_two_final_marks_are_reduced_to_one_sink(self, fake_ollama):
+        calls, replies = fake_ollama
+        replies.append(json.dumps({
+            "name": "s", "description": "d",
+            "nodes": [
+                {"id": "a", "name": "수집", "final": True},
+                {"id": "b", "name": "요약", "final": True},
+                {"id": "c", "name": "보고서", "final": True},
+            ],
+            "edges": [{"source": "a", "target": "b"}, {"source": "b", "target": "c"}],
+        }))
+
+        graph, _ = asyncio.run(generator.generate_workflow("요청"))
+
+        # 생성기가 둘 이상 고르면 끝 블록 기준으로 하나만 남긴다
+        assert [n["id"] for n in graph["nodes"] if n["final"]] == ["c"]
+
+    def test_start_block_without_file_hint_gets_file_and_slot(self, fake_ollama):
+        calls, replies = fake_ollama
+        replies.append(VALID_LLM_REPLY)
+
+        graph, _ = asyncio.run(generator.generate_workflow("문서 요약"))
+
+        reader = next(n for n in graph["nodes"] if n["id"] == "reader")
+        # 생성기는 false로 냈지만 들어오는 연결이 없어 파일 필요로 제안한다
+        assert reader["needs_file_hint"] is False and reader["needs_file"] is True
+        assert graph["input_slots"] == [{
+            "id": "slot1", "description": "읽기 입력 파일", "format": "", "file_ids": [], "directory_ids": [],
+        }]
+        assert reader["input_slot_ids"] == ["slot1"]
 
     def test_cyclic_reply_retries_then_reports_validation_error(self, fake_ollama):
         calls, replies = fake_ollama

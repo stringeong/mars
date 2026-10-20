@@ -84,6 +84,9 @@ def inspect_graph_for_user(db: Session, user_id: int, graph: dict, run_prompt: s
     """dag.inspect_graph에 사용자의 Worker 모델 정보를 더해 구성 검사를 한다."""
     from .transfers import is_cloud_node
 
+    # 저장 이후 자동 규칙이 바뀌었거나 이전 버전 그래프여도 실행할 때와 같은 기준으로 검사한다
+    graph = dag.apply_auto_flags(graph)
+
     devices = {
         device.id: device
         for device in db.query(models.Device).filter(models.Device.user_id == user_id).all()
