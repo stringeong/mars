@@ -64,6 +64,12 @@ def editable_graph(service):
     return graph
 
 
+def upload(client, auth, name="input.csv", content=b"id,amount\n1,100\n"):
+    r = client.post("/files", files={"file": (name, content, "text/plain")}, headers=auth)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
 def create_service(client, auth):
     r = client.post(
         "/services/generate", json={"prompt": "문서 요약 서비스 만들기"}, headers=auth
@@ -322,7 +328,8 @@ class TestExecutionGuards:
         )
         assert r.status_code == 409
 
-    def test_blank_run_prompt_rejected(self, client):
+    def test_blank_run_prompt_rejected_only_when_start_block_has_no_input(self, client):
+        """실행 프롬프트는 선택 사항이다. 시작 블록에 파일도 프롬프트도 없을 때만 막는다."""
         auth = signup_and_login(client)
         key = register_device(client, auth)
         client.post("/worker/heartbeat", headers=key)
@@ -333,6 +340,16 @@ class TestExecutionGuards:
             headers=auth,
         )
         assert r.status_code == 422
+        assert r.json()["detail"]["validation"]["errors"][0]["code"] == "no_input"
+
+        uploaded = upload(client, auth, "memo.txt")
+        r = client.post(
+            f"/services/{service['id']}/executions",
+            json={"input_files": {"nodes": {"a": [uploaded["id"]]}}},
+            headers=auth,
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["run_prompt"] == ""
 
     def test_cancel_then_cancel_again_conflicts(self, client):
         auth = signup_and_login(client)
@@ -416,6 +433,104 @@ class TestExecutionGuards:
         client.post(f"/worker/tasks/{task['task_id']}/result", json={"status": "done", "output": "a"}, headers=key)
         task = client.post("/worker/tasks/next", headers=key).json()
         assert [f["id"] for f in task["uploaded_files"]] == [uploaded["id"]]
+
+
+class TestRunInputsAndReuse:
+    def _slot_service(self, client, auth, file_id):
+        service = create_service(client, auth)
+        graph = editable_graph(service)
+        graph["input_slots"] = [{"id": "slot1", "description": "신용카드 사용 내역", "file_ids": [file_id]}]
+        graph["nodes"][0].update(needs_file=True, input_slot_ids=["slot1"])
+        assert client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth).status_code == 200
+        return service
+
+    def test_run_files_override_defaults_without_changing_workflow(self, client):
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        october = upload(client, auth, "10월.csv")
+        november = upload(client, auth, "11월.csv")
+        service = self._slot_service(client, auth, october["id"])
+
+        r = client.post(
+            f"/services/{service['id']}/executions",
+            json={"input_files": {"slots": {"slot1": [november["id"]]}}},
+            headers=auth,
+        )
+        assert r.status_code == 201, r.text
+        # 실행 이력에 이번 실행의 입력 파일이 이름과 함께 남는다
+        assert r.json()["input_files"] == [{
+            "kind": "slot", "id": "slot1", "label": "신용카드 사용 내역", "node_ids": ["a"],
+            "files": [{"id": november["id"], "name": "11월.csv"}], "directories": [],
+        }]
+        task = client.post("/worker/tasks/next", headers=key).json()
+        assert [f["original_name"] for f in task["uploaded_files"]] == ["11월.csv"]
+        # 저장된 워크플로우의 기본 파일은 그대로다
+        saved = client.get(f"/services/{service['id']}", headers=auth).json()
+        assert saved["graph"]["input_slots"][0]["file_ids"] == [october["id"]]
+
+    def test_unknown_slot_is_rejected(self, client):
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        service = self._slot_service(client, auth, upload(client, auth)["id"])
+        r = client.post(
+            f"/services/{service['id']}/executions",
+            json={"input_files": {"slots": {"ghost": [1]}}},
+            headers=auth,
+        )
+        assert r.status_code == 422
+
+    def test_history_filter_by_service_returns_input_files(self, client):
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        file = upload(client, auth, "카드.csv")
+        first = self._slot_service(client, auth, file["id"])
+        other = create_service(client, auth)
+        client.post(f"/services/{first['id']}/executions", json={}, headers=auth)
+        client.post(f"/services/{other['id']}/executions", json={"run_prompt": "요약"}, headers=auth)
+
+        items = client.get(f"/executions?service_id={first['id']}", headers=auth).json()
+        assert [item["service_id"] for item in items] == [first["id"]]
+        assert items[0]["input_files"][0]["files"] == [{"id": file["id"], "name": "카드.csv"}]
+
+    def test_consent_is_bound_to_the_run_files(self, client):
+        """외부 전송 동의는 이번 실행 파일까지 포함한 그래프에 묶인다."""
+        auth = signup_and_login(client)
+        client.put("/settings/llm-providers/openai", json={"api_key": "sk-test-12345678"}, headers=auth)
+        first, second = upload(client, auth, "a.csv"), upload(client, auth, "b.csv")
+        service = self._slot_service(client, auth, first["id"])
+        graph = client.get(f"/services/{service['id']}", headers=auth).json()["graph"]
+        for n in graph["nodes"]:
+            n.update(provider="openai", executor="cloud")
+        client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
+
+        inputs = {"slots": {"slot1": [second["id"]]}}
+        preview = client.post(
+            f"/services/{service['id']}/executions/preview", json={"input_files": inputs}, headers=auth
+        ).json()
+        assert any(t["type"] == "file_text" and t["file_ids"] == [second["id"]] for t in preview["transfers"])
+        url = f"/services/{service['id']}/executions"
+        token = preview["consent_token"]
+        # 다른 파일로 바꾸면 이전 동의로는 실행할 수 없다
+        r = client.post(url, json={"consent_token": token, "input_files": {"slots": {"slot1": [first["id"]]}}}, headers=auth)
+        assert r.status_code == 428
+        r = client.post(url, json={"consent_token": token, "input_files": inputs}, headers=auth)
+        assert r.status_code == 201, r.text
+
+    def test_duplicate_copies_workflow_but_not_history(self, client):
+        auth = signup_and_login(client)
+        service = create_service(client, auth)
+        r = client.post(f"/services/{service['id']}/duplicate", headers=auth)
+        assert r.status_code == 201, r.text
+        copy_ = r.json()
+        assert copy_["id"] != service["id"]
+        assert copy_["name"] == "테스트 서비스 (복사본)"
+        assert copy_["graph"] == service["graph"]
+        assert copy_["generation_info"] == service["generation_info"]
+        intruder = signup_and_login(client, username="user2", email="u2@example.com")
+        assert client.post(f"/services/{service['id']}/duplicate", headers=intruder).status_code == 404
 
 
 class TestWorkerResultGuards:

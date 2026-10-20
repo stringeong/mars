@@ -88,6 +88,15 @@ export default function ServicesPage() {
     }
   }
 
+  async function duplicateService(serviceId: number) {
+    try {
+      const copy = await api.post<Service>(`/services/${serviceId}/duplicate`)
+      navigate(`/services/${copy.id}/setup`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '복제 실패')
+    }
+  }
+
   // 생성 실패 후 사용자가 고른 경우에만 규칙 기반 기본 워크플로우를 만든다
   async function chooseDefaultWorkflow() {
     if (!genError) return
@@ -205,11 +214,17 @@ export default function ServicesPage() {
             <div className="section-heading"><div><span className="eyebrow">SAVED WORK</span><h2>Recent workflows</h2></div><span className="count-pill">{services.length}</span></div>
             <div className="recent-list">
               {services.slice(0, 4).map((service) => (
-                <button type="button" className="recent-workflow" key={service.id} onClick={() => navigate(`/services/${service.id}`)}>
-                  <span className="workflow-avatar">{service.name.slice(0, 1).toUpperCase()}</span>
-                  <span><strong>{service.name}</strong><small>{service.graph?.nodes?.length ?? 0} blocks · Updated {new Date(service.updated_at).toLocaleDateString()}</small></span>
-                  <b>→</b>
-                </button>
+                <div className="recent-workflow-row" key={service.id}>
+                  <button type="button" className="recent-workflow" onClick={() => navigate(`/services/${service.id}`)}>
+                    <span className="workflow-avatar">{service.name.slice(0, 1).toUpperCase()}</span>
+                    <span><strong>{service.name}</strong><small>{service.graph?.nodes?.length ?? 0} blocks · Updated {new Date(service.updated_at).toLocaleDateString()}</small></span>
+                    <b>→</b>
+                  </button>
+                  <div className="recent-workflow-actions">
+                    <button type="button" className="btn sm ghost" onClick={() => navigate(`/services/${service.id}/run`)}>다시 실행</button>
+                    <button type="button" className="btn sm ghost" onClick={() => duplicateService(service.id)}>복제</button>
+                  </div>
+                </div>
               ))}
               {services.length === 0 && <div className="empty-workflows">Your generated workflows will appear here.</div>}
             </div>

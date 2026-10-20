@@ -1,5 +1,7 @@
 """UC-202 서비스 생성, UC-203 서비스 수정."""
 
+import copy
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -208,6 +210,27 @@ def validate_service(
         db, user.id, graph, run_prompt=body.run_prompt if body else ""
     )
     return {**result, "reason": result["errors"][0]["message"] if result["errors"] else None}
+
+
+@router.post("/{service_id}/duplicate", response_model=schemas.ServiceOut, status_code=201)
+def duplicate_service(
+    service_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """저장된 워크플로우를 그대로 복제한다. 실행 이력은 복사하지 않는다."""
+    source = _get_owned(service_id, user, db)
+    duplicate = models.Service(
+        user_id=user.id,
+        name=f"{source.name} (복사본)"[:255],
+        description=source.description,
+        graph=copy.deepcopy(source.graph),
+        generation_info=copy.deepcopy(source.generation_info),
+    )
+    db.add(duplicate)
+    db.commit()
+    db.refresh(duplicate)
+    return duplicate
 
 
 @router.delete("/{service_id}", status_code=204)

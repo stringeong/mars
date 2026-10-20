@@ -241,15 +241,25 @@ class ServiceOut(BaseModel):
 # ---------- Execution ----------
 
 
+class RunInputs(BaseModel):
+    """이번 실행에만 쓰는 입력 파일. 저장된 워크플로우의 기본값을 덮어쓴다."""
+
+    slots: dict[str, list[int]] = Field(default_factory=dict)
+    # 슬롯 없이 블록에 직접 파일을 붙인 이전 버전 워크플로우용
+    nodes: dict[str, list[int]] = Field(default_factory=dict)
+
+
 class ExecutionCreate(BaseModel):
-    run_prompt: str = Field(min_length=1, description="이번 실행에 대한 지시")
+    run_prompt: str = Field(default="", description="이번 실행에 대한 추가 지시(선택)")
+    input_files: RunInputs = Field(default_factory=RunInputs)
     consent_token: str | None = None
     # 구성 검사 경고를 사용자가 확인했는지
     acknowledge_warnings: bool = False
 
 
 class ExecutionPreview(BaseModel):
-    run_prompt: str = Field(min_length=1)
+    run_prompt: str = ""
+    input_files: RunInputs = Field(default_factory=RunInputs)
 
 
 class ProviderCredentialUpdate(BaseModel):
@@ -303,6 +313,7 @@ class ExecutionOut(BaseModel):
     created_at: UTCDateTime
     finished_at: UTCDateTime | None
     generation_info: dict | None = None
+    input_files: list[dict] | None = None
     progress: float = 0.0
     tasks: list[TaskOut] = Field(default_factory=list)
 
@@ -318,6 +329,7 @@ class ExecutionListItem(BaseModel):
     created_at: UTCDateTime
     finished_at: UTCDateTime | None
     generation_info: dict | None = None
+    input_files: list[dict] | None = None
 
     model_config = {"from_attributes": True}
 

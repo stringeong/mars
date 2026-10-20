@@ -1,4 +1,4 @@
-"""UC-203/204 서비스 실행, UC-205 결과 확인, UC-206 이력 조회."""
+"""UC-204 실행 입력, UC-205 서비스 실행, UC-206 실행 결과 확인, UC-207 실행 이력 조회."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
@@ -34,6 +34,60 @@ def _validate_uploaded_files(db: Session, user_id: int, graph: dict) -> None:
         raise HTTPException(422, "A selected uploaded file is unavailable.")
 
 
+def _run_graph(service: models.Service, inputs: schemas.RunInputs) -> dict:
+    """이번 실행의 입력 파일을 반영한 그래프(슬롯은 아직 펼치지 않음)."""
+    try:
+        return dag.apply_run_inputs(service.graph, inputs.slots, inputs.nodes)
+    except dag.DagError as e:
+        raise HTTPException(422, f"실행 입력이 올바르지 않습니다: {e}")
+
+
+def input_record(db: Session, user_id: int, graph: dict) -> list[dict]:
+    """실행 이력에 남길 입력 파일. 파일이 나중에 삭제돼도 볼 수 있게 이름까지 저장한다."""
+    agents = [n for n in graph.get("nodes", []) if n.get("type", "agent") == "agent"]
+    slots = graph.get("input_slots") or []
+    file_ids = {v for s in slots for v in s.get("file_ids") or []} | {v for n in agents for v in n.get("uploaded_file_ids") or []}
+    directory_ids = {v for s in slots for v in s.get("directory_ids") or []}
+    names = dict(
+        db.query(models.UploadedFile.id, models.UploadedFile.original_name)
+        .filter(models.UploadedFile.user_id == user_id, models.UploadedFile.id.in_(file_ids))
+        .all()
+    ) if file_ids else {}
+    aliases = dict(
+        db.query(models.SharedDirectory.id, models.SharedDirectory.alias)
+        .filter(models.SharedDirectory.user_id == user_id, models.SharedDirectory.id.in_(directory_ids))
+        .all()
+    ) if directory_ids else {}
+
+    def files(ids):
+        return [{"id": v, "name": names.get(v, f"파일 #{v}")} for v in ids or [] if isinstance(v, int)]
+
+    record = [
+        {
+            "kind": "slot",
+            "id": slot["id"],
+            "label": slot.get("description") or "사용자 파일",
+            "node_ids": [n["id"] for n in agents if slot["id"] in (n.get("input_slot_ids") or [])],
+            "files": files(slot.get("file_ids")),
+            "directories": [{"id": v, "alias": aliases.get(v, f"디렉터리 #{v}")} for v in slot.get("directory_ids") or []],
+        }
+        for slot in slots
+    ]
+    record += [
+        {
+            "kind": "node",
+            "id": n["id"],
+            "label": n.get("name") or n["id"],
+            "node_ids": [n["id"]],
+            "files": files(n.get("uploaded_file_ids")),
+            "directories": [],
+        }
+        for n in agents
+        if n.get("uploaded_file_ids")
+    ]
+    return record
+
+
 @router.post("/services/{service_id}/executions/preview")
 def preview_execution(
     service_id: int,
@@ -44,7 +98,7 @@ def preview_execution(
     service = db.get(models.Service, service_id)
     if service is None or service.user_id != user.id:
         raise HTTPException(404, "서비스를 찾을 수 없습니다.")
-    graph = dag.expand_input_slots(service.graph)
+    graph = dag.expand_input_slots(_run_graph(service, body.input_files))
     validation = orchestrator.inspect_graph_for_user(db, user.id, graph, run_prompt=body.run_prompt)
     items = transfers.describe_transfers(graph)
     # 오류가 있으면 실행할 수 없으므로 외부 전송 동의 토큰을 발급하지 않는다
@@ -69,10 +123,10 @@ def start_execution(
     service = db.get(models.Service, service_id)
     if service is None or service.user_id != user.id:
         raise HTTPException(404, "서비스를 찾을 수 없습니다.")
-    if not body.run_prompt.strip():
-        raise HTTPException(422, "실행 프롬프트가 비어 있습니다.")  # UC-204 e301
-    # 파일 슬롯을 블록 필드로 펼친 그래프로 검사·동의·스냅샷을 모두 처리한다
-    graph = dag.expand_input_slots(service.graph)
+    # 실행 프롬프트는 선택 사항이다. 입력이 전혀 없는 시작 블록은 구성 검사(no_input)가 막는다.
+    # 이번 실행의 입력 파일을 반영하고 파일 슬롯을 블록 필드로 펼친 그래프로 검사·동의·스냅샷을 처리한다
+    run_graph = _run_graph(service, body.input_files)
+    graph = dag.expand_input_slots(run_graph)
     validation = orchestrator.inspect_graph_for_user(db, user.id, graph, run_prompt=body.run_prompt)
     if validation["errors"]:
         raise HTTPException(
@@ -102,6 +156,7 @@ def start_execution(
         run_prompt=body.run_prompt.strip(),
         graph_snapshot=graph,
         generation_info=service.generation_info,
+        input_files=input_record(db, user.id, run_graph),
     )
     db.add(execution)
     db.flush()
@@ -119,12 +174,16 @@ def _to_out(execution: models.Execution) -> schemas.ExecutionOut:
 
 @router.get("/executions", response_model=list[schemas.ExecutionListItem])
 def list_executions(
-    user: models.User = Depends(get_current_user), db: Session = Depends(get_db)
+    service_id: int | None = None,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
+    query = db.query(models.Execution).filter(models.Execution.user_id == user.id)
+    if service_id is not None:
+        query = query.filter(models.Execution.service_id == service_id)
     rows = (
-        db.query(models.Execution)
-        .filter(models.Execution.user_id == user.id)
-        .order_by(models.Execution.created_at.desc())
+        query
+        .order_by(models.Execution.created_at.desc(), models.Execution.id.desc())
         .limit(100)
         .all()
     )

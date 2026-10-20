@@ -266,6 +266,8 @@ class Execution(Base):
     graph_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
     # 실행 시점 서비스의 생성 모델 정보 (이력 보존용 복사본)
     generation_info: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 이번 실행에 쓴 입력 파일 [{"kind": "slot"|"node", "id", "label", "node_ids", "files", "directories"}]
+    input_files: Mapped[list | None] = mapped_column(JSON, nullable=True)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

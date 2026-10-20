@@ -155,6 +155,15 @@ export interface UploadedFile {
   created_at: string
 }
 
+export interface RunInputRecord {
+  kind: 'slot' | 'node'
+  id: string
+  label: string
+  node_ids: string[]
+  files: { id: number; name: string }[]
+  directories: { id: number; alias: string }[]
+}
+
 export interface Task {
   id: number
   node_id: string
@@ -177,6 +186,7 @@ export interface Execution {
   created_at: string
   finished_at: string | null
   generation_info?: GenerationInfo | null
+  input_files?: RunInputRecord[] | null
   progress: number
   tasks: Task[]
 }
@@ -190,4 +200,5 @@ export interface ExecutionListItem {
   created_at: string
   finished_at: string | null
   generation_info?: GenerationInfo | null
+  input_files?: RunInputRecord[] | null
 }

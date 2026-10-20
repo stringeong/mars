@@ -1,4 +1,4 @@
-import { GenerationInfo, ValidationIssue, ValidationResult } from './types'
+import { GenerationInfo, RunInputRecord, ValidationIssue, ValidationResult } from './types'
 
 export const PROVIDER_LABELS: Record<string, string> = {
   ollama: 'Ollama',
@@ -19,6 +19,14 @@ export function generationLabel(info: GenerationInfo | null | undefined) {
   if (info.source === 'fallback') return '기본 워크플로우 (규칙 기반)'
   const where = info.location === 'cloud' ? `외부 LLM API · ${PROVIDER_LABELS[info.provider ?? ''] ?? info.provider}` : '서버 로컬 LLM · Ollama'
   return `${where} · ${info.model}`
+}
+
+/** 실행 이력의 입력 파일을 한 줄로: "card_A.csv 외 2개" */
+export function inputFilesSummary(records: RunInputRecord[] | null | undefined) {
+  // 여러 슬롯이 같은 파일을 쓰면 한 번만 센다
+  const names = [...new Map((records ?? []).flatMap((record) => record.files.map((file) => [file.id, file.name] as const))).values()]
+  if (!names.length) return '입력 파일 없음'
+  return names.length > 1 ? `${names[0]} 외 ${names.length - 1}개` : names[0]
 }
 
 /** "신용카드 거래 분류 에이전트" → "분류": 단계 요약에 쓰는 역할 단어 */
