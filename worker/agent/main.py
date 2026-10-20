@@ -14,7 +14,9 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import httpx
@@ -27,6 +29,8 @@ from . import sandbox
 
 _MODEL_CACHE: tuple[float, list[str]] = (0.0, [])
 _MODEL_CACHE_SECONDS = 30
+# 서버 MARS_HEARTBEAT_TIMEOUT(기본 30초)보다 충분히 짧아야 한다.
+_TASK_HEARTBEAT_SECONDS = 10
 
 
 
@@ -169,6 +173,40 @@ def cmd_register(args: argparse.Namespace) -> None:
     print("이제 `python -m agent run` 으로 에이전트를 실행하세요.")
 
 
+def send_heartbeat(server: str, headers: dict) -> None:
+    httpx.post(
+        f"{server}/worker/heartbeat",
+        headers=headers,
+        json={"specs": collect_runtime_stats()},
+        timeout=15,
+    )
+
+
+@contextmanager
+def heartbeat_while_running(server: str, headers: dict, interval: float = _TASK_HEARTBEAT_SECONDS):
+    """작업 실행 중에도 하트비트를 보낸다.
+
+    실행이 하트비트 타임아웃보다 오래 걸리면 서버가 기기를 offline으로 보고
+    작업을 회수하므로(UC-204 e203), 결과 제출이 거부되고 같은 작업을 반복하게 된다.
+    """
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(interval):
+            try:
+                send_heartbeat(server, headers)
+            except Exception as e:
+                print(f"하트비트 전송 실패(재시도 예정): {e}")
+
+    thread = threading.Thread(target=beat, name="task-heartbeat", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=1)
+
+
 def process_directory_inspection(server: str, headers: dict) -> bool:
     """Run one server-requested, sandboxed file listing when available."""
     response = httpx.post(
@@ -256,8 +294,9 @@ def cmd_run(_args: argparse.Namespace) -> None:
                 print(f"[RECEIVED] 작업 수신: #{task['task_id']} {task['agent_name']}")
                 staging_dir = None
                 try:
-                    staging_dir = stage_uploaded_files(server, headers, task)
-                    output = executor.run_task(task, config)
+                    with heartbeat_while_running(server, headers):
+                        staging_dir = stage_uploaded_files(server, headers, task)
+                        output = executor.run_task(task, config)
                     result = {"status": "done", "output": output, "error": ""}
                     print(f"[DONE] 작업 완료: #{task['task_id']} ({len(output)}자)")
                 except Exception as e:  # LLM 실패 등 -> 서버에 실패 보고
@@ -275,12 +314,7 @@ def cmd_run(_args: argparse.Namespace) -> None:
                 runtime_state.write(status="idle")
             else:
                 # 대기 중에도 주기적으로 상태(사양) 보고
-                httpx.post(
-                    f"{server}/worker/heartbeat",
-                    headers=headers,
-                    json={"specs": collect_runtime_stats()},
-                    timeout=15,
-                )
+                send_heartbeat(server, headers)
         except KeyboardInterrupt:
             runtime_state.clear()
             print("\n종료합니다.")
