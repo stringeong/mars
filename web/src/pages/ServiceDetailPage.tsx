@@ -4,12 +4,23 @@ import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, getDeviceDirectories, getDeviceModels } from '../api'
 import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
+import DeletableEdge from '../components/DeletableEdge'
 import ValidationPanel from '../components/ValidationPanel'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
 import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
 import { applyAutoFlags, blockingErrors, FlagExplanation, generationLabel, issuesByNode } from '../workflow'
 
 const nodeTypes = { agent: AgentBlockNode }
+const edgeTypes = { deletable: DeletableEdge }
+
+/** 편집기의 workflow 연결선. 선택하면 삭제(×) 버튼이 나온다. */
+function toFlowEdge(source: string, target: string): Edge {
+  return { id: `${source}-${target}`, source, target, type: 'deletable', markerEnd: { type: MarkerType.ArrowClosed } }
+}
+
+// 저장 전까지 되돌릴 수 있는 구조 변경 기록(연결·블록 추가/삭제, 체크박스)
+type BuilderSnapshot = { agents: Record<string, AgentNode>; nodes: Node[]; edges: Edge[] }
+const UNDO_LIMIT = 50
 
 
 const CLOUD_MODELS = {
@@ -130,11 +141,7 @@ export default function ServiceDetailPage() {
       position: agent.position ?? positions[agent.id],
       data: nodeData(agent),
     })))
-    setEdges(graphEdges.filter((edge) => !edge.relation || edge.relation === 'workflow').map((edge) => ({
-      ...edge,
-      id: `${edge.source}-${edge.target}`,
-      markerEnd: { type: MarkerType.ArrowClosed },
-    })))
+    setEdges(graphEdges.filter((edge) => !edge.relation || edge.relation === 'workflow').map((edge) => toFlowEdge(edge.source, edge.target)))
   }, [nodeData, setEdges, setNodes])
 
   useEffect(() => {
@@ -160,7 +167,8 @@ export default function ServiceDetailPage() {
         const positions = layout(loadedAgents)
         setAgents(Object.fromEntries(loadedAgents.map((agent) => [agent.id, agent])))
         setNodes(loadedAgents.map((agent) => ({ id: agent.id, type: 'agent', position: agent.position ?? positions[agent.id], data: {} })))
-        setEdges(loadedService.graph.edges.filter((edge) => !edge.relation || edge.relation === 'workflow').map((edge) => ({ ...edge, id: `${edge.source}-${edge.target}`, markerEnd: { type: MarkerType.ArrowClosed } })))
+        setEdges(loadedService.graph.edges.filter((edge) => !edge.relation || edge.relation === 'workflow').map((edge) => toFlowEdge(edge.source, edge.target)))
+        clearHistory()
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : '불러오기 실패')
       } finally {
@@ -218,9 +226,62 @@ export default function ServiceDetailPage() {
     setAgents((current) => ({ ...current, [selectedAgent.id]: { ...selectedAgent, ...patch } }))
   }
 
+  // ---------- 되돌리기 (저장 전까지) ----------
+  const historyRef = useRef<BuilderSnapshot[]>([])
+  const [historySize, setHistorySize] = useState(0)
+  const latestRef = useRef<BuilderSnapshot>({ agents, nodes, edges })
+  latestRef.current = { agents, nodes, edges }
+
+  // 구조를 바꾸기 직전에 부른다. 글자 입력은 브라우저 기본 되돌리기를 쓴다.
+  const pushHistory = useCallback(() => {
+    historyRef.current = [...historyRef.current.slice(-(UNDO_LIMIT - 1)), latestRef.current]
+    setHistorySize(historyRef.current.length)
+  }, [])
+
+  function clearHistory() {
+    historyRef.current = []
+    setHistorySize(0)
+  }
+
+  const undo = useCallback(() => {
+    const previous = historyRef.current.pop()
+    if (!previous) return
+    setHistorySize(historyRef.current.length)
+    setAgents(previous.agents)
+    setNodes(previous.nodes)
+    setEdges(previous.edges)
+    setSelected((current) => (current && previous.agents[current] ? current : null))
+    setMessage('마지막 변경을 되돌렸습니다.')
+  }, [setEdges, setNodes])
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return
+      // 입력 칸 안에서는 브라우저의 글자 되돌리기를 그대로 쓴다
+      if ((event.target as HTMLElement | null)?.closest('input, textarea, select, [contenteditable="true"]')) return
+      event.preventDefault()
+      undo()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [undo])
+
+  function changeFlags(patch: Partial<AgentNode>) {
+    pushHistory()
+    updateAgent(patch)
+  }
+
+  // 패널의 연결 목록에서 지울 때. 캔버스에서 지울 때는 onBeforeDelete가 기록을 남긴다.
+  function removeConnection(edgeId: string) {
+    pushHistory()
+    setEdges((current) => current.filter((edge) => edge.id !== edgeId))
+    setMessage('연결을 삭제했습니다. 저장하기 전까지 Ctrl/Cmd+Z로 되돌릴 수 있습니다.')
+  }
+
   // 최종 블록은 하나만 둔다. 직접 지정하면 다른 블록의 직접 지정은 풀고 자동 규칙에 맡긴다.
   function setFinal(checked: boolean) {
     if (!selectedAgent) return
+    pushHistory()
     setAgents((current) => Object.fromEntries(Object.entries(current).map(([agentId, agent]) => [
       agentId,
       agentId === selectedAgent.id ? { ...agent, final: checked, final_manual: true }
@@ -239,6 +300,7 @@ export default function ServiceDetailPage() {
       directory_ids: [],
       uploaded_file_ids: [],
     }
+    pushHistory()
     setAgents((current) => ({ ...current, [agent.id]: agent }))
     setNodes((current) => [...current, { id: agent.id, type: 'agent', position: position ?? { x: 80, y: 80 + current.length * 35 }, data: nodeData(agent) }])
     setSelected(agent.id)
@@ -250,11 +312,13 @@ export default function ServiceDetailPage() {
       setError('이미 연결된 에이전트입니다.')
       return
     }
-    setEdges((current) => addEdge({ ...connection, id: `${connection.source}-${connection.target}`, markerEnd: { type: MarkerType.ArrowClosed } }, current))
-  }, [edges, setEdges])
+    pushHistory()
+    setEdges((current) => addEdge(toFlowEdge(connection.source!, connection.target!), current))
+  }, [edges, pushHistory, setEdges])
 
   function deleteAgent() {
     if (!selected) return
+    pushHistory()
     setAgents((current) => Object.fromEntries(Object.entries(current).filter(([agentId]) => agentId !== selected)))
     setNodes((current) => current.filter((node) => node.id !== selected))
     setEdges((current) => current.filter((edge) => edge.source !== selected && edge.target !== selected))
@@ -313,6 +377,7 @@ export default function ServiceDetailPage() {
       setService(updated)
       setValidation(updated.validation ?? null)
       setError('')
+      clearHistory()
       const issueCount = (updated.validation?.errors.length ?? 0) + (updated.validation?.warnings.length ?? 0)
       setMessage(issueCount ? `저장되었습니다. 구성 검사에서 문제 ${issueCount}개가 발견되었습니다.` : '저장되었습니다.')
       return updated
@@ -339,6 +404,7 @@ export default function ServiceDetailPage() {
     setAiLoading(true)
     try {
       const result = await api.post<{ graph: Graph }>(`/services/${id}/revise`, { instruction: aiInstruction })
+      pushHistory()
       applyAgents(asAgents(result.graph), result.graph.edges)
       setAiInstruction('')
       setMessage('AI 수정안을 적용했습니다. 저장해 주세요.')
@@ -351,7 +417,7 @@ export default function ServiceDetailPage() {
   return <div className="builder-page">
     <header className="builder-header">
       <div><div className="breadcrumb">M.A.R.S <span>/</span> Workflows <span>/</span> Builder</div><h1>{svcName}</h1><p>{svcDesc || 'Build and assign a distributed multi-agent workflow.'}</p><div className="generation-badge"><span>생성 모델</span><strong>{generationLabel(service.generation_info)}</strong></div></div>
-      <div className="builder-header-actions"><button className="btn ghost" onClick={async () => { if (await save()) navigate(`/services/${id}/setup`) }}>설정 확인 표</button><button className="btn ghost" disabled={syncing} onClick={() => { if (confirm('서버의 최신 워크플로우와 Worker 정보로 다시 불러올까요? 저장하지 않은 변경은 사라집니다.')) setSyncVersion((version) => version + 1) }}>{syncing ? '동기화 중…' : '↻ 서버와 재동기화'}</button><button className="btn ghost" onClick={() => navigate('/services')}>All workflows</button><button className="btn" onClick={save}>Save changes</button></div>
+      <div className="builder-header-actions"><button className="btn ghost" disabled={!historySize} onClick={undo} title="Ctrl/Cmd+Z">↶ 되돌리기{historySize ? ` (${historySize})` : ''}</button><button className="btn ghost" onClick={async () => { if (await save()) navigate(`/services/${id}/setup`) }}>설정 확인 표</button><button className="btn ghost" disabled={syncing} onClick={() => { if (confirm('서버의 최신 워크플로우와 Worker 정보로 다시 불러올까요? 저장하지 않은 변경은 사라집니다.')) setSyncVersion((version) => version + 1) }}>{syncing ? '동기화 중…' : '↻ 서버와 재동기화'}</button><button className="btn ghost" onClick={() => navigate('/services')}>All workflows</button><button className="btn" onClick={save}>Save changes</button></div>
     </header>
     {message && <div style={{ color: 'var(--success)', marginBottom: 8 }}>{message}</div>}
     {error && <div className="error">{error}</div>}
@@ -366,15 +432,49 @@ export default function ServiceDetailPage() {
         {BLOCK_PRESETS.map((preset) => { const category = categoryOf(preset.name); return <div key={preset.name} className="palette-block" style={{ borderColor: category.color, background: category.bg }} draggable onDragStart={(event) => event.dataTransfer.setData('application/mars-agent', JSON.stringify(preset))} onClick={() => addAgent(preset)}><span className="palette-block-tag" style={{ background: category.color }}>{category.tag}</span><div className="palette-block-name">{preset.name}</div><div className="palette-block-hint">{preset.hint}</div></div> })}
       </aside>
       <div className="flow-wrap" onDragOver={(event) => event.preventDefault()} onDrop={(event: DragEvent) => { event.preventDefault(); const raw = event.dataTransfer.getData('application/mars-agent'); if (raw) addAgent(JSON.parse(raw), { x: event.nativeEvent.offsetX - 100, y: event.nativeEvent.offsetY - 50 }) }}>
-        <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onEdgesChange={onEdgesChange} onConnect={onConnect} onNodeClick={(_, node) => setSelected(node.id)} onPaneClick={() => setSelected(null)} fitView><Background /><Controls /></ReactFlow>
+        <ReactFlow
+          nodes={nodes}
+          edges={edges}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onNodeClick={(_, node) => setSelected(node.id)}
+          onPaneClick={() => setSelected(null)}
+          deleteKeyCode={['Delete', 'Backspace']}
+          onBeforeDelete={async () => { pushHistory(); return true }}
+          onEdgesDelete={(deleted) => setMessage(`연결 ${deleted.length}개를 삭제했습니다. 저장하기 전까지 Ctrl/Cmd+Z로 되돌릴 수 있습니다.`)}
+          onNodesDelete={(deleted) => {
+            // 키보드로 블록을 지우면 블록 설정도 함께 지운다
+            const removed = new Set(deleted.map((node) => node.id))
+            setAgents((current) => Object.fromEntries(Object.entries(current).filter(([agentId]) => !removed.has(agentId))))
+            setSelected((current) => (current && removed.has(current) ? null : current))
+          }}
+          fitView
+        ><Background /><Controls /></ReactFlow>
       </div>
       <aside className="node-panel">
         {selectedAgent ? <>
           <div className="row spread"><h2 style={{ margin: 0 }}>에이전트 블록</h2><button className="btn sm danger" onClick={deleteAgent}>삭제</button></div>
           {selectedIssues.length > 0 && <ul className="validation-list node-issues">{selectedIssues.map((issue, index) => <li key={`${issue.code}-${index}`} className={issue.severity}>{issue.message}</li>)}</ul>}
           <label>이름</label><input value={selectedAgent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
-          <FlagToggle label="최종 블록 (출력이 실행 결과가 됨)" checked={!!selectedAgent.final} explanation={flagReasons[selectedAgent.id]?.final} onChange={setFinal} onReset={() => updateAgent({ final_manual: false })} />
-          <FlagToggle label="사용자 파일 필요" checked={!!selectedAgent.needs_file} explanation={flagReasons[selectedAgent.id]?.needsFile} onChange={(checked) => updateAgent({ needs_file: checked, needs_file_manual: true })} onReset={() => updateAgent({ needs_file_manual: false })} />
+          <FlagToggle label="최종 블록 (출력이 실행 결과가 됨)" checked={!!selectedAgent.final} explanation={flagReasons[selectedAgent.id]?.final} onChange={setFinal} onReset={() => changeFlags({ final_manual: false })} />
+          <FlagToggle label="사용자 파일 필요" checked={!!selectedAgent.needs_file} explanation={flagReasons[selectedAgent.id]?.needsFile} onChange={(checked) => changeFlags({ needs_file: checked, needs_file_manual: true })} onReset={() => changeFlags({ needs_file_manual: false })} />
+          <label>연결</label>
+          <div className="connection-list">
+            {([['incoming', '들어오는 연결', edges.filter((edge) => edge.target === selectedAgent.id)], ['outgoing', '나가는 연결', edges.filter((edge) => edge.source === selectedAgent.id)]] as const).map(([kind, title, list]) => <div className="connection-group" key={kind}>
+              <span className="connection-title">{title} {list.length}</span>
+              {list.map((edge) => {
+                const other = agents[kind === 'incoming' ? edge.source : edge.target]
+                return <div className="connection-item" key={edge.id}>
+                  <span>{kind === 'incoming' ? '← ' : '→ '}{other?.name ?? (kind === 'incoming' ? edge.source : edge.target)}</span>
+                  <button type="button" aria-label={`${other?.name ?? ''} 연결 삭제`} title="연결 삭제" onClick={() => removeConnection(edge.id)}>×</button>
+                </div>
+              })}
+              {!list.length && <small className="muted">없음</small>}
+            </div>)}
+          </div>
           {inputSlots.filter((slot) => (selectedAgent.input_slot_ids ?? []).includes(slot.id)).map((slot) => <div className="slot-inline node-slot" key={slot.id}><span title={slot.format}>파일 슬롯 · {slot.description}</span><small className={slot.file_ids.length + slot.directory_ids.length ? 'ok' : 'empty'}>{slot.file_ids.length + slot.directory_ids.length ? `${slot.file_ids.length + slot.directory_ids.length}개 연결` : '비어 있음'}</small></div>)}
           <label>역할 프롬프트</label><textarea rows={5} value={selectedAgent.role_prompt} onChange={(event) => updateAgent({ role_prompt: event.target.value })} />
           <label>실행 위치</label><select value={selectedAgent.provider || 'ollama'} onChange={(event) => { const provider = event.target.value as 'ollama' | 'openai' | 'anthropic' | 'gemini'; updateAgent({ provider, executor: provider === 'ollama' ? 'local' : 'cloud', worker_id: provider === 'ollama' ? selectedAgent.worker_id : null, model: '' }) }}><option value="ollama">Local Worker · Ollama</option><option value="openai">Cloud · OpenAI</option><option value="anthropic">Cloud · Anthropic</option><option value="gemini">Cloud · Google Gemini</option></select>

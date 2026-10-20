@@ -530,3 +530,12 @@ tr.clickable:hover { background: #f8fafc; }
 .flag-reason { display: block; padding-left: 22px; color: var(--muted); font-size: 11px; line-height: 1.45; }
 .setup-block-cell .flag-reason { padding-left: 0; margin-top: 2px; }
 .flag-reset { justify-self: start; margin-left: 18px; font-size: 11px; }
+
+/* 편집기 연결 목록 */
+.connection-list { display: grid; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; }
+.connection-group { display: grid; gap: 4px; }
+.connection-title { color: var(--muted); font-size: 11px; font-weight: 800; }
+.connection-item { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 6px 4px 8px; border-radius: 6px; background: #f8fafc; font-size: 12px; }
+.connection-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.connection-item button { flex: none; width: 22px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: #fff; color: var(--danger); font-weight: 700; cursor: pointer; }
+.connection-item button:hover { border-color: var(--danger); }
