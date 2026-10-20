@@ -11,10 +11,15 @@ export default function AgentBlockNode({ data, selected }: { data: any; selected
   const category = categoryOf(String(data.label ?? ''))
   const directories: string[] = data.directories ?? []
   const files: string[] = data.files ?? []
+  const issueLevel: 'error' | 'warning' | undefined = data.issueLevel
 
   return (
-    <div className={`agent-block scratch-agent${selected ? ' selected' : ''}`} style={{ borderColor: category.color, background: category.bg }}>
-      <div className="agent-block-tag" style={{ background: category.color }}>{category.tag}</div>
+    <div className={`agent-block scratch-agent${selected ? ' selected' : ''}${issueLevel ? ` has-${issueLevel}` : ''}`} style={{ borderColor: category.color, background: category.bg }}>
+      {issueLevel && <div className={`agent-issue ${issueLevel}`} title={data.issueMessages}>{issueLevel === 'error' ? '오류' : '경고'} {data.issueCount}</div>}
+      <div className="agent-block-tags">
+        <div className="agent-block-tag" style={{ background: category.color }}>{category.tag}</div>
+        {data.final && <div className="agent-block-tag agent-final-tag">FINAL</div>}
+      </div>
       <div className="agent-block-name">{data.label}</div>
       <div className="agent-block-model">{data.model || '기본 모델'}</div>
 

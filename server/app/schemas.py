@@ -146,6 +146,11 @@ class AgentNode(BaseModel):
     worker_id: int | None = None
     directory_ids: list[int] = Field(default_factory=list)
     uploaded_file_ids: list[int] = Field(default_factory=list)
+    # 실행 결과를 내는 블록. 워크플로우에 하나만 둔다.
+    final: bool = False
+    # 사용자 파일을 직접 읽어야 하는 블록과, 그 파일이 들어갈 슬롯
+    needs_file: bool = False
+    input_slot_ids: list[str] = Field(default_factory=list)
     position: dict | None = None
 
 
@@ -172,9 +177,20 @@ class Edge(BaseModel):
 
 
 
+class InputSlot(BaseModel):
+    """사용자가 올릴 파일 하나. 여러 블록이 같은 슬롯을 함께 읽을 수 있다."""
+
+    id: str
+    description: str = ""
+    format: str = ""
+    file_ids: list[int] = Field(default_factory=list)
+    directory_ids: list[int] = Field(default_factory=list)
+
+
 class Graph(BaseModel):
     nodes: list[WorkflowNode] = Field(default_factory=list)
     edges: list[Edge] = Field(default_factory=list)
+    input_slots: list[InputSlot] = Field(default_factory=list)
 
 
 class ServiceGenerate(BaseModel):
@@ -191,6 +207,13 @@ class ServiceUpdate(BaseModel):
     graph: Graph | None = None
 
 
+class ServiceValidate(BaseModel):
+    """저장 전 편집 중인 그래프를 검사할 때 사용한다. graph가 없으면 저장된 그래프를 검사한다."""
+
+    graph: Graph | None = None
+    run_prompt: str = ""
+
+
 class ServiceOut(BaseModel):
     id: int
     name: str
@@ -198,6 +221,7 @@ class ServiceOut(BaseModel):
     graph: dict
     created_at: UTCDateTime
     updated_at: UTCDateTime
+    validation: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -208,6 +232,8 @@ class ServiceOut(BaseModel):
 class ExecutionCreate(BaseModel):
     run_prompt: str = Field(min_length=1, description="이번 실행에 대한 지시")
     consent_token: str | None = None
+    # 구성 검사 경고를 사용자가 확인했는지
+    acknowledge_warnings: bool = False
 
 
 class ExecutionPreview(BaseModel):

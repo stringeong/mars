@@ -206,3 +206,90 @@ def test_shared_directory_does_not_change_workflow_order():
 
     assert order.index("a") < order.index("c")
     assert order.index("b") < order.index("c")
+
+def _with_file(graph, *node_ids, file_id=1):
+    for n in graph["nodes"]:
+        if n["id"] in node_ids:
+            n["uploaded_file_ids"] = [file_id]
+    return graph
+
+
+def _codes(result, severity="errors"):
+    return [(issue["code"], tuple(issue["node_ids"])) for issue in result[severity]]
+
+
+class TestInspectGraph:
+    """1번 개선: 실행 전·저장 시 블록 단위 오류/경고와 실행 단계 미리보기."""
+
+    def test_valid_graph_reports_stages_and_implicit_final(self):
+        graph = _with_file(graph_of(["a", "b", "c", "d"], [("a", "b"), ("a", "c"), ("b", "d"), ("c", "d")]), "a")
+        result = dag.inspect_graph(graph)
+        assert result["valid"] is True
+        assert result["errors"] == [] and result["warnings"] == []
+        assert result["stages"] == [["a"], ["b", "c"], ["d"]]
+        # final 표시가 없는 기존 워크플로우는 말단이 하나면 그 말단을 최종 블록으로 본다
+        assert result["final_node_ids"] == ["d"]
+
+    def test_stage_uses_longest_path_depth(self):
+        # a -> b -> d, a -> d : d는 b 뒤에 와야 하므로 3단계
+        graph = _with_file(graph_of(["a", "b", "d"], [("a", "b"), ("b", "d"), ("a", "d")]), "a")
+        assert dag.inspect_graph(graph)["stages"] == [["a"], ["b"], ["d"]]
+
+    def test_cycle_reports_only_cycle_blocks(self):
+        graph = _with_file(graph_of(["a", "b", "c", "d"], [("a", "b"), ("b", "c"), ("c", "b"), ("c", "d")]), "a")
+        result = dag.inspect_graph(graph)
+        assert ("cycle", ("b", "c")) in _codes(result)
+        assert result["valid"] is False
+
+    def test_needs_file_without_file_is_error(self):
+        graph = _with_file(graph_of(["a", "b"], [("a", "b")]), "a")
+        graph["nodes"][1]["needs_file"] = True
+        assert ("missing_file", ("b",)) in _codes(dag.inspect_graph(graph))
+
+    def test_needs_file_satisfied_by_input_slot_or_directory(self):
+        graph = graph_of(["a", "b"], [("a", "b")])
+        graph["input_slots"] = [{"id": "s1", "file_ids": [7]}]
+        graph["nodes"][0].update(needs_file=True, input_slot_ids=["s1"])
+        graph["nodes"][1].update(needs_file=True, directory_ids=[3])
+        assert dag.inspect_graph(graph)["errors"] == []
+
+    def test_root_without_input_is_error_until_run_prompt_given(self):
+        graph = graph_of(["a", "b"], [("a", "b")])
+        result = dag.inspect_graph(graph)
+        assert _codes(result) == [("no_input", ("a",))]
+        assert result["errors"][0]["resolvable_by_run_prompt"] is True
+        assert dag.inspect_graph(graph, run_prompt="이번 달 분석")["valid"] is True
+
+    def test_multiple_sinks_without_final_is_error(self):
+        graph = _with_file(graph_of(["a", "b", "c"], [("a", "b"), ("a", "c")]), "a")
+        assert ("final_missing", ("b", "c")) in _codes(dag.inspect_graph(graph))
+
+    def test_two_final_marks_are_error(self):
+        graph = _with_file(graph_of(["a", "b", "c"], [("a", "b"), ("a", "c")]), "a")
+        graph["nodes"][1]["final"] = graph["nodes"][2]["final"] = True
+        assert ("final_multiple", ("b", "c")) in _codes(dag.inspect_graph(graph))
+
+    def test_isolated_block_is_warning_when_final_is_marked(self):
+        graph = _with_file(graph_of(["a", "b", "x"], [("a", "b")]), "a", "x")
+        graph["nodes"][1]["final"] = True
+        result = dag.inspect_graph(graph)
+        assert result["valid"] is True
+        assert _codes(result, "warnings") == [("unreachable", ("x",))]
+
+    def test_model_missing_on_worker_is_warning(self):
+        graph = _with_file(graph_of(["a"], []), "a")
+        graph["nodes"][0].update(worker_id=1, model="qwen3:4b")
+        result = dag.inspect_graph(graph, has_model=lambda node: False)
+        assert _codes(result, "warnings") == [("model_not_installed", ("a",))]
+        assert dag.inspect_graph(graph, has_model=lambda node: None)["warnings"] == []
+
+    def test_invalid_reference_stops_block_checks(self):
+        result = dag.inspect_graph(graph_of(["a"], [("a", "ghost")]))
+        assert _codes(result) == [("invalid_graph", ())]
+
+    def test_result_nodes_prefer_final_mark(self):
+        graph = graph_of(["a", "b", "c"], [("a", "b"), ("a", "c")])
+        assert dag.result_node_ids(graph) == ["b", "c"]
+        graph["nodes"][2]["final"] = True
+        assert dag.result_node_ids(graph) == ["c"]
+

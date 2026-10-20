@@ -80,6 +80,24 @@ def device_has_model(device: models.Device, model: str) -> bool:
     return True if not isinstance(available, list) else model in available
 
 
+def inspect_graph_for_user(db: Session, user_id: int, graph: dict, run_prompt: str = "") -> dict:
+    """dag.inspect_graph에 사용자의 Worker 모델 정보를 더해 구성 검사를 한다."""
+    from .transfers import is_cloud_node
+
+    devices = {
+        device.id: device
+        for device in db.query(models.Device).filter(models.Device.user_id == user_id).all()
+    }
+
+    def has_model(node: dict) -> bool | None:
+        device = devices.get(node.get("worker_id"))
+        if device is None or is_cloud_node(node):
+            return None
+        return device_has_model(device, node.get("model") or "")
+
+    return dag.inspect_graph(graph, run_prompt=run_prompt, has_model=has_model)
+
+
 def reclaim_stale_tasks(db: Session, user_id: int) -> None:
     """하트비트가 끊긴 기기에 할당된 running 작업을 ready로 되돌린다."""
     rows = (
@@ -232,7 +250,7 @@ def complete_task(
 
     # 전부 완료되면 결과 통합 (UC-205)
     if all(t.status == "done" for t in tasks.values()):
-        terminals = dag.terminal_nodes(graph)
+        terminals = dag.result_node_ids(graph)
         outputs = [
             f"## {tasks[nid].agent_name}\n\n{tasks[nid].output or ''}"
             for nid in terminals

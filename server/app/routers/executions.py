@@ -44,9 +44,14 @@ def preview_execution(
     service = db.get(models.Service, service_id)
     if service is None or service.user_id != user.id:
         raise HTTPException(404, "서비스를 찾을 수 없습니다.")
+    validation = orchestrator.inspect_graph_for_user(db, user.id, service.graph, run_prompt=body.run_prompt)
     items = transfers.describe_transfers(service.graph)
-    token = transfers.issue_consent(db, user.id, service.id, service.graph, body.run_prompt, items) if items else None
-    return {"requires_consent": bool(items), "consent_token": token, "transfers": items}
+    # 오류가 있으면 실행할 수 없으므로 외부 전송 동의 토큰을 발급하지 않는다
+    token = (
+        transfers.issue_consent(db, user.id, service.id, service.graph, body.run_prompt, items)
+        if items and validation["valid"] else None
+    )
+    return {"requires_consent": bool(items), "consent_token": token, "transfers": items, "validation": validation}
 
 
 @router.post(
@@ -65,10 +70,14 @@ def start_execution(
         raise HTTPException(404, "서비스를 찾을 수 없습니다.")
     if not body.run_prompt.strip():
         raise HTTPException(422, "실행 프롬프트가 비어 있습니다.")  # UC-203 e301
-    try:
-        dag.validate_graph(service.graph)
-    except dag.DagError as e:
-        raise HTTPException(422, f"실행 불가능한 구성입니다: {e}")
+    validation = orchestrator.inspect_graph_for_user(db, user.id, service.graph, run_prompt=body.run_prompt)
+    if validation["errors"]:
+        raise HTTPException(
+            422,
+            {"message": f"실행 불가능한 구성입니다: {validation['errors'][0]['message']}", "validation": validation},
+        )
+    if validation["warnings"] and not body.acknowledge_warnings:
+        raise HTTPException(409, {"message": "구성 경고를 확인한 뒤 실행해 주세요.", "validation": validation})
     try:
         directory_access.resolve_directories_by_agent(db, user.id, service.graph)
     except directory_access.DirectoryAccessError as e:

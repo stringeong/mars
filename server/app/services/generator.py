@@ -101,8 +101,23 @@ def _agent_node(node: dict, index: int) -> dict:
         "worker_id": node.get("worker_id"),
         "directory_ids": node.get("directory_ids") or [],
         "uploaded_file_ids": node.get("uploaded_file_ids") or [],
+        "final": bool(node.get("final")),
         **({"position": node["position"]} if node.get("position") is not None else {}),
     }
+
+
+def _mark_final(graph: dict) -> dict:
+    """끝나는 블록이 하나면 최종 블록으로 표시한다. 여럿이면 사용자가 고르도록 비워 둔다."""
+    from . import dag
+
+    finals = [n for n in graph["nodes"] if n.get("final")]
+    sinks = set(dag.terminal_nodes(graph))
+    for node in finals:
+        if node["id"] not in sinks:
+            node["final"] = False
+    if not any(n.get("final") for n in graph["nodes"]) and len(sinks) == 1:
+        next(n for n in graph["nodes"] if n["id"] in sinks)["final"] = True
+    return graph
 
 
 def _workflow_edge(edge: dict) -> dict:
@@ -151,7 +166,7 @@ async def _generate_once(prompt: str, temperature: float) -> dict:
     }
     # LLM이 순환 그래프 등 실행 불가능한 구성을 제안하면 여기서 예외 발생
     dag.validate_graph(graph)
-    return graph
+    return _mark_final(graph)
 
 
 async def generate_workflow(prompt: str) -> tuple[dict, str]:
@@ -181,7 +196,7 @@ async def generate_workflow(prompt: str) -> tuple[dict, str]:
         "nodes": [_agent_node(n, i) for i, n in enumerate(fb["nodes"])],
         "edges": [_workflow_edge(edge) for edge in fb["edges"]],
     }
-    return graph, "fallback"
+    return _mark_final(graph), "fallback"
 
 
 REVISE_SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.
@@ -259,15 +274,17 @@ async def revise_workflow(graph: dict, instruction: str) -> dict:
             "worker_id": prev.get("worker_id"),
             "directory_ids": prev.get("directory_ids", []),
             "uploaded_file_ids": prev.get("uploaded_file_ids", []),
+            "final": bool(prev.get("final")),
+            "needs_file": bool(prev.get("needs_file")),
+            "input_slot_ids": prev.get("input_slot_ids", []),
             "position": prev.get("position"),
         })
-    return {
-        "name": data.get("name"),
-        "description": data.get("description"),
+    revised = _mark_final({
         "nodes": merged_nodes,
         "edges": [
             _workflow_edge(e)
             for e in (data.get("edges") or [])
             if e.get("source") and e.get("target")
         ],
-    }
+    })
+    return {"name": data.get("name"), "description": data.get("description"), **revised}

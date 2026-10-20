@@ -9,6 +9,9 @@ export interface AgentNode {
   worker_id?: number | null
   directory_ids?: number[]
   uploaded_file_ids?: number[]
+  final?: boolean
+  needs_file?: boolean
+  input_slot_ids?: string[]
   position?: { x: number; y: number } | null
 }
 
@@ -29,9 +32,36 @@ export interface GraphEdge {
   relation: 'workflow' | 'directory'
 }
 
+export interface InputSlot {
+  id: string
+  description: string
+  format: string
+  file_ids: number[]
+  directory_ids: number[]
+}
+
 export interface Graph {
   nodes: WorkflowNode[]
   edges: GraphEdge[]
+  input_slots?: InputSlot[]
+}
+
+export interface ValidationIssue {
+  code: string
+  severity: 'error' | 'warning'
+  message: string
+  node_ids: string[]
+  resolvable_by_run_prompt?: boolean
+}
+
+export interface ValidationResult {
+  valid: boolean
+  order: string[]
+  errors: ValidationIssue[]
+  warnings: ValidationIssue[]
+  stages: string[][]
+  final_node_ids: string[]
+  reason?: string | null
 }
 
 export interface Service {
@@ -41,6 +71,7 @@ export interface Service {
   graph: Graph
   created_at: string
   updated_at: string
+  validation?: ValidationResult | null
 }
 
 export interface DeviceModels {

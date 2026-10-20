@@ -4,8 +4,10 @@ import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, getDeviceDirectories, getDeviceModels } from '../api'
 import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
+import ValidationPanel from '../components/ValidationPanel'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
-import { AgentNode, Device, DeviceModels, Graph, Service, SharedDirectory, UploadedFile, WorkflowNode } from '../types'
+import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
+import { blockingErrors, issuesByNode } from '../workflow'
 
 const nodeTypes = { agent: AgentBlockNode }
 
@@ -63,8 +65,13 @@ export default function ServiceDetailPage() {
   const [aiLoading, setAiLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [inputSlots, setInputSlots] = useState<InputSlot[]>([])
+  const [validation, setValidation] = useState<ValidationResult | null>(null)
 
   const selectedAgent = selected ? agents[selected] : null
+  const issueMap = useMemo(() => issuesByNode(validation), [validation])
+  const selectedIssues = selected ? issueMap.get(selected) ?? [] : []
+  const nodeNames = useMemo(() => Object.fromEntries(Object.values(agents).map((agent) => [agent.id, agent.name])), [agents])
   const directoryById = useMemo(() => new Map(directories.map((directory) => [directory.id, directory])), [directories])
   const deviceById = useMemo(() => new Map(devices.map((device) => [device.id, device])), [devices])
   const uploadedFileById = useMemo(() => new Map(uploadedFiles.map((file) => [file.id, file])), [uploadedFiles])
@@ -81,13 +88,20 @@ export default function ServiceDetailPage() {
     : modelOptions
   const selectedDeviceModelInfo = selectedAgent?.worker_id ? deviceModels[selectedAgent.worker_id] : undefined
 
-  const nodeData = useCallback((agent: AgentNode) => ({
+  const nodeData = useCallback((agent: AgentNode) => {
+    const issues = issueMap.get(agent.id) ?? []
+    return {
     label: agent.name,
     model: agent.model,
+    final: agent.final,
+    issueLevel: issues.some((issue) => issue.severity === 'error') ? 'error' : issues.length ? 'warning' : undefined,
+    issueCount: issues.length,
+    issueMessages: issues.map((issue) => issue.message).join('\n'),
     workerName: agent.worker_id ? deviceById.get(agent.worker_id)?.name : undefined,
     directories: (agent.directory_ids ?? []).map((directoryId) => directoryById.get(directoryId)?.alias ?? `#${directoryId}`),
     files: (agent.uploaded_file_ids ?? []).map((fileId) => uploadedFileById.get(fileId)?.original_name ?? `#${fileId}`),
-  }), [deviceById, directoryById, uploadedFileById])
+    }
+  }, [deviceById, directoryById, issueMap, uploadedFileById])
 
   const applyAgents = useCallback((nextAgents: AgentNode[], graphEdges: Graph['edges'] = []) => {
     const positions = layout(nextAgents)
@@ -123,6 +137,7 @@ export default function ServiceDetailPage() {
         setDeviceModels(Object.fromEntries(modelGroups.map((item) => [item.device_id, item])))
         setDirectories(directoryGroups.flat())
         setUploadedFiles(files)
+        setInputSlots(loadedService.graph.input_slots ?? [])
         const loadedAgents = asAgents(loadedService.graph)
         const positions = layout(loadedAgents)
         setAgents(Object.fromEntries(loadedAgents.map((agent) => [agent.id, agent])))
@@ -143,14 +158,39 @@ export default function ServiceDetailPage() {
 
   function currentGraph(): Graph {
     return {
-      nodes: nodes.map((node) => ({ ...agents[node.id], position: node.position, directory_ids: agents[node.id].directory_ids ?? [], uploaded_file_ids: agents[node.id].uploaded_file_ids ?? [] })),
+      nodes: nodes.filter((node) => agents[node.id]).map((node) => ({ ...agents[node.id], position: node.position, directory_ids: agents[node.id].directory_ids ?? [], uploaded_file_ids: agents[node.id].uploaded_file_ids ?? [] })),
       edges: edges.map((edge) => ({ source: edge.source, target: edge.target, relation: 'workflow' as const })),
+      input_slots: inputSlots,
     }
   }
+
+  // 블록 위치를 뺀 구성이 바뀌면 잠시 뒤 서버에서 다시 검사한다
+  const graphKey = useMemo(() => JSON.stringify({
+    agents: Object.values(agents).map(({ position: _position, ...agent }) => agent),
+    edges: edges.map((edge) => [edge.source, edge.target]),
+    inputSlots,
+  }), [agents, edges, inputSlots])
+
+  useEffect(() => {
+    if (!service || !Object.keys(agents).length) return
+    const timer = window.setTimeout(() => {
+      api.post<ValidationResult>(`/services/${id}/validate`, { graph: currentGraph() }).then(setValidation).catch(() => {})
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [graphKey, service?.id])
 
   function updateAgent(patch: Partial<AgentNode>) {
     if (!selectedAgent) return
     setAgents((current) => ({ ...current, [selectedAgent.id]: { ...selectedAgent, ...patch } }))
+  }
+
+  // 최종 블록은 하나만 둔다
+  function setFinal(checked: boolean) {
+    if (!selectedAgent) return
+    setAgents((current) => Object.fromEntries(Object.entries(current).map(([agentId, agent]) => [
+      agentId,
+      { ...agent, final: agentId === selectedAgent.id ? checked : checked ? false : agent.final },
+    ])))
   }
 
   function addAgent(preset: BlockPreset, position?: { x: number; y: number }) {
@@ -232,16 +272,31 @@ export default function ServiceDetailPage() {
     }
   }
 
-  async function save(): Promise<boolean> {
+  async function save(): Promise<Service | null> {
     try {
       const updated = await api.put<Service>(`/services/${id}`, { name: svcName, description: svcDesc, graph: currentGraph() })
       setService(updated)
-      setMessage('저장되었습니다.')
-      return true
+      setValidation(updated.validation ?? null)
+      setError('')
+      const issueCount = (updated.validation?.errors.length ?? 0) + (updated.validation?.warnings.length ?? 0)
+      setMessage(issueCount ? `저장되었습니다. 구성 검사에서 문제 ${issueCount}개가 발견되었습니다.` : '저장되었습니다.')
+      return updated
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '저장 실패')
-      return false
+      return null
     }
+  }
+
+  async function configureAndRun() {
+    const updated = await save()
+    if (!updated) return
+    // 실행 프롬프트로 풀리는 '입력 없음' 오류만 남았다면 실행 화면으로 넘어간다
+    const blocking = blockingErrors(updated.validation)
+    if (blocking.length) {
+      setError(`실행하기 전에 오류 ${blocking.length}개를 고쳐 주세요: ${blocking[0].message}`)
+      return
+    }
+    navigate(`/services/${id}/run`)
   }
 
   async function aiRevise(event: FormEvent) {
@@ -281,7 +336,10 @@ export default function ServiceDetailPage() {
       <aside className="node-panel">
         {selectedAgent ? <>
           <div className="row spread"><h2 style={{ margin: 0 }}>에이전트 블록</h2><button className="btn sm danger" onClick={deleteAgent}>삭제</button></div>
+          {selectedIssues.length > 0 && <ul className="validation-list node-issues">{selectedIssues.map((issue, index) => <li key={`${issue.code}-${index}`} className={issue.severity}>{issue.message}</li>)}</ul>}
           <label>이름</label><input value={selectedAgent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
+          <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.final} onChange={(event) => setFinal(event.target.checked)} />최종 블록 (이 블록의 출력이 실행 결과가 됩니다)</label>
+          <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.needs_file} onChange={(event) => updateAgent({ needs_file: event.target.checked })} />사용자 파일 필요 (파일이 없으면 실행할 수 없습니다)</label>
           <label>역할 프롬프트</label><textarea rows={5} value={selectedAgent.role_prompt} onChange={(event) => updateAgent({ role_prompt: event.target.value })} />
           <label>실행 위치</label><select value={selectedAgent.provider || 'ollama'} onChange={(event) => { const provider = event.target.value as 'ollama' | 'openai' | 'anthropic' | 'gemini'; updateAgent({ provider, executor: provider === 'ollama' ? 'local' : 'cloud', worker_id: provider === 'ollama' ? selectedAgent.worker_id : null, model: '' }) }}><option value="ollama">Local Worker · Ollama</option><option value="openai">Cloud · OpenAI</option><option value="anthropic">Cloud · Anthropic</option><option value="gemini">Cloud · Google Gemini</option></select>
           <label>컴퓨팅 자원 (Worker)</label><select disabled={selectedProvider !== 'ollama'} value={selectedAgent.worker_id ?? ''} onChange={(event) => updateAgent({ worker_id: event.target.value ? Number(event.target.value) : null, model: '' })}><option value="">자동 배정</option>{devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.online ? ' · 온라인' : ' · 오프라인'}</option>)}</select>
@@ -306,7 +364,9 @@ export default function ServiceDetailPage() {
           </div>
         </> : <>
           <h2>서비스 정보</h2><label>이름</label><input value={svcName} onChange={(event) => setSvcName(event.target.value)} /><label>설명</label><textarea rows={3} value={svcDesc} onChange={(event) => setSvcDesc(event.target.value)} />
-          <h2 style={{ marginTop: 20 }}>Workflow execution</h2><p className="muted">Enter the run-specific prompt on a separate execution input screen.</p><button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={async () => { if (await save()) navigate(`/services/${id}/run`) }}>Configure and run</button>
+          <h2 style={{ marginTop: 20 }}>구성 검사</h2>
+          <ValidationPanel validation={validation} nodeNames={nodeNames} onSelectNode={setSelected} />
+          <h2 style={{ marginTop: 20 }}>Workflow execution</h2><p className="muted">Enter the run-specific prompt on a separate execution input screen.</p><button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={configureAndRun}>Configure and run</button>
         </>}
       </aside>
     </div>

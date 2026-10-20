@@ -45,6 +45,14 @@ def register_device(client, auth, name="노트북"):
     return {"X-Device-Key": r.json()["api_key"]}
 
 
+def editable_graph(service):
+    """웹 편집기가 저장할 때처럼 노드 type을 채운 그래프 복사본."""
+    graph = copy.deepcopy(service["graph"])
+    for n in graph["nodes"]:
+        n.setdefault("type", "agent")
+    return graph
+
+
 def create_service(client, auth):
     r = client.post(
         "/services/generate", json={"prompt": "문서 요약 서비스 만들기"}, headers=auth
@@ -194,7 +202,31 @@ class TestServiceEndpoints:
         auth = signup_and_login(client)
         service = create_service(client, auth)
         r = client.post(f"/services/{service['id']}/validate", headers=auth)
-        assert r.json() == {"valid": True, "order": ["a", "b", "c"]}
+        body = r.json()
+        # 시작 블록 a에 파일이 없으므로 실행 프롬프트 없이는 오류다
+        assert body["valid"] is False
+        assert [e["code"] for e in body["errors"]] == ["no_input"]
+        assert body["order"] == ["a", "b", "c"]
+        assert body["stages"] == [["a"], ["b"], ["c"]]
+
+        r = client.post(
+            f"/services/{service['id']}/validate", json={"run_prompt": "요약"}, headers=auth
+        )
+        assert r.json()["valid"] is True
+
+    def test_validate_draft_graph_and_save_reports_issues(self, client):
+        auth = signup_and_login(client)
+        service = create_service(client, auth)
+        draft = editable_graph(service)
+        draft["edges"].append({"source": "a", "target": "c"})
+        draft["nodes"][1]["needs_file"] = True
+        r = client.post(f"/services/{service['id']}/validate", json={"graph": draft}, headers=auth)
+        assert {e["code"] for e in r.json()["errors"]} == {"no_input", "missing_file"}
+
+        # 저장은 구조 오류만 막고, 나머지 문제는 저장 응답에 함께 돌려준다
+        r = client.put(f"/services/{service['id']}", json={"graph": draft}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert {e["code"] for e in r.json()["validation"]["errors"]} == {"no_input", "missing_file"}
 
     def test_duplicate_device_name_reconnects_and_rotates_key(self, client):
         auth = signup_and_login(client)
@@ -248,6 +280,46 @@ class TestExecutionGuards:
         # 이미 종료된 실행은 다시 취소할 수 없다
         r = client.post(f"/executions/{execution['id']}/cancel", headers=auth)
         assert r.status_code == 409
+
+
+    def test_validation_errors_block_execution(self, client):
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        service = create_service(client, auth)
+        graph = editable_graph(service)
+        graph["nodes"][1]["needs_file"] = True
+        assert client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth).status_code == 200
+
+        r = client.post(
+            f"/services/{service['id']}/executions", json={"run_prompt": "실행"}, headers=auth
+        )
+        assert r.status_code == 422
+        detail = r.json()["detail"]
+        assert detail["validation"]["errors"][0]["code"] == "missing_file"
+        assert detail["validation"]["errors"][0]["node_ids"] == ["b"]
+
+    def test_warnings_need_acknowledgement(self, client):
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        service = create_service(client, auth)
+        graph = editable_graph(service)
+        graph["nodes"].append({"id": "x", "type": "agent", "name": "고립", "uploaded_file_ids": []})
+        graph["nodes"][2]["final"] = True
+        assert client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth).status_code == 200
+
+        preview = client.post(
+            f"/services/{service['id']}/executions/preview", json={"run_prompt": "실행"}, headers=auth
+        ).json()
+        assert [w["code"] for w in preview["validation"]["warnings"]] == ["unreachable"]
+
+        url = f"/services/{service['id']}/executions"
+        r = client.post(url, json={"run_prompt": "실행"}, headers=auth)
+        assert r.status_code == 409
+        assert r.json()["detail"]["validation"]["warnings"][0]["node_ids"] == ["x"]
+        r = client.post(url, json={"run_prompt": "실행", "acknowledge_warnings": True}, headers=auth)
+        assert r.status_code == 201, r.text
 
 
 class TestWorkerResultGuards:

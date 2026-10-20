@@ -118,6 +118,15 @@ class TestGenerateWorkflow:
         # source가 빈 간선은 제거된다
         assert graph["edges"] == [{"source": "reader", "target": "agent1", "relation": "workflow"}]
 
+    def test_single_sink_is_marked_final(self, fake_ollama):
+        calls, replies = fake_ollama
+        replies.append(VALID_LLM_REPLY)
+
+        graph, _ = asyncio.run(generator.generate_workflow("문서 요약"))
+
+        assert {n["id"]: n["final"] for n in graph["nodes"]} == {"reader": False, "agent1": True}
+        assert dag.inspect_graph(graph, run_prompt="요약")["final_node_ids"] == ["agent1"]
+
     def test_cyclic_reply_retries_then_falls_back(self, fake_ollama):
         calls, replies = fake_ollama
         replies.append(CYCLIC_LLM_REPLY)

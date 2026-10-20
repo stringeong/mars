@@ -283,6 +283,18 @@ class TestCompleteTask:
             "## 에이전트 b\n\nb 결과\n\n---\n\n## 에이전트 c\n\nc 결과"
         )
 
+    def test_final_mark_limits_result_to_final_block(
+        self, db, make_user, make_execution
+    ):
+        graph = graph_of(["a", "b", "c"], [("a", "b"), ("a", "c")])
+        graph["nodes"][2]["final"] = True
+        execution, tasks = self._start(db, make_user, make_execution, graph)
+        for nid in ("a", "b", "c"):
+            self._finish(db, tasks[nid], output=f"{nid} 결과")
+
+        assert execution.status == "completed"
+        assert execution.result == "## 에이전트 c\n\nc 결과"
+
     def test_failure_fails_execution_and_cancels_pending(
         self, db, make_user, make_execution
     ):
