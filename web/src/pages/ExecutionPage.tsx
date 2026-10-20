@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api } from '../api'
 import { Execution, ExecutionListItem } from '../types'
+import { generationLabel } from '../workflow'
 
 function statusLabel(status: string) { return status.replace(/_/g, ' ') }
 
@@ -50,6 +51,6 @@ export default function ExecutionPage() {
       {execution.result && <section className="final-result-card"><div className="result-section-heading"><div><span className="eyebrow">FINAL OUTPUT</span><h2>Generated result</h2></div><button className="btn sm ghost" onClick={downloadResult}>Download</button></div><article className="result-box">{execution.result}</article></section>}
       {execution.tasks.some((task) => task.output) && <section className="agent-output-section"><span className="eyebrow">TRACE OUTPUT</span><h2>Agent outputs</h2>{execution.tasks.filter((task) => task.output).map((task) => <details key={task.id}><summary><span>{task.agent_name}</span><small>{task.assigned_device_id ? `Worker #${task.assigned_device_id}` : 'Auto assigned'}</small></summary><div className="result-box">{task.output}</div></details>)}</section>}
     </main>
-    <aside className="execution-detail-panel"><span className="eyebrow">EXECUTION DETAILS</span><h2>Run metadata</h2><dl><div><dt>Status</dt><dd><span className={`status-pill ${execution.status}`}>{statusLabel(execution.status)}</span></dd></div><div><dt>Progress</dt><dd>{execution.progress}%</dd></div><div><dt>Started</dt><dd>{new Date(execution.created_at).toLocaleString()}</dd></div><div><dt>Agents</dt><dd>{execution.tasks.length}</dd></div></dl><div className="mini-flow"><span className="eyebrow">WORKFLOW MAP</span><div><b>Input</b><i /><b>Agents</b><i /><b>Output</b></div><small>Workflow blocks and worker assignments are recorded in the execution trace.</small></div></aside>
+    <aside className="execution-detail-panel"><span className="eyebrow">EXECUTION DETAILS</span><h2>Run metadata</h2><dl><div><dt>Status</dt><dd><span className={`status-pill ${execution.status}`}>{statusLabel(execution.status)}</span></dd></div><div><dt>Progress</dt><dd>{execution.progress}%</dd></div><div><dt>Started</dt><dd>{new Date(execution.created_at).toLocaleString()}</dd></div><div><dt>Agents</dt><dd>{execution.tasks.length}</dd></div><div><dt>생성 모델</dt><dd>{generationLabel(execution.generation_info)}</dd></div></dl><div className="mini-flow"><span className="eyebrow">WORKFLOW MAP</span><div><b>Input</b><i /><b>Agents</b><i /><b>Output</b></div><small>Workflow blocks and worker assignments are recorded in the execution trace.</small></div></aside>
   </div>
 }

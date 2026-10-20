@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api'
-import { Device, Service } from '../types'
+import { api, ApiError } from '../api'
+import { CloudProvider, Device, GenerationError, GeneratorModels, Service } from '../types'
+import { GENERATION_STAGE_LABELS, PROVIDER_LABELS } from '../workflow'
 
 const templates = [
   { title: 'Research report', text: 'Collect reliable sources on a topic, analyze the evidence, and prepare a concise research report.' },
@@ -21,12 +22,36 @@ export default function ServicesPage() {
   const [selectedResources, setSelectedResources] = useState(['Workers', 'Directories'])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [generatorModels, setGeneratorModels] = useState<GeneratorModels | null>(null)
+  const [genLocation, setGenLocation] = useState<'local' | 'cloud'>('local')
+  const [genProvider, setGenProvider] = useState<CloudProvider>('openai')
+  const [genModel, setGenModel] = useState('')
+  const [transferAck, setTransferAck] = useState(false)
+  const [genError, setGenError] = useState<GenerationError | null>(null)
+  const modelSelectRef = useRef<HTMLSelectElement>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
     api.get<Service[]>('/services').then(setServices).catch(() => {})
     api.get<Device[]>('/devices').then(setDevices).catch(() => {})
+    api.get<GeneratorModels>('/services/generator-models').then(setGeneratorModels).catch(() => {})
   }, [])
+
+  // 외부 LLM API는 키를 등록한 제공자만 고를 수 있다
+  const configuredCloud = (generatorModels?.cloud ?? []).filter((item) => item.configured)
+  const selectedCloud = configuredCloud.find((item) => item.provider === genProvider)
+  const genModelOptions = genLocation === 'cloud' ? selectedCloud?.models ?? [] : generatorModels?.local.models ?? []
+  const genDefaultModel = genLocation === 'cloud' ? selectedCloud?.default_model : generatorModels?.local.default_model
+  const genModelLabel = genLocation === 'cloud'
+    ? `외부 LLM API · ${PROVIDER_LABELS[genProvider]} · ${genModel || genDefaultModel || '기본 모델'}`
+    : `서버 로컬 LLM · ${genModel || genDefaultModel || '기본 모델'}`
+
+  function chooseLocation(next: 'local' | 'cloud') {
+    setGenLocation(next)
+    setGenModel('')
+    setTransferAck(false)
+    if (next === 'cloud' && configuredCloud.length && !selectedCloud) setGenProvider(configuredCloud[0].provider)
+  }
 
   const onlineDevices = devices.filter((device) => device.online)
   const estimate = useMemo(() => ({
@@ -43,10 +68,34 @@ export default function ServicesPage() {
   async function generate(e: FormEvent) {
     e.preventDefault()
     setError('')
+    setGenError(null)
     setLoading(true)
     try {
-      const service = await api.post<Service>('/services/generate', { prompt })
-      navigate(`/services/${service.id}`)
+      const service = await api.post<Service>('/services/generate', {
+        prompt,
+        location: genLocation,
+        provider: genLocation === 'cloud' ? genProvider : 'ollama',
+        model: genModel,
+        external_transfer_ack: genLocation === 'cloud' && transferAck,
+      })
+      navigate(`/services/${service.id}/setup`)
+    } catch (err) {
+      const detail = err instanceof ApiError ? err.detail as { generation_error?: GenerationError } | undefined : undefined
+      if (detail?.generation_error) setGenError(detail.generation_error)
+      else setError(err instanceof Error ? err.message : 'Unable to create workflow.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // 생성 실패 후 사용자가 고른 경우에만 규칙 기반 기본 워크플로우를 만든다
+  async function chooseDefaultWorkflow() {
+    if (!genError) return
+    setLoading(true)
+    try {
+      const reason = `${GENERATION_STAGE_LABELS[genError.stage] ?? genError.stage} (${genError.model}): ${genError.message}`
+      const service = await api.post<Service>('/services/generate', { prompt, use_fallback: true, fallback_reason: reason })
+      navigate(`/services/${service.id}/setup`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unable to create workflow.')
     } finally {
@@ -85,6 +134,42 @@ export default function ServicesPage() {
               required
               minLength={5}
             />
+            <div className="generator-picker">
+              <span className="generator-picker-title">생성 모델</span>
+              <label>실행 위치
+                <select value={genLocation} onChange={(event) => chooseLocation(event.target.value as 'local' | 'cloud')}>
+                  <option value="local">서버 로컬 LLM (Ollama)</option>
+                  <option value="cloud" disabled={!configuredCloud.length}>외부 LLM API{configuredCloud.length ? '' : ' · 등록된 키 없음'}</option>
+                </select>
+              </label>
+              {genLocation === 'cloud' && <label>제공자
+                <select value={genProvider} onChange={(event) => { setGenProvider(event.target.value as CloudProvider); setGenModel(''); setTransferAck(false) }}>
+                  {configuredCloud.map((item) => <option key={item.provider} value={item.provider}>{PROVIDER_LABELS[item.provider]}</option>)}
+                </select>
+              </label>}
+              <label>모델
+                <select ref={modelSelectRef} value={genModel} onChange={(event) => setGenModel(event.target.value)}>
+                  <option value="">{genLocation === 'cloud' ? '등록된 기본 모델' : '서버 기본 모델'}{genDefaultModel ? ` · ${genDefaultModel}` : ''}</option>
+                  {genModelOptions.filter((model) => model !== genDefaultModel).map((model) => <option key={model} value={model}>{model}</option>)}
+                </select>
+              </label>
+            </div>
+            {genLocation === 'local' && generatorModels && !generatorModels.local.available && <small className="generator-hint">{generatorModels.local.error} 이대로 생성하면 연결 실패로 안내됩니다.</small>}
+            {genLocation === 'cloud' && <div className="external-notice">
+              <strong>외부 전송 안내</strong>
+              <p>생성 프롬프트가 {PROVIDER_LABELS[genProvider]} API로 전송됩니다. API 키는 서버에만 보관되며, 업로드 파일은 생성 단계에서 전송되지 않습니다.</p>
+              <label className="ack-row"><input type="checkbox" checked={transferAck} onChange={(event) => setTransferAck(event.target.checked)} />생성 프롬프트가 외부로 전송되는 것을 확인했습니다.</label>
+            </div>}
+            {genError && <div className="generation-failure" role="alert">
+              <span className="eyebrow">생성 실패 · {GENERATION_STAGE_LABELS[genError.stage] ?? genError.stage}</span>
+              <strong>{genError.location === 'cloud' ? PROVIDER_LABELS[genError.provider] : '서버 로컬 LLM'} · {genError.model} 모델로 워크플로우를 만들지 못했습니다.</strong>
+              <p>{genError.message}</p>
+              <div className="generation-failure-actions">
+                <button type="button" className="btn sm ghost" onClick={() => { setGenError(null); modelSelectRef.current?.focus() }}>다른 모델로 다시 시도</button>
+                <button type="button" className="btn sm" disabled={loading} onClick={chooseDefaultWorkflow}>기본 워크플로우 사용</button>
+              </div>
+              <small>기본 워크플로우는 정보 수집 → 분석 → 정리 3단계이며, 생성 프롬프트는 역할 프롬프트에 붙지 않고 서비스 목표로만 전달됩니다.</small>
+            </div>}
             <div className="resource-row">
               <span>Attach context</span>
               {['Workers', 'Directories', 'Web research'].map((resource) => (
@@ -96,7 +181,7 @@ export default function ServicesPage() {
             {error && <div className="error">{error}</div>}
             <div className="creation-footer">
               <span>Generation creates an editable Scratch-style workflow.</span>
-              <button className="generate-button" disabled={loading}>
+              <button className="generate-button" disabled={loading || (genLocation === 'cloud' && (!transferAck || !selectedCloud))}>
                 <span className="spark">+</span>{loading ? 'Building workflow...' : 'Generate workflow'}
               </button>
             </div>
@@ -152,7 +237,7 @@ export default function ServicesPage() {
               {devices.length === 0 && <div className="worker-empty">No workers registered yet.</div>}
             </div>
           </div>
-          <div className="assistant-section model-section"><div className="assistant-section-title"><span>Agent models</span><small>Auto select</small></div><div className="model-tags"><span>Planner</span><span>Researcher</span><span>Reviewer</span></div></div>
+          <div className="assistant-section model-section"><div className="assistant-section-title"><span>Generation model</span><small>{genLocation === 'cloud' ? 'External API' : 'Server local'}</small></div><div className="model-tags"><span>{genModelLabel}</span></div></div>
           <div className="plan-preview"><span className="eyebrow">ESTIMATED FLOW</span><div className="plan-flow"><span>Brief</span><i /><span>Agents</span><i /><span>Result</span></div><small>Generated blocks can be rearranged before running.</small></div>
         </aside>
       </div>

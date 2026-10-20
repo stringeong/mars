@@ -293,3 +293,14 @@ class TestInspectGraph:
         graph["nodes"][2]["final"] = True
         assert dag.result_node_ids(graph) == ["c"]
 
+
+def test_expand_input_slots_copies_slot_sources_into_blocks():
+    graph = graph_of(["a", "b"], [("a", "b")])
+    graph["input_slots"] = [{"id": "s1", "file_ids": [7], "directory_ids": [3]}]
+    graph["nodes"][0].update(input_slot_ids=["s1"], uploaded_file_ids=[5])
+    expanded = dag.expand_input_slots(graph)
+    assert expanded["nodes"][0]["uploaded_file_ids"] == [5, 7]
+    assert expanded["nodes"][0]["directory_ids"] == [3]
+    assert expanded["nodes"][1].get("uploaded_file_ids", []) == []
+    # 원본 그래프는 바뀌지 않는다
+    assert graph["nodes"][0]["uploaded_file_ids"] == [5]

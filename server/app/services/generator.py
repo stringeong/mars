@@ -1,12 +1,16 @@
 """자연어 생성 프롬프트 -> MAS 워크플로우(DAG) 생성.
 
-1차: Ollama LLM에게 JSON 스키마로 요청.
-실패 시: 규칙 기반 폴백(수집 -> 분석 -> 정리 3단계)으로 항상 결과를 보장한다.
+사용자가 고른 생성 모델(서버 로컬 Ollama 또는 등록된 외부 LLM API)에 JSON 스키마로 요청한다.
+실패하면 원인(연결 실패, 응답 파싱 실패, 구성 검증 실패)을 GenerationError로 알린다.
+규칙 기반 기본 워크플로우는 사용자가 고른 경우에만 만든다.
 """
 
+import asyncio
 import json
 import logging
 import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 import httpx
 
@@ -16,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 # Stay within the 60-second reverse-proxy response window.
 OLLAMA_TIMEOUT = httpx.Timeout(25.0, connect=3.0)
+# 외부 LLM 생성도 같은 프록시 응답 시간 안에 끝나야 한다 (실행용 클라우드 호출은 120초)
+CLOUD_GENERATION_TIMEOUT = httpx.Timeout(45.0, connect=5.0)
 
 SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.
 사용자가 만들고 싶은 서비스 설명을 읽고, 이를 수행할 에이전트 구성과 실행 순서(DAG)를 설계하세요.
@@ -26,6 +32,13 @@ SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.
 - 연결은 반드시 앞 단계에서 뒤 단계로 한 방향으로만 흐른다. 검토·첨삭·개선처럼
   앞 단계 결과를 다듬는 작업도 뒤에 새 에이전트를 두어 처리하고, 이전 에이전트로
   되돌아가는 연결(피드백 루프)은 절대 만들지 않는다.
+- 결과를 종합하는 최종 에이전트는 정확히 1개이며 "final": true로 표시한다.
+  다른 모든 에이전트의 결과는 연결을 따라 최종 에이전트에 도달해야 한다.
+- 실행할 때 사용자 파일(예: 거래 내역 CSV, 보고서 PDF)을 직접 읽어야 하는 에이전트는
+  "needs_file": true로 표시하고 "file_description"(어떤 내용의 파일인지)과
+  "file_format"(형식과 예상 열 구성)을 적는다. 앞 단계 결과만 읽는 에이전트는 false로 둔다.
+- 같은 파일을 여러 에이전트가 함께 읽으면 같은 "file_key"를 쓴다.
+  예: 거래 분류와 이상 거래 탐지가 같은 신용카드 내역을 읽으면 둘 다 "credit_card".
 - role_prompt는 해당 에이전트에게 줄 시스템 프롬프트로, 한국어로 구체적으로 작성한다.
 - 반드시 아래 JSON 형식만 출력한다. 다른 텍스트는 출력하지 않는다.
 
@@ -33,12 +46,50 @@ SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.
   "name": "서비스 이름",
   "description": "서비스 한 줄 설명",
   "nodes": [
-    {"id": "agent1", "name": "에이전트 이름", "role_prompt": "..."}
+    {"id": "agent1", "name": "에이전트 이름", "role_prompt": "...",
+     "needs_file": true, "file_key": "credit_card",
+     "file_description": "신용카드 사용 내역",
+     "file_format": "CSV, 열: 거래ID, 일시, 거래처, 금액"},
+    {"id": "agent2", "name": "에이전트 이름", "role_prompt": "...",
+     "needs_file": false, "final": true}
   ],
   "edges": [
     {"source": "agent1", "target": "agent2"}
   ]
 }"""
+
+
+@dataclass(frozen=True)
+class GeneratorChoice:
+    """워크플로우를 생성할 LLM. location: local(서버 Ollama) | cloud(등록된 외부 LLM API)."""
+
+    location: str = "local"
+    provider: str = "ollama"
+    model: str = ""
+    api_key: str = field(default="", repr=False)
+
+    @property
+    def resolved_model(self) -> str:
+        return self.model or (DEFAULT_MODEL if self.location == "local" else "")
+
+
+class GenerationError(RuntimeError):
+    """사용자가 고른 모델로 워크플로우를 만들지 못했다. stage: connection | parse | validation"""
+
+    def __init__(self, stage: str, message: str, choice: GeneratorChoice):
+        super().__init__(message)
+        self.stage = stage
+        self.message = message
+        self.choice = choice
+
+    def detail(self) -> dict:
+        return {
+            "stage": self.stage,
+            "message": self.message,
+            "location": self.choice.location,
+            "provider": self.choice.provider,
+            "model": self.choice.resolved_model,
+        }
 
 
 def _extract_json(text: str) -> dict:
@@ -52,18 +103,22 @@ def _extract_json(text: str) -> dict:
 
 
 def _fallback_graph(prompt: str) -> dict:
-    """LLM을 사용할 수 없을 때의 규칙 기반 3단계 워크플로우."""
+    """LLM을 사용할 수 없을 때의 규칙 기반 3단계 워크플로우.
+
+    생성 프롬프트는 역할 프롬프트에 붙이지 않고 goal로 두어 시작 블록 컨텍스트로만 전달한다.
+    """
     topic = prompt.strip()[:40]
     return {
         "name": f"{topic} 서비스",
         "description": prompt.strip(),
+        "goal": prompt.strip(),
         "nodes": [
             {
                 "id": "collector",
                 "name": "정보 수집 에이전트",
                 "role_prompt": (
-                    "당신은 정보 수집 담당입니다. 사용자의 요청과 제공된 자료를 바탕으로 "
-                    "필요한 정보를 항목별로 정리해 나열하세요. 요청: " + prompt
+                    "당신은 정보 수집 담당입니다. 서비스 목표와 사용자의 요청, 제공된 자료를 바탕으로 "
+                    "필요한 정보를 항목별로 정리해 나열하세요."
                 ),
             },
             {
@@ -90,6 +145,10 @@ def _fallback_graph(prompt: str) -> dict:
     }
 
 
+def _truthy(value) -> bool:
+    return value is True or str(value).strip().lower() in {"true", "1", "yes"}
+
+
 def _agent_node(node: dict, index: int) -> dict:
     """Return the canonical shape expected by the API and web editor."""
     return {
@@ -101,9 +160,33 @@ def _agent_node(node: dict, index: int) -> dict:
         "worker_id": node.get("worker_id"),
         "directory_ids": node.get("directory_ids") or [],
         "uploaded_file_ids": node.get("uploaded_file_ids") or [],
-        "final": bool(node.get("final")),
+        "final": _truthy(node.get("final")),
+        "needs_file": _truthy(node.get("needs_file")),
+        "input_slot_ids": list(node.get("input_slot_ids") or []),
         **({"position": node["position"]} if node.get("position") is not None else {}),
     }
+
+
+def _input_slots(raw_nodes: list[dict], nodes: list[dict]) -> list[dict]:
+    """needs_file 블록의 파일 안내를 슬롯으로 묶는다. 같은 file_key를 쓰는 블록은 한 슬롯을 함께 읽는다."""
+    slots: dict[str, dict] = {}
+    for raw, node in zip(raw_nodes, nodes):
+        if not node["needs_file"]:
+            continue
+        key = str(raw.get("file_key") or raw.get("file_description") or node["id"]).strip()
+        slot = slots.setdefault(key, {
+            "id": f"slot{len(slots) + 1}",
+            "description": "",
+            "format": "",
+            "file_ids": [],
+            "directory_ids": [],
+        })
+        slot["description"] = slot["description"] or str(raw.get("file_description") or "").strip()
+        slot["format"] = slot["format"] or str(raw.get("file_format") or "").strip()
+        node["input_slot_ids"] = [slot["id"]]
+    for slot in slots.values():
+        slot["description"] = slot["description"] or "사용자 파일"
+    return list(slots.values())
 
 
 def _mark_final(graph: dict) -> dict:
@@ -129,18 +212,26 @@ def _workflow_edge(edge: dict) -> dict:
     }
 
 
-async def _generate_once(prompt: str, temperature: float) -> dict:
-    """LLM을 1회 호출해 그래프를 만들고 DAG 검증까지 통과시킨다. 실패 시 예외."""
-    from . import dag
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
+
+async def _chat(choice: GeneratorChoice, system: str, user: str, temperature: float) -> tuple[str, dict]:
+    """고른 생성 모델에 한 번 묻고 (응답 텍스트, 토큰 사용량)을 돌려준다."""
+    if choice.location == "cloud":
+        from .cloud_executor import _call
+
+        return await asyncio.to_thread(
+            _call, choice.provider, choice.api_key, choice.resolved_model, system, user, CLOUD_GENERATION_TIMEOUT
+        )
     async with httpx.AsyncClient(timeout=OLLAMA_TIMEOUT) as client:
         resp = await client.post(
             f"{OLLAMA_URL}/api/chat",
             json={
-                "model": DEFAULT_MODEL,
+                "model": choice.resolved_model,
                 "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
                 ],
                 "stream": False,
                 "format": "json",
@@ -148,55 +239,122 @@ async def _generate_once(prompt: str, temperature: float) -> dict:
             },
         )
         resp.raise_for_status()
-        content = resp.json()["message"]["content"]
-        data = _extract_json(content)
+        return resp.json()["message"]["content"], {}
 
-    nodes = data.get("nodes") or []
-    if not nodes:
+
+async def _generate_once(prompt: str, choice: GeneratorChoice, temperature: float) -> tuple[dict, dict]:
+    """LLM을 1회 호출해 그래프를 만들고 DAG 검증까지 통과시킨다. 실패 시 예외."""
+    from . import dag
+
+    content, usage = await _chat(choice, SYSTEM_PROMPT, prompt, temperature)
+    data = _extract_json(content)
+    raw_nodes = data.get("nodes") or []
+    if not raw_nodes:
         raise ValueError("에이전트가 비어 있음")
+    nodes = [_agent_node(n, i) for i, n in enumerate(raw_nodes)]
     graph = {
         "name": data.get("name") or "새 서비스",
         "description": data.get("description") or prompt,
-        "nodes": [_agent_node(n, i) for i, n in enumerate(nodes)],
+        "nodes": nodes,
         "edges": [
             _workflow_edge(e)
             for e in (data.get("edges") or [])
             if e.get("source") and e.get("target")
         ],
+        "input_slots": _input_slots(raw_nodes, nodes),
     }
     # LLM이 순환 그래프 등 실행 불가능한 구성을 제안하면 여기서 예외 발생
     dag.validate_graph(graph)
-    return _mark_final(graph)
+    return _mark_final(graph), usage
 
 
-async def generate_workflow(prompt: str) -> tuple[dict, str]:
-    """(graph_dict, source) 반환. source는 'llm' 또는 'fallback'.
+def _connection_message(exc: httpx.HTTPError, choice: GeneratorChoice) -> str:
+    where = "서버 로컬 LLM(Ollama)" if choice.location == "local" else f"외부 LLM API({choice.provider})"
+    if isinstance(exc, httpx.TimeoutException):
+        return f"{where} 응답 시간이 초과되었습니다."
+    if isinstance(exc, httpx.HTTPStatusError):
+        try:
+            reason = exc.response.json().get("error")
+            reason = reason.get("message") if isinstance(reason, dict) else reason
+        except (ValueError, AttributeError):
+            reason = None
+        suffix = f": {str(reason)[:200]}" if reason else ""
+        return f"{where}가 {exc.response.status_code} 오류를 반환했습니다{suffix}"
+    return f"{where}에 연결할 수 없습니다. 실행 상태와 네트워크를 확인해 주세요."
 
-    LLM 출력이 잘못되면(JSON 파싱 실패, 순환 그래프 등) 온도를 낮춰 1회 재시도하고,
-    그래도 실패하면 규칙 기반 폴백으로 항상 유효한 그래프를 보장한다 —
-    사용자에게 '생성 실패'를 돌려주는 일이 없도록 한다.
+
+async def generate_workflow(prompt: str, choice: GeneratorChoice | None = None) -> tuple[dict, dict]:
+    """(graph_dict, generation_info) 반환.
+
+    LLM 출력이 잘못되면(JSON 파싱 실패, 순환 그래프 등) 온도를 낮춰 1회 재시도한다.
+    그래도 실패하거나 모델에 연결할 수 없으면 GenerationError를 던진다. 기본 워크플로우로
+    바꿀지는 사용자가 원인을 보고 고른다(fallback_workflow).
     """
+    from . import dag
+
+    choice = choice or GeneratorChoice()
+    last_error: GenerationError | None = None
     for attempt, temperature in enumerate((0.3, 0.1), start=1):
         try:
-            return await _generate_once(prompt, temperature), "llm"
+            graph, usage = await _generate_once(prompt, choice, temperature)
         except httpx.HTTPError as exc:
-            logger.warning("Ollama workflow generation unavailable: %s", exc)
-            break
+            logger.warning("Workflow generation model unavailable: %s", exc)
+            raise GenerationError("connection", _connection_message(exc, choice), choice) from exc
+        except dag.DagError as exc:
+            logger.warning("Generated workflow is not runnable (attempt %s): %s", attempt, exc)
+            last_error = GenerationError("validation", f"생성된 구성을 실행할 수 없습니다: {exc}", choice)
         except (KeyError, TypeError, ValueError) as exc:
-            logger.warning(
-                "Invalid Ollama workflow response (attempt %s): %s", attempt, exc
-            )
-        except Exception:
+            logger.warning("Invalid workflow response (attempt %s): %s", attempt, exc)
+            last_error = GenerationError("parse", f"모델 응답을 워크플로우로 해석하지 못했습니다: {exc}", choice)
+        except Exception as exc:
             logger.exception("Unexpected workflow generation failure")
-            break
+            raise GenerationError("connection", f"모델 호출 중 오류가 발생했습니다: {type(exc).__name__}", choice) from exc
+        else:
+            info = {
+                "source": "llm",
+                "location": choice.location,
+                "provider": choice.provider if choice.location == "cloud" else "ollama",
+                "model": choice.resolved_model,
+                "generated_at": _now(),
+            }
+            if usage:
+                info["usage"] = usage
+            return graph, info
+    raise last_error
+
+
+def fallback_workflow(prompt: str, reason: str = "") -> tuple[dict, dict]:
+    """사용자가 생성 실패 후 고른 규칙 기반 기본 워크플로우."""
     fb = _fallback_graph(prompt)
     graph = {
         "name": fb["name"],
         "description": fb["description"],
+        "goal": fb["goal"],
         "nodes": [_agent_node(n, i) for i, n in enumerate(fb["nodes"])],
         "edges": [_workflow_edge(edge) for edge in fb["edges"]],
+        "input_slots": [],
     }
-    return _mark_final(graph), "fallback"
+    info = {"source": "fallback", "location": None, "provider": None, "model": None, "generated_at": _now()}
+    if reason.strip():
+        info["fallback_reason"] = reason.strip()[:300]
+    return _mark_final(graph), info
+
+
+async def list_local_models() -> dict:
+    """서버 로컬 Ollama에 설치된 모델 목록."""
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(5.0, connect=2.0)) as client:
+            resp = await client.get(f"{OLLAMA_URL}/api/tags")
+            resp.raise_for_status()
+        names = sorted({str(m["name"]) for m in resp.json().get("models", []) if m.get("name")})
+        return {"available": True, "models": names, "default_model": DEFAULT_MODEL, "error": None}
+    except (httpx.HTTPError, ValueError, KeyError, TypeError):
+        return {
+            "available": False,
+            "models": [],
+            "default_model": DEFAULT_MODEL,
+            "error": "서버 로컬 LLM(Ollama)에 연결할 수 없습니다.",
+        }
 
 
 REVISE_SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.

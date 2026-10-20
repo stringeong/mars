@@ -15,6 +15,7 @@ import SettingsPage from './pages/SettingsPage'
 import ServiceDetailPage from './pages/ServiceDetailPage'
 import ServicesPage from './pages/ServicesPage'
 import WorkflowRunPage from './pages/WorkflowRunPage'
+import WorkflowSetupPage from './pages/WorkflowSetupPage'
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   if (!getToken()) return <Navigate to="/login" replace />
@@ -51,6 +52,7 @@ export default function App() {
           <Route path="/dashboard" element={<RequireAuth><DashboardPage /></RequireAuth>} />
           <Route path="/services" element={<RequireAuth><ServicesPage /></RequireAuth>} />
           <Route path="/services/:id/run" element={<RequireAuth><WorkflowRunPage /></RequireAuth>} />
+          <Route path="/services/:id/setup" element={<RequireAuth><WorkflowSetupPage /></RequireAuth>} />
           <Route path="/services/:id" element={<RequireAuth><ServiceDetailPage /></RequireAuth>} />
           <Route path="/devices" element={<RequireAuth><DevicesPage /></RequireAuth>} />
           <Route path="/files" element={<RequireAuth><FilesPage /></RequireAuth>} />

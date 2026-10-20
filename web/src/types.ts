@@ -44,6 +44,31 @@ export interface Graph {
   nodes: WorkflowNode[]
   edges: GraphEdge[]
   input_slots?: InputSlot[]
+  goal?: string
+}
+
+export type CloudProvider = 'openai' | 'anthropic' | 'gemini'
+
+export interface GenerationInfo {
+  source: 'llm' | 'fallback'
+  location: 'local' | 'cloud' | null
+  provider: string | null
+  model: string | null
+  generated_at?: string
+  fallback_reason?: string
+}
+
+export interface GenerationError {
+  stage: 'connection' | 'parse' | 'validation'
+  message: string
+  location: 'local' | 'cloud'
+  provider: string
+  model: string
+}
+
+export interface GeneratorModels {
+  local: { available: boolean; models: string[]; default_model: string; error: string | null }
+  cloud: { provider: CloudProvider; configured: boolean; status: string; default_model: string; models: string[] }[]
 }
 
 export interface ValidationIssue {
@@ -71,6 +96,7 @@ export interface Service {
   graph: Graph
   created_at: string
   updated_at: string
+  generation_info?: GenerationInfo | null
   validation?: ValidationResult | null
 }
 
@@ -150,6 +176,7 @@ export interface Execution {
   error: string | null
   created_at: string
   finished_at: string | null
+  generation_info?: GenerationInfo | null
   progress: number
   tasks: Task[]
 }
@@ -162,4 +189,5 @@ export interface ExecutionListItem {
   status: string
   created_at: string
   finished_at: string | null
+  generation_info?: GenerationInfo | null
 }

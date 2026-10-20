@@ -13,14 +13,25 @@ from app.main import app
 from tests.conftest import LINEAR
 
 
+GENERATE_CALLS: list = []
+
+
 @pytest.fixture()
 def client(db, monkeypatch):
-    async def fake_generate(prompt):
+    async def fake_generate(prompt, choice=None):
         graph = copy.deepcopy(LINEAR)
         graph["name"] = "테스트 서비스"
         graph["description"] = prompt
-        return graph, "llm"
+        GENERATE_CALLS.append(choice)
+        return graph, {
+            "source": "llm",
+            "location": choice.location if choice else "local",
+            "provider": choice.provider if choice else "ollama",
+            "model": "test-model",
+            "generated_at": "2026-10-21T00:00:00+00:00",
+        }
 
+    GENERATE_CALLS.clear()
     monkeypatch.setattr("app.routers.services.generate_workflow", fake_generate)
     app.dependency_overrides[get_db] = lambda: db
     with TestClient(app) as c:
@@ -89,6 +100,8 @@ class TestHappyPath:
         execution = r.json()
         assert execution["status"] == "running"
         assert len(execution["tasks"]) == 3
+        # 실행 이력에 생성 모델 정보가 복사된다
+        assert execution["generation_info"]["model"] == "test-model"
 
         # 워커 프로토콜 루프: a → b → c 순서로 할당·완료 (UC-204)
         for node, output in [("a", "a 결과"), ("b", "b 결과"), ("c", "c 결과")]:
@@ -121,6 +134,66 @@ class TestHappyPath:
         assert len(items) == 1
         assert items[0]["service_name"] == "테스트 서비스"
         assert items[0]["status"] == "completed"
+
+
+class TestGenerationChoice:
+    def test_generator_models_lists_local_and_registered_cloud(self, client, monkeypatch):
+        async def fake_local():
+            return {"available": True, "models": ["gemma3:4b", "qwen3:4b"], "default_model": "gemma3:4b", "error": None}
+
+        monkeypatch.setattr("app.routers.services.list_local_models", fake_local)
+        auth = signup_and_login(client)
+        client.put("/settings/llm-providers/openai", json={"api_key": "sk-test-12345678"}, headers=auth)
+
+        body = client.get("/services/generator-models", headers=auth).json()
+        assert body["local"]["models"] == ["gemma3:4b", "qwen3:4b"]
+        configured = {item["provider"]: item["configured"] for item in body["cloud"]}
+        assert configured == {"openai": True, "anthropic": False, "gemini": False}
+
+    def test_failure_returns_cause_without_creating_service(self, client, monkeypatch):
+        from app.services.generator import GenerationError, GeneratorChoice
+
+        async def failing_generate(prompt, choice=None):
+            raise GenerationError("parse", "모델 응답을 워크플로우로 해석하지 못했습니다", choice or GeneratorChoice())
+
+        monkeypatch.setattr("app.routers.services.generate_workflow", failing_generate)
+        auth = signup_and_login(client)
+        r = client.post("/services/generate", json={"prompt": "문서 요약 서비스", "model": "qwen3:4b"}, headers=auth)
+
+        assert r.status_code == 502
+        error = r.json()["detail"]["generation_error"]
+        assert error["stage"] == "parse" and error["model"] == "qwen3:4b"
+        assert client.get("/services", headers=auth).json() == []
+
+    def test_user_can_choose_default_workflow_after_failure(self, client):
+        auth = signup_and_login(client)
+        r = client.post(
+            "/services/generate",
+            json={"prompt": "문서 요약 서비스", "use_fallback": True, "fallback_reason": "연결 실패"},
+            headers=auth,
+        )
+        assert r.status_code == 201, r.text
+        service = r.json()
+        assert service["generation_info"]["source"] == "fallback"
+        assert service["generation_info"]["fallback_reason"] == "연결 실패"
+        assert service["graph"]["goal"] == "문서 요약 서비스"
+        assert GENERATE_CALLS == []
+
+    def test_cloud_generation_requires_key_and_transfer_ack(self, client):
+        auth = signup_and_login(client)
+        body = {"prompt": "문서 요약 서비스", "location": "cloud", "provider": "openai"}
+        assert client.post("/services/generate", json=body, headers=auth).status_code == 422
+
+        client.put("/settings/llm-providers/openai", json={"api_key": "sk-test-12345678"}, headers=auth)
+        assert client.post("/services/generate", json=body, headers=auth).status_code == 428
+
+        r = client.post("/services/generate", json={**body, "external_transfer_ack": True}, headers=auth)
+        assert r.status_code == 201, r.text
+        choice = GENERATE_CALLS[-1]
+        assert choice.location == "cloud" and choice.provider == "openai"
+        assert choice.model == "gpt-5-mini"  # 등록된 기본 모델
+        assert choice.api_key == "sk-test-12345678"
+        assert r.json()["generation_info"]["provider"] == "openai"
 
 
 class TestAuthGuards:
@@ -320,6 +393,29 @@ class TestExecutionGuards:
         assert r.json()["detail"]["validation"]["warnings"][0]["node_ids"] == ["x"]
         r = client.post(url, json={"run_prompt": "실행", "acknowledge_warnings": True}, headers=auth)
         assert r.status_code == 201, r.text
+
+
+    def test_slot_files_reach_every_block_that_shares_the_slot(self, client):
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        service = create_service(client, auth)
+        uploaded = client.post(
+            "/files", files={"file": ("card.csv", b"id,amount\n1,100\n", "text/csv")}, headers=auth
+        ).json()
+        graph = editable_graph(service)
+        graph["input_slots"] = [{"id": "slot1", "description": "신용카드 사용 내역", "file_ids": [uploaded["id"]]}]
+        graph["nodes"][0].update(needs_file=True, input_slot_ids=["slot1"])
+        graph["nodes"][1].update(needs_file=True, input_slot_ids=["slot1"])
+        assert client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth).status_code == 200
+
+        execution = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "분석"}, headers=auth)
+        assert execution.status_code == 201, execution.text
+        task = client.post("/worker/tasks/next", headers=key).json()
+        assert task["uploaded_files"] == [{"id": uploaded["id"], "original_name": "card.csv"}]
+        client.post(f"/worker/tasks/{task['task_id']}/result", json={"status": "done", "output": "a"}, headers=key)
+        task = client.post("/worker/tasks/next", headers=key).json()
+        assert [f["id"] for f in task["uploaded_files"]] == [uploaded["id"]]
 
 
 class TestWorkerResultGuards:

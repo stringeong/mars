@@ -7,7 +7,7 @@ import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
 import ValidationPanel from '../components/ValidationPanel'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
 import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { blockingErrors, issuesByNode } from '../workflow'
+import { blockingErrors, generationLabel, issuesByNode } from '../workflow'
 
 const nodeTypes = { agent: AgentBlockNode }
 
@@ -99,9 +99,12 @@ export default function ServiceDetailPage() {
     issueMessages: issues.map((issue) => issue.message).join('\n'),
     workerName: agent.worker_id ? deviceById.get(agent.worker_id)?.name : undefined,
     directories: (agent.directory_ids ?? []).map((directoryId) => directoryById.get(directoryId)?.alias ?? `#${directoryId}`),
-    files: (agent.uploaded_file_ids ?? []).map((fileId) => uploadedFileById.get(fileId)?.original_name ?? `#${fileId}`),
+    files: [
+      ...(agent.uploaded_file_ids ?? []),
+      ...inputSlots.filter((slot) => (agent.input_slot_ids ?? []).includes(slot.id)).flatMap((slot) => slot.file_ids),
+    ].map((fileId) => uploadedFileById.get(fileId)?.original_name ?? `#${fileId}`),
     }
-  }, [deviceById, directoryById, issueMap, uploadedFileById])
+  }, [deviceById, directoryById, inputSlots, issueMap, uploadedFileById])
 
   const applyAgents = useCallback((nextAgents: AgentNode[], graphEdges: Graph['edges'] = []) => {
     const positions = layout(nextAgents)
@@ -315,8 +318,8 @@ export default function ServiceDetailPage() {
 
   return <div className="builder-page">
     <header className="builder-header">
-      <div><div className="breadcrumb">M.A.R.S <span>/</span> Workflows <span>/</span> Builder</div><h1>{svcName}</h1><p>{svcDesc || 'Build and assign a distributed multi-agent workflow.'}</p></div>
-      <div className="builder-header-actions"><button className="btn ghost" disabled={syncing} onClick={() => { if (confirm('서버의 최신 워크플로우와 Worker 정보로 다시 불러올까요? 저장하지 않은 변경은 사라집니다.')) setSyncVersion((version) => version + 1) }}>{syncing ? '동기화 중…' : '↻ 서버와 재동기화'}</button><button className="btn ghost" onClick={() => navigate('/services')}>All workflows</button><button className="btn" onClick={save}>Save changes</button></div>
+      <div><div className="breadcrumb">M.A.R.S <span>/</span> Workflows <span>/</span> Builder</div><h1>{svcName}</h1><p>{svcDesc || 'Build and assign a distributed multi-agent workflow.'}</p><div className="generation-badge"><span>생성 모델</span><strong>{generationLabel(service.generation_info)}</strong></div></div>
+      <div className="builder-header-actions"><button className="btn ghost" onClick={async () => { if (await save()) navigate(`/services/${id}/setup`) }}>설정 확인 표</button><button className="btn ghost" disabled={syncing} onClick={() => { if (confirm('서버의 최신 워크플로우와 Worker 정보로 다시 불러올까요? 저장하지 않은 변경은 사라집니다.')) setSyncVersion((version) => version + 1) }}>{syncing ? '동기화 중…' : '↻ 서버와 재동기화'}</button><button className="btn ghost" onClick={() => navigate('/services')}>All workflows</button><button className="btn" onClick={save}>Save changes</button></div>
     </header>
     {message && <div style={{ color: 'var(--success)', marginBottom: 8 }}>{message}</div>}
     {error && <div className="error">{error}</div>}
@@ -340,6 +343,7 @@ export default function ServiceDetailPage() {
           <label>이름</label><input value={selectedAgent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
           <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.final} onChange={(event) => setFinal(event.target.checked)} />최종 블록 (이 블록의 출력이 실행 결과가 됩니다)</label>
           <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.needs_file} onChange={(event) => updateAgent({ needs_file: event.target.checked })} />사용자 파일 필요 (파일이 없으면 실행할 수 없습니다)</label>
+          {inputSlots.filter((slot) => (selectedAgent.input_slot_ids ?? []).includes(slot.id)).map((slot) => <div className="slot-inline node-slot" key={slot.id}><span title={slot.format}>파일 슬롯 · {slot.description}</span><small className={slot.file_ids.length + slot.directory_ids.length ? 'ok' : 'empty'}>{slot.file_ids.length + slot.directory_ids.length ? `${slot.file_ids.length + slot.directory_ids.length}개 연결` : '비어 있음'}</small></div>)}
           <label>역할 프롬프트</label><textarea rows={5} value={selectedAgent.role_prompt} onChange={(event) => updateAgent({ role_prompt: event.target.value })} />
           <label>실행 위치</label><select value={selectedAgent.provider || 'ollama'} onChange={(event) => { const provider = event.target.value as 'ollama' | 'openai' | 'anthropic' | 'gemini'; updateAgent({ provider, executor: provider === 'ollama' ? 'local' : 'cloud', worker_id: provider === 'ollama' ? selectedAgent.worker_id : null, model: '' }) }}><option value="ollama">Local Worker · Ollama</option><option value="openai">Cloud · OpenAI</option><option value="anthropic">Cloud · Anthropic</option><option value="gemini">Cloud · Google Gemini</option></select>
           <label>컴퓨팅 자원 (Worker)</label><select disabled={selectedProvider !== 'ollama'} value={selectedAgent.worker_id ?? ''} onChange={(event) => updateAgent({ worker_id: event.target.value ? Number(event.target.value) : null, model: '' })}><option value="">자동 배정</option>{devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.online ? ' · 온라인' : ' · 오프라인'}</option>)}</select>

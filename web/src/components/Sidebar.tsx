@@ -16,11 +16,12 @@ const navItems = [
 export default function Sidebar({ recentHistory }: { recentHistory: ExecutionListItem[] }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const workflowMatch = location.pathname.match(/^\/services\/(\d+)(?:\/(run))?$/)
+  const workflowMatch = location.pathname.match(/^\/services\/(\d+)(?:\/(run|setup))?$/)
   const workflowId = workflowMatch?.[1]
-  const workflowStage = location.pathname === '/services' ? 0 : workflowMatch?.[2] === 'run' ? 2 : workflowId ? 1 : 0
+  const workflowStage = location.pathname === '/services' ? 0 : workflowMatch?.[2] === 'setup' ? 1 : workflowMatch?.[2] === 'run' ? 3 : workflowId ? 2 : 0
   const workflowSteps = [
     { label: 'Create workflow', to: '/services' },
+    { label: 'Check setup', to: workflowId ? `/services/${workflowId}/setup` : undefined },
     { label: 'Build & configure', to: workflowId ? `/services/${workflowId}` : undefined },
     { label: 'Run workflow', to: workflowId ? `/services/${workflowId}/run` : undefined },
   ]

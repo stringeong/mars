@@ -198,6 +198,9 @@ def populate_task_context(db: Session, task: models.TaskRecord) -> None:
     execution = db.get(models.Execution, task.execution_id)
     parents = dag.parents_of(execution.graph_snapshot).get(task.node_id, [])
     parts: list[str] = []
+    goal = (execution.graph_snapshot or {}).get("goal")
+    if goal and not parents:
+        parts.append(f"[서비스 목표]\n{goal}")
     if execution.run_prompt:
         parts.append(f"[사용자 실행 요청]\n{execution.run_prompt}")
     if parents:

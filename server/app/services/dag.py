@@ -3,6 +3,7 @@
 요구사항 2.5: 순환 구조나 실행 불가능한 구성은 검증 단계에서 차단한다.
 """
 
+import copy
 from collections import defaultdict, deque
 
 
@@ -348,6 +349,21 @@ def input_sources(graph: dict, node: dict) -> tuple[list[int], list[int]]:
         directory_ids += [v for v in slot.get("directory_ids") or [] if isinstance(v, int)]
     directory_ids += directory_ids_by_agent(graph).get(node["id"], [])
     return list(dict.fromkeys(file_ids)), list(dict.fromkeys(directory_ids))
+
+
+def expand_input_slots(graph: dict) -> dict:
+    """슬롯에 연결된 파일·디렉터리를 각 블록의 uploaded_file_ids/directory_ids로 펼친 복사본.
+
+    Worker·클라우드 실행·외부 전송 동의 로직은 블록 필드만 읽으므로 실행 스냅샷에 이 결과를 쓴다.
+    """
+    expanded = copy.deepcopy(graph)
+    slots = {slot.get("id"): slot for slot in expanded.get("input_slots") or []}
+    for node in _agent_nodes(expanded):
+        for slot_id in node.get("input_slot_ids") or []:
+            slot = slots.get(slot_id) or {}
+            node["uploaded_file_ids"] = list(dict.fromkeys([*(node.get("uploaded_file_ids") or []), *(slot.get("file_ids") or [])]))
+            node["directory_ids"] = list(dict.fromkeys([*(node.get("directory_ids") or []), *(slot.get("directory_ids") or [])]))
+    return expanded
 
 
 def _ancestors(graph: dict, node_id: str) -> set[str]:

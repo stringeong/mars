@@ -1,4 +1,4 @@
-"""generator 검증 — LLM 출력 파싱, 규칙 기반 폴백, 재시도/폴백 사다리.
+"""generator 검증 — LLM 출력 파싱, 생성 모델 선택, 재시도와 실패 원인, 사용자가 고르는 기본 워크플로우.
 
 Ollama HTTP 호출은 httpx.MockTransport로 대체한다.
 """
@@ -9,8 +9,9 @@ import json
 import httpx
 import pytest
 
+from app.config import DEFAULT_MODEL
 from app.services import dag, generator
-from app.services.generator import _extract_json, _fallback_graph
+from app.services.generator import GenerationError, GeneratorChoice, _extract_json, _fallback_graph
 
 
 class TestExtractJson:
@@ -44,10 +45,20 @@ class TestFallbackGraph:
         # 폴백은 '항상 유효한 그래프 보장'이 계약이므로 DAG 검증을 통과해야 한다
         assert dag.validate_graph(graph) == ["collector", "analyzer", "writer"]
 
-    def test_fallback_embeds_prompt(self):
+    def test_fallback_keeps_prompt_as_goal_not_role_prompt(self):
         graph = _fallback_graph("이력서 첨삭")
         assert graph["description"] == "이력서 첨삭"
-        assert "이력서 첨삭" in graph["nodes"][0]["role_prompt"]
+        assert graph["goal"] == "이력서 첨삭"
+        # 생성 프롬프트 전체가 역할 프롬프트에 그대로 붙지 않는다
+        assert all("이력서 첨삭" not in n["role_prompt"] for n in graph["nodes"])
+
+    def test_fallback_workflow_records_reason(self):
+        graph, info = generator.fallback_workflow("여행 계획", reason="연결 실패")
+        assert info["source"] == "fallback"
+        assert info["fallback_reason"] == "연결 실패"
+        assert info["model"] is None
+        assert [n["id"] for n in graph["nodes"] if n["final"]] == ["writer"]
+        assert graph["goal"] == "여행 계획"
 
     def test_fallback_name_truncates_long_prompt(self):
         graph = _fallback_graph("긴 프롬프트 " * 50)
@@ -104,9 +115,11 @@ class TestGenerateWorkflow:
         calls, replies = fake_ollama
         replies.append(VALID_LLM_REPLY)
 
-        graph, source = asyncio.run(generator.generate_workflow("문서 요약"))
+        graph, info = asyncio.run(generator.generate_workflow("문서 요약"))
 
-        assert source == "llm"
+        assert info["source"] == "llm"
+        assert info["location"] == "local" and info["model"] == DEFAULT_MODEL
+        assert calls[0]["model"] == DEFAULT_MODEL
         assert len(calls) == 1
         assert calls[0]["options"]["temperature"] == 0.3
         assert calls[0]["messages"][1]["content"] == "문서 요약"
@@ -127,47 +140,117 @@ class TestGenerateWorkflow:
         assert {n["id"]: n["final"] for n in graph["nodes"]} == {"reader": False, "agent1": True}
         assert dag.inspect_graph(graph, run_prompt="요약")["final_node_ids"] == ["agent1"]
 
-    def test_cyclic_reply_retries_then_falls_back(self, fake_ollama):
+    def test_cyclic_reply_retries_then_reports_validation_error(self, fake_ollama):
         calls, replies = fake_ollama
         replies.append(CYCLIC_LLM_REPLY)
 
-        graph, source = asyncio.run(generator.generate_workflow("무한 루프"))
+        with pytest.raises(GenerationError) as error:
+            asyncio.run(generator.generate_workflow("무한 루프"))
 
-        assert source == "fallback"
-        # 온도를 낮춰 1회 재시도한 뒤 폴백
+        # 온도를 낮춰 1회 재시도한 뒤, 기본 워크플로우로 바꾸지 않고 원인을 알린다
         assert [c["options"]["temperature"] for c in calls] == [0.3, 0.1]
-        assert dag.validate_graph(graph)  # 폴백은 항상 유효한 DAG
-        for n in graph["nodes"]:
-            assert "model" in n and "directory_ids" in n
+        assert error.value.stage == "validation"
+        assert error.value.detail()["model"] == DEFAULT_MODEL
 
-    def test_garbage_reply_falls_back(self, fake_ollama):
+    def test_garbage_reply_reports_parse_error(self, fake_ollama):
         calls, replies = fake_ollama
         replies.append("JSON이 아닌 잡담입니다.")
 
-        graph, source = asyncio.run(generator.generate_workflow("요청"))
+        with pytest.raises(GenerationError) as error:
+            asyncio.run(generator.generate_workflow("요청"))
 
-        assert source == "fallback"
-        assert dag.validate_graph(graph)
+        assert error.value.stage == "parse"
+        assert len(calls) == 2
 
     def test_recovers_on_second_attempt(self, fake_ollama):
         calls, replies = fake_ollama
         replies.extend(["잡담", VALID_LLM_REPLY])
 
-        graph, source = asyncio.run(generator.generate_workflow("요청"))
+        graph, info = asyncio.run(generator.generate_workflow("요청"))
 
-        assert source == "llm"
+        assert info["source"] == "llm"
         assert len(calls) == 2
         assert calls[1]["options"]["temperature"] == 0.1
 
-    def test_connection_error_falls_back(self, fake_ollama):
-        """Ollama가 아예 실행 중이 아니어도 생성은 항상 성공해야 한다."""
+    def test_connection_error_is_reported_without_retry(self, fake_ollama):
+        """Ollama가 실행 중이 아니면 재시도하지 않고 연결 실패로 알린다."""
         calls, replies = fake_ollama
         replies.append(httpx.ConnectError("Ollama 없음"))
 
-        graph, source = asyncio.run(generator.generate_workflow("요청"))
+        with pytest.raises(GenerationError) as error:
+            asyncio.run(generator.generate_workflow("요청"))
 
-        assert source == "fallback"
-        assert dag.validate_graph(graph)
+        assert error.value.stage == "connection"
+        assert "Ollama" in error.value.message
+        assert len(calls) == 1
+
+    def test_model_error_status_is_reported(self, fake_ollama):
+        calls, replies = fake_ollama
+        request = httpx.Request("POST", "http://ollama.test/api/chat")
+        replies.append(httpx.HTTPStatusError(
+            "404", request=request,
+            response=httpx.Response(404, json={"error": "model 'x' not found"}, request=request),
+        ))
+
+        with pytest.raises(GenerationError) as error:
+            asyncio.run(generator.generate_workflow("요청", GeneratorChoice(model="x")))
+
+        assert error.value.stage == "connection"
+        assert "404" in error.value.message and "model 'x' not found" in error.value.message
+
+    def test_selected_local_model_is_used(self, fake_ollama):
+        calls, replies = fake_ollama
+        replies.append(VALID_LLM_REPLY)
+
+        _, info = asyncio.run(generator.generate_workflow("요청", GeneratorChoice(model="qwen3:4b")))
+
+        assert calls[0]["model"] == "qwen3:4b"
+        assert info["model"] == "qwen3:4b"
+
+    def test_cloud_choice_calls_provider_with_short_timeout(self, monkeypatch):
+        seen = {}
+
+        def fake_call(provider, key, model, system, user, timeout):
+            seen.update(provider=provider, key=key, model=model, user=user, timeout=timeout)
+            return VALID_LLM_REPLY, {"input_tokens": 12, "output_tokens": 34}
+
+        monkeypatch.setattr("app.services.cloud_executor._call", fake_call)
+        choice = GeneratorChoice(location="cloud", provider="openai", model="gpt-5-mini", api_key="sk-test")
+
+        graph, info = asyncio.run(generator.generate_workflow("문서 요약", choice))
+
+        assert seen["provider"] == "openai" and seen["model"] == "gpt-5-mini"
+        assert seen["user"] == "문서 요약"
+        assert seen["timeout"] == generator.CLOUD_GENERATION_TIMEOUT
+        assert info["location"] == "cloud" and info["provider"] == "openai"
+        assert info["usage"] == {"input_tokens": 12, "output_tokens": 34}
+        assert "sk-test" not in repr(choice)
+
+    def test_file_requirements_become_shared_slots(self, fake_ollama):
+        calls, replies = fake_ollama
+        replies.append(json.dumps({
+            "name": "가계부", "description": "d",
+            "nodes": [
+                {"id": "classify", "name": "분류", "needs_file": True, "file_key": "card",
+                 "file_description": "신용카드 사용 내역", "file_format": "CSV, 열: 거래ID, 금액"},
+                {"id": "detect", "name": "탐지", "needs_file": "true", "file_key": "card"},
+                {"id": "report", "name": "리포트", "needs_file": False, "final": True},
+            ],
+            "edges": [{"source": "classify", "target": "report"}, {"source": "detect", "target": "report"}],
+        }, ensure_ascii=False))
+
+        graph, _ = asyncio.run(generator.generate_workflow("가계부 분석"))
+
+        assert graph["input_slots"] == [{
+            "id": "slot1", "description": "신용카드 사용 내역", "format": "CSV, 열: 거래ID, 금액",
+            "file_ids": [], "directory_ids": [],
+        }]
+        by_id = {n["id"]: n for n in graph["nodes"]}
+        assert by_id["classify"]["input_slot_ids"] == by_id["detect"]["input_slot_ids"] == ["slot1"]
+        assert by_id["report"]["needs_file"] is False and by_id["report"]["input_slot_ids"] == []
+        # 파일이 아직 없으므로 검사에서 두 블록 모두 파일 누락 오류가 된다
+        errors = dag.inspect_graph(graph)["errors"]
+        assert sorted(e["node_ids"][0] for e in errors if e["code"] == "missing_file") == ["classify", "detect"]
 
 
 CURRENT_GRAPH = {

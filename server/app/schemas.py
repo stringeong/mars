@@ -191,10 +191,21 @@ class Graph(BaseModel):
     nodes: list[WorkflowNode] = Field(default_factory=list)
     edges: list[Edge] = Field(default_factory=list)
     input_slots: list[InputSlot] = Field(default_factory=list)
+    # 기본 워크플로우의 생성 프롬프트. 시작 블록 컨텍스트로 전달된다.
+    goal: str = ""
 
 
 class ServiceGenerate(BaseModel):
     prompt: str = Field(min_length=5, description="만들고자 하는 서비스를 설명하는 자연어")
+    # 워크플로우를 생성할 LLM. 기본값은 서버 로컬 LLM(Ollama)의 기본 모델.
+    location: Literal["local", "cloud"] = "local"
+    provider: Literal["ollama", "openai", "anthropic", "gemini"] = "ollama"
+    model: str = Field(default="", max_length=128)
+    # 외부 LLM으로 생성 프롬프트가 전송된다는 안내를 사용자가 확인했는지
+    external_transfer_ack: bool = False
+    # 생성 실패 후 사용자가 규칙 기반 기본 워크플로우를 고른 경우
+    use_fallback: bool = False
+    fallback_reason: str = Field(default="", max_length=500)
 
 
 class ServiceRevise(BaseModel):
@@ -221,6 +232,7 @@ class ServiceOut(BaseModel):
     graph: dict
     created_at: UTCDateTime
     updated_at: UTCDateTime
+    generation_info: dict | None = None
     validation: dict | None = None
 
     model_config = {"from_attributes": True}
@@ -290,6 +302,7 @@ class ExecutionOut(BaseModel):
     error: str | None
     created_at: UTCDateTime
     finished_at: UTCDateTime | None
+    generation_info: dict | None = None
     progress: float = 0.0
     tasks: list[TaskOut] = Field(default_factory=list)
 
@@ -304,6 +317,7 @@ class ExecutionListItem(BaseModel):
     status: str
     created_at: UTCDateTime
     finished_at: UTCDateTime | None
+    generation_info: dict | None = None
 
     model_config = {"from_attributes": True}
 

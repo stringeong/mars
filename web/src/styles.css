@@ -365,3 +365,75 @@ tr.clickable:hover { background: #f8fafc; }
 .toggle-row input { width: auto; margin: 0; }
 .ack-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }
 .ack-row input { width: auto; margin: 0; }
+
+/* 생성 모델 선택과 생성 실패 안내 */
+.generator-picker { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 10px; padding: 16px 0 4px; }
+.generator-picker-title { align-self: center; margin-right: 2px; color: #778095; font-size: 12px; }
+.generator-picker label { display: grid; gap: 4px; min-width: 170px; margin: 0; color: var(--muted); font-size: 11px; font-weight: 700; }
+.generator-picker select { min-width: 170px; }
+.generator-hint { display: block; margin-top: 6px; color: #b45309; font-size: 12px; }
+.external-notice { margin-top: 12px; padding: 12px 14px; border: 1px solid #fde68a; border-radius: 10px; background: #fffbeb; font-size: 12px; }
+.external-notice strong { color: #92400e; }
+.external-notice p { margin: 4px 0 0; color: #78350f; line-height: 1.5; }
+.generation-failure { display: grid; gap: 6px; margin-top: 14px; padding: 14px 16px; border: 1px solid #fecaca; border-left: 4px solid var(--danger); border-radius: 10px; background: #fef2f2; }
+.generation-failure strong { color: #7f1d1d; font-size: 14px; }
+.generation-failure p { margin: 0; color: #991b1b; font-size: 13px; line-height: 1.5; }
+.generation-failure small { color: #7f1d1d; opacity: .8; }
+.generation-failure-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.generation-badge { display: inline-flex; align-items: center; gap: 8px; margin-top: 4px; padding: 4px 10px; border-radius: 999px; background: #f0edff; font-size: 12px; }
+.generation-badge span { color: #6953c4; font-weight: 800; }
+.generation-badge strong { color: #312e81; font-weight: 650; }
+.generation-reason { display: block; margin-top: 6px; color: var(--muted); font-size: 12px; }
+
+/* 설정 확인 화면 */
+.setup-page { max-width: 1480px; margin: 0 auto; }
+.setup-message { margin-bottom: 10px; color: #15803d; font-size: 13px; }
+.setup-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+.setup-main { display: grid; gap: 18px; min-width: 0; }
+.setup-card, .setup-side { padding: 20px; border: 1px solid #e4e7ee; border-radius: 15px; background: #fff; box-shadow: 0 6px 22px rgba(25, 33, 61, .035); }
+.setup-side { position: sticky; top: 24px; }
+.setup-side h2 { margin: 4px 0 6px; }
+.file-route-notice { margin: 12px 0; padding: 10px 14px; border-radius: 10px; background: #eff6ff; color: #1e3a8a; font-size: 12px; }
+.file-route-notice p { margin: 3px 0 0; line-height: 1.5; }
+.slot-card { display: grid; gap: 10px; margin-top: 10px; padding: 14px; border: 1px solid #e4e7ee; border-left: 4px solid #8b5cf6; border-radius: 12px; }
+.slot-card.empty { border-left-color: var(--danger); }
+.slot-card-head { display: flex; justify-content: space-between; gap: 12px; }
+.slot-card-head strong { font-size: 14px; }
+.slot-format { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.slot-state { flex: none; align-self: start; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 800; }
+.slot-state.ready { background: #f0fdf4; color: #15803d; }
+.slot-state.empty { background: #fef2f2; color: #b91c1c; }
+.slot-users { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; }
+.slot-users > span { color: var(--muted); }
+.slot-users b { padding: 2px 8px; border-radius: 999px; background: #f5f3ff; color: #5b35ce; font-weight: 650; }
+.slot-sources { display: flex; flex-wrap: wrap; gap: 6px; }
+.source-chip { display: inline-grid; grid-template-columns: auto auto; align-items: center; column-gap: 6px; padding: 5px 6px 5px 10px; border-radius: 9px; font-size: 12px; }
+.source-chip small { grid-column: 1; color: var(--muted); font-size: 10px; }
+.source-chip button { grid-column: 2; grid-row: 1 / span 2; border: 0; background: none; color: var(--muted); font-size: 15px; cursor: pointer; }
+.source-chip.upload { background: #f5f3ff; }
+.source-chip.directory { background: #f0fdfa; }
+.slot-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.slot-actions select { width: auto; min-width: 190px; }
+.setup-table-wrap { overflow-x: auto; margin-top: 10px; }
+.setup-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.setup-table th { padding: 8px; border-bottom: 1px solid #e4e7ee; color: var(--muted); font-size: 11px; text-align: left; white-space: nowrap; }
+.setup-table td { padding: 10px 8px; border-bottom: 1px solid #f0f2f6; vertical-align: top; }
+.setup-table tr.has-error td:first-child { box-shadow: inset 3px 0 0 var(--danger); }
+.setup-table tr.has-warning td:first-child { box-shadow: inset 3px 0 0 var(--warning); }
+.setup-table select { width: 100%; min-width: 140px; }
+.setup-block-cell strong { display: block; min-width: 150px; }
+.setup-block-cell span { display: flex; align-items: center; gap: 6px; margin-top: 3px; color: var(--muted); }
+.mini-final { padding: 1px 6px; border-radius: 999px; background: #0f172a; color: #fff; font-size: 9px; letter-spacing: .06em; }
+.cell-hint { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.suggest-chip { display: block; margin-top: 6px; padding: 3px 8px; border: 1px dashed #14b8a6; border-radius: 7px; background: #f0fdfa; color: #0f766e; font: inherit; font-size: 11px; cursor: pointer; }
+.setup-input-cell { min-width: 170px; }
+.slot-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 4px; }
+.slot-inline > span { font-weight: 650; }
+.slot-inline small.ok { color: #15803d; }
+.slot-inline small.empty { color: #b91c1c; }
+.node-slot { margin: 6px 0 0; font-size: 12px; }
+.issue-dot { display: inline-block; margin: 0 4px 4px 0; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; }
+.issue-dot.error { background: #fef2f2; color: #b91c1c; }
+.issue-dot.warning { background: #fffbeb; color: #b45309; }
+.issue-dot.ok { background: #f0fdf4; color: #15803d; }
+@media (max-width: 1180px) { .setup-layout { grid-template-columns: minmax(0, 1fr); }.setup-side { position: static; } }

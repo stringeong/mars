@@ -44,11 +44,12 @@ def preview_execution(
     service = db.get(models.Service, service_id)
     if service is None or service.user_id != user.id:
         raise HTTPException(404, "서비스를 찾을 수 없습니다.")
-    validation = orchestrator.inspect_graph_for_user(db, user.id, service.graph, run_prompt=body.run_prompt)
-    items = transfers.describe_transfers(service.graph)
+    graph = dag.expand_input_slots(service.graph)
+    validation = orchestrator.inspect_graph_for_user(db, user.id, graph, run_prompt=body.run_prompt)
+    items = transfers.describe_transfers(graph)
     # 오류가 있으면 실행할 수 없으므로 외부 전송 동의 토큰을 발급하지 않는다
     token = (
-        transfers.issue_consent(db, user.id, service.id, service.graph, body.run_prompt, items)
+        transfers.issue_consent(db, user.id, service.id, graph, body.run_prompt, items)
         if items and validation["valid"] else None
     )
     return {"requires_consent": bool(items), "consent_token": token, "transfers": items, "validation": validation}
@@ -69,8 +70,10 @@ def start_execution(
     if service is None or service.user_id != user.id:
         raise HTTPException(404, "서비스를 찾을 수 없습니다.")
     if not body.run_prompt.strip():
-        raise HTTPException(422, "실행 프롬프트가 비어 있습니다.")  # UC-203 e301
-    validation = orchestrator.inspect_graph_for_user(db, user.id, service.graph, run_prompt=body.run_prompt)
+        raise HTTPException(422, "실행 프롬프트가 비어 있습니다.")  # UC-204 e301
+    # 파일 슬롯을 블록 필드로 펼친 그래프로 검사·동의·스냅샷을 모두 처리한다
+    graph = dag.expand_input_slots(service.graph)
+    validation = orchestrator.inspect_graph_for_user(db, user.id, graph, run_prompt=body.run_prompt)
     if validation["errors"]:
         raise HTTPException(
             422,
@@ -79,17 +82,17 @@ def start_execution(
     if validation["warnings"] and not body.acknowledge_warnings:
         raise HTTPException(409, {"message": "구성 경고를 확인한 뒤 실행해 주세요.", "validation": validation})
     try:
-        directory_access.resolve_directories_by_agent(db, user.id, service.graph)
+        directory_access.resolve_directories_by_agent(db, user.id, graph)
     except directory_access.DirectoryAccessError as e:
         raise HTTPException(422, f"디렉토리 접근 설정이 올바르지 않습니다: {e}")
 
     # F2-403: 실행 전 사용 가능한 기기 확인
-    _validate_uploaded_files(db, user.id, service.graph)
-    transfer_items = transfers.describe_transfers(service.graph)
-    if transfer_items and not transfers.consume_consent(db, body.consent_token, user.id, service.id, service.graph, body.run_prompt):
+    _validate_uploaded_files(db, user.id, graph)
+    transfer_items = transfers.describe_transfers(graph)
+    if transfer_items and not transfers.consume_consent(db, body.consent_token, user.id, service.id, graph, body.run_prompt):
         raise HTTPException(428, "외부 전송 내용을 확인하고 동의해 주세요.")
     devices = db.query(models.Device).filter(models.Device.user_id == user.id).all()
-    has_local_nodes = any(n.get("type", "agent") == "agent" and not transfers.is_cloud_node(n) for n in service.graph.get("nodes", []))
+    has_local_nodes = any(n.get("type", "agent") == "agent" and not transfers.is_cloud_node(n) for n in graph.get("nodes", []))
     if has_local_nodes and not any(orchestrator.device_is_online(d) for d in devices):
         raise HTTPException(409, "사용 가능한(온라인) 기기가 없습니다. Worker Agent를 실행해 주세요.")
 
@@ -97,7 +100,8 @@ def start_execution(
         service_id=service.id,
         user_id=user.id,
         run_prompt=body.run_prompt.strip(),
-        graph_snapshot=service.graph,
+        graph_snapshot=graph,
+        generation_info=service.generation_info,
     )
     db.add(execution)
     db.flush()
