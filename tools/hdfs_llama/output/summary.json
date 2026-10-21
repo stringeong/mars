@@ -1,0 +1,10 @@
+{
+  "source": "data/HDFS_2k.log",
+  "max_tokens": 8192,
+  "reserved_for_prompt_and_answer": 2048,
+  "usable_input_tokens": 6144,
+  "chars_per_token_estimate": 3.0,
+  "unique_traces": 2200,
+  "trace_parts": 2200,
+  "chunks": 54
+}
