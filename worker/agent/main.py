@@ -229,6 +229,45 @@ def process_directory_inspection(server: str, headers: dict) -> bool:
     return True
 
 
+def process_generation_job(server: str, headers: dict, config: dict) -> bool:
+    """Generate a workflow with the local Ollama when the user queued one for this Worker.
+
+    The server GPU may not be enough, so the first-screen workflow generation can run here.
+    Older servers answer 404 and the Worker simply moves on to regular tasks.
+    """
+    response = httpx.post(f"{server}/worker/generations/next", headers=headers, timeout=15)
+    if response.status_code != 200 or not response.content:
+        return False
+    job = response.json()
+    model = job.get("model") or config.get("default_model", "")
+    runtime_state.write(
+        status="running",
+        task={
+            "task_id": job["job_id"],
+            "agent_name": "워크플로우 생성",
+            "label": "워크플로우 생성",
+            "model": model,
+            "started_at": time.time(),
+        },
+    )
+    print(f"[RECEIVED] 워크플로우 생성 요청: #{job['job_id']} ({model})")
+    try:
+        with heartbeat_while_running(server, headers):
+            content = executor.generate_workflow_reply(config, job)
+        result = {"content": content, "error": ""}
+        print(f"[DONE] 워크플로우 생성 응답: #{job['job_id']} ({len(content)}자)")
+    except Exception as exc:  # Ollama 미실행·모델 없음 등 -> 서버가 원인을 사용자에게 보여준다
+        result = {"content": "", "error": str(exc)}
+        print(f"[ERROR] 워크플로우 생성 실패: #{job['job_id']} - {exc}")
+    finally:
+        runtime_state.write(status="idle")
+    # 사용자가 그사이 취소했으면 409가 오고, 따로 할 일은 없다
+    httpx.post(
+        f"{server}/worker/generations/{job['job_id']}/result", headers=headers, json=result, timeout=30,
+    )
+    return True
+
+
 def stage_uploaded_files(server: str, headers: dict, task: dict) -> str | None:
     """Download files selected in the agent block to a private, temporary folder."""
     uploads = task.get("uploaded_files") or []
@@ -275,6 +314,8 @@ def cmd_run(_args: argparse.Namespace) -> None:
         try:
             # 하트비트 겸 작업 요청
             if process_directory_inspection(server, headers):
+                continue
+            if process_generation_job(server, headers, config):
                 continue
             resp = httpx.post(
                 f"{server}/worker/tasks/next", headers=headers, timeout=15
