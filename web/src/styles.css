@@ -584,3 +584,10 @@ tr.clickable:hover { background: #f8fafc; }
 .input-review-section.consent { border: 1px solid #f0c8ae; background: #fff8f2; }
 .input-review-section.warnings { border: 1px solid #fde68a; background: #fffbeb; }
 .input-review-section > small { color: var(--muted); font-size: 11px; }
+
+/* 워커로 워크플로우 생성: 진행 안내와 취소 */
+.worker-generation-progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fafbfe; font-size: 13px; }
+.worker-generation-progress .btn { margin-left: auto; }
+.worker-generation-spinner { flex: none; width: 14px; height: 14px; border: 2px solid #d4d4d8; border-top-color: #52525b; border-radius: 50%; animation: worker-generation-spin .8s linear infinite; }
+@keyframes worker-generation-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .worker-generation-spinner { animation: none; } }

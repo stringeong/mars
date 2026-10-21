@@ -120,12 +120,18 @@ export const GENERATION_STAGE_LABELS: Record<string, string> = {
   validation: '구성 검증 실패',
 }
 
+/** 생성 모델이 돌아간 곳: 서버, 외부 API, 또는 사용자의 워커 */
+export function generatorPlace(info: { location: string | null; provider: string | null; device_name?: string }) {
+  if (info.location === 'cloud') return `외부 LLM API · ${PROVIDER_LABELS[info.provider ?? ''] ?? info.provider}`
+  if (info.location === 'worker') return `워커 · ${info.device_name ?? '삭제된 워커'}`
+  return '서버 로컬 LLM · Ollama'
+}
+
 /** 워크플로우 정보·실행 이력에 표시할 생성 모델 */
 export function generationLabel(info: GenerationInfo | null | undefined) {
   if (!info) return '기록 없음 (이전 버전에서 생성)'
   if (info.source === 'fallback') return '기본 워크플로우 (규칙 기반)'
-  const where = info.location === 'cloud' ? `외부 LLM API · ${PROVIDER_LABELS[info.provider ?? ''] ?? info.provider}` : '서버 로컬 LLM · Ollama'
-  return `${where} · ${info.model}`
+  return `${generatorPlace(info)} · ${info.model}`
 }
 
 /** 실행 이력의 입력을 한 줄로: "card_A.csv 외 2개 · 텍스트 1개" */
