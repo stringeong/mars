@@ -650,3 +650,28 @@ body, .layout { background: #fff; color: var(--text); }
 .sidebar.side .side-rename-button:hover { background: #dededa; color: var(--text); }
 .sidebar.side .side-rename-button .app-icon { width: 15px; height: 15px; }
 .sidebar.side .side-rename { width: 100%; padding: 6px 9px; border: 1px solid #b9b9b5; border-radius: 8px; background: #fff; color: var(--text); font: inherit; font-size: 13.5px; outline: 0; }
+
+/* 사이드바 접기·폭 조절: 폭은 .layout의 --sidebar-width로 정한다 */
+.authenticated-layout { --sidebar-width: 224px; }
+.authenticated-layout .sidebar.side { width: var(--sidebar-width); }
+.authenticated-layout .content { width: calc(100% - var(--sidebar-width)); margin-left: var(--sidebar-width); }
+.sidebar.side .side-head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.sidebar.side .side-head .side-brand { flex: 1; min-width: 0; }
+.sidebar.side .side-toggle { flex: none; width: 30px; height: 30px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--muted); cursor: pointer; }
+.sidebar.side .side-toggle:hover { background: #ececea; color: var(--text); }
+.sidebar.side .side-toggle .app-icon { width: 18px; height: 18px; }
+.sidebar.side .side-resizer { position: absolute; top: 0; right: 0; bottom: 0; z-index: 2; width: 6px; cursor: col-resize; }
+.sidebar.side .side-resizer:hover, .sidebar.side .side-resizer:focus-visible, body.resizing-sidebar .sidebar.side .side-resizer { outline: 0; background: rgba(0, 0, 0, .1); }
+body.resizing-sidebar { cursor: col-resize; user-select: none; }
+.sidebar.side.collapsed { padding: 12px 8px; }
+.sidebar.side.collapsed .side-head { flex-direction: column; gap: 6px; }
+.sidebar.side.collapsed .side-head .side-brand { flex: none; padding: 6px 0 2px; }
+.sidebar.side.collapsed .side-brand strong, .sidebar.side.collapsed .side-new span:last-child, .sidebar.side.collapsed .side-section,
+.authenticated-layout .sidebar.side.collapsed .side-list, .sidebar.side.collapsed .side-footer a span:not(.nav-icon),
+.sidebar.side.collapsed .side-footer small, .sidebar.side.collapsed .side-logout { display: none; }
+.authenticated-layout .sidebar.side.collapsed .side-footer { margin-top: auto; }
+.sidebar.side.collapsed .side-brand, .sidebar.side.collapsed .side-new, .sidebar.side.collapsed .side-footer a { justify-content: center; padding-left: 0; padding-right: 0; }
+@media (max-width: 720px) {
+  .authenticated-layout { --sidebar-width: 64px !important; }
+  .sidebar.side .side-resizer, .sidebar.side .side-toggle { display: none; }
+}

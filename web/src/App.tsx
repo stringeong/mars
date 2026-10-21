@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { CSSProperties, useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { api, getToken } from './api'
 import { Device, Service } from './types'
-import Sidebar from './components/Sidebar'
+import Sidebar, { loadSidebarLayout, saveSidebarLayout, SIDEBAR_COLLAPSED_WIDTH, SidebarLayout } from './components/Sidebar'
 import { onServiceRenamed } from './workflow'
 import DashboardPage from './pages/DashboardPage'
 import DevicesPage from './pages/DevicesPage'
@@ -24,6 +24,14 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 export default function App() {
   const location = useLocation()
   const authed = !!getToken()
+  // 사이드바 폭·접힘 상태 (브라우저에 기억한다)
+  const [sidebarLayout, setSidebarLayout] = useState<SidebarLayout>(loadSidebarLayout)
+  function changeSidebarLayout(next: SidebarLayout) {
+    setSidebarLayout(next)
+    saveSidebarLayout(next)
+  }
+  const shellStyle = { '--sidebar-width': `${sidebarLayout.collapsed ? SIDEBAR_COLLAPSED_WIDTH : sidebarLayout.width}px` } as CSSProperties
+
   // 사이드바의 워크플로우 목록과 워커 온라인 수
   const [services, setServices] = useState<Service[]>([])
   const [devices, setDevices] = useState<Device[]>([])
@@ -49,9 +57,9 @@ export default function App() {
   }), [])
 
   return (
-    <div className={authed && location.pathname !== '/login' ? 'layout authenticated-layout' : 'layout'}>
+    <div className={authed && location.pathname !== '/login' ? 'layout authenticated-layout' : 'layout'} style={authed ? shellStyle : undefined}>
       {authed && location.pathname !== '/login' && (
-        <Sidebar services={services} devices={devices} />
+        <Sidebar services={services} devices={devices} layout={sidebarLayout} onLayoutChange={changeSidebarLayout} />
       )}
       <main className="content">
         <Routes>
