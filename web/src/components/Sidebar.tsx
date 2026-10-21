@@ -1,50 +1,61 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
-import { setToken } from '../api'
-import { ExecutionListItem } from '../types'
+import { api, setToken } from '../api'
+import { Device, Service } from '../types'
 import AppIcon from './AppIcon'
 
-const navItems = [
-  { to: '/dashboard', label: 'Dashboard', icon: 'dashboard' as const },
-  { to: '/services', label: 'Workflows', icon: 'workflow' as const },
-  { to: '/devices', label: 'Workers', icon: 'workers' as const },
-  { to: '/files', label: 'Files', icon: 'files' as const },
-  { to: '/history', label: 'Run history', icon: 'history' as const },
-  { to: '/marketplace', label: 'Marketplace', icon: 'marketplace' as const },
-  { to: '/settings', label: 'Settings', icon: 'settings' as const },
+const footerItems = [
+  { to: '/history', label: '실행 이력', icon: 'history' as const },
+  { to: '/files', label: '파일', icon: 'files' as const },
+  { to: '/devices', label: '워커', icon: 'workers' as const },
+  { to: '/marketplace', label: '마켓플레이스', icon: 'marketplace' as const },
+  { to: '/settings', label: '설정', icon: 'settings' as const },
 ]
 
-export default function Sidebar({ recentHistory }: { recentHistory: ExecutionListItem[] }) {
+/** 대화형 앱처럼: 새 워크플로우 버튼, 워크플로우 목록, 아래쪽 메뉴 */
+export default function Sidebar({ services, devices }: { services: Service[]; devices: Device[] }) {
   const location = useLocation()
   const navigate = useNavigate()
-  const workflowMatch = location.pathname.match(/^\/services\/(\d+)(?:\/(run|setup))?$/)
-  const workflowId = workflowMatch?.[1]
-  const workflowStage = location.pathname === '/services' ? 0 : workflowMatch?.[2] === 'setup' ? 1 : workflowMatch?.[2] === 'run' ? 3 : workflowId ? 2 : 0
-  const workflowSteps = [
-    { label: 'Create workflow', to: '/services' },
-    { label: 'Check setup', to: workflowId ? `/services/${workflowId}/setup` : undefined },
-    { label: 'Build & configure', to: workflowId ? `/services/${workflowId}` : undefined },
-    { label: 'Run workflow', to: workflowId ? `/services/${workflowId}/run` : undefined },
-  ]
+  const match = location.pathname.match(/^\/services\/(\d+)(?:\/(setup|run))?$/)
+  const activeId = match ? Number(match[1]) : null
+  const activeStep = match ? match[2] ?? 'builder' : null
+  const online = devices.filter((device) => device.online).length
 
-  return <aside className="sidebar">
-    <Link to="/dashboard" className="brand"><span className="brand-mark">M</span><span className="brand-copy"><strong>M.A.R.S</strong><small>Multi-Agent Resource Sharing</small></span></Link>
-    <div className="workspace-label">WORKSPACE</div>
-    <nav>{navItems.map((item) => <div className="nav-group" key={item.to}>
-      <Link to={item.to} className={location.pathname.startsWith(item.to) ? 'active' : ''}><span className="nav-icon"><AppIcon name={item.icon} /></span><span className="nav-label">{item.label}</span></Link>
-      {item.to === '/services' && location.pathname.startsWith('/services') && <div className="workflow-subnav" aria-label="Workflow progress">
-        {workflowSteps.map((step, index) => step.to
-          ? <Link key={step.label} to={step.to} className={`${index === workflowStage ? 'current' : ''} ${index < workflowStage ? 'complete' : ''}`}><i>{index < workflowStage ? '✓' : index + 1}</i><span>{step.label}</span></Link>
-          : <span key={step.label} className="disabled"><i>{index + 1}</i><span>{step.label}</span></span>)}
-      </div>}
-    </div>)}</nav>
-    <section className="sidebar-history">
-      <div className="sidebar-history-heading"><span>RECENT RUNS</span><Link to="/history">View all</Link></div>
-      <div className="sidebar-history-list">
-        {recentHistory.map((item) => <Link key={item.id} to={'/executions/' + item.id} className={location.pathname === '/executions/' + item.id ? 'current' : ''}><span className={'sidebar-run-dot ' + item.status} /><span><strong>{item.service_name || 'Run #' + item.id}</strong><small>{item.status} · #{item.id}</small></span></Link>)}
-        {!recentHistory.length && <small className="sidebar-history-empty">No execution history yet.</small>}
-      </div>
-    </section>
-    <div className="sidebar-status"><span className="status-dot" /> System connected</div>
-    <button className="btn ghost logout" onClick={() => { setToken(null); navigate('/login') }}>Sign out</button>
+  async function duplicate(serviceId: number) {
+    try {
+      const copy = await api.post<Service>(`/services/${serviceId}/duplicate`)
+      navigate(`/services/${copy.id}/setup`)
+    } catch (cause) {
+      window.alert(cause instanceof Error ? cause.message : '워크플로우를 복제하지 못했어요.')
+    }
+  }
+
+  return <aside className="sidebar side">
+    <Link to="/services" className="side-brand"><span className="brand-mark">M</span><strong>M.A.R.S</strong></Link>
+    <Link to="/services" className={`side-new${location.pathname === '/services' ? ' active' : ''}`}>
+      <span className="nav-icon"><AppIcon name="workflow" /></span><span>새 워크플로우</span>
+    </Link>
+
+    <div className="side-section"><span>워크플로우</span><Link to="/dashboard">모두 보기</Link></div>
+    <nav className="side-list" aria-label="워크플로우 목록">
+      {services.map((service) => <div key={service.id}>
+        <Link to={`/services/${service.id}`} className={service.id === activeId ? 'active' : ''} title={service.name}>{service.name}</Link>
+        {service.id === activeId && <div className="side-sublinks">
+          <Link to={`/services/${service.id}/setup`} className={activeStep === 'setup' ? 'current' : ''}>설정 확인</Link>
+          <Link to={`/services/${service.id}`} className={activeStep === 'builder' ? 'current' : ''}>편집</Link>
+          <Link to={`/services/${service.id}/run`} className={activeStep === 'run' ? 'current' : ''}>실행</Link>
+          <button type="button" onClick={() => duplicate(service.id)}>복제</button>
+        </div>}
+      </div>)}
+      {!services.length && <small className="side-empty">만든 워크플로우가 여기에 쌓여요.</small>}
+    </nav>
+
+    <nav className="side-footer" aria-label="메뉴">
+      {footerItems.map((item) => <Link key={item.to} to={item.to} className={location.pathname.startsWith(item.to) ? 'active' : ''}>
+        <span className="nav-icon"><AppIcon name={item.icon} /></span>
+        <span>{item.label}</span>
+        {item.to === '/devices' && <small className={online ? 'side-online' : ''}>{online}/{devices.length} 온라인</small>}
+      </Link>)}
+      <button type="button" className="side-logout" onClick={() => { setToken(null); navigate('/login') }}>로그아웃</button>
+    </nav>
   </aside>
 }

@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { api, getToken } from './api'
-import { ExecutionListItem } from './types'
-import DeviceMonitor from './components/DeviceMonitor'
+import { Device, Service } from './types'
 import Sidebar from './components/Sidebar'
 import DashboardPage from './pages/DashboardPage'
 import DevicesPage from './pages/DevicesPage'
@@ -25,30 +24,34 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 export default function App() {
   const location = useLocation()
   const authed = !!getToken()
-  const [recentHistory, setRecentHistory] = useState<ExecutionListItem[]>([])
+  // 사이드바의 워크플로우 목록과 워커 온라인 수
+  const [services, setServices] = useState<Service[]>([])
+  const [devices, setDevices] = useState<Device[]>([])
   useEffect(() => {
     if (!authed) {
-      setRecentHistory([])
+      setServices([])
+      setDevices([])
       return
     }
     let active = true
-    const loadHistory = () => api.get<ExecutionListItem[]>("/executions")
-      .then((items) => { if (active) setRecentHistory(items.slice(0, 20)) })
-      .catch(() => {})
-    loadHistory()
-    const timer = window.setInterval(loadHistory, 10_000)
+    const load = () => {
+      api.get<Service[]>('/services').then((items) => { if (active) setServices(items) }).catch(() => {})
+      api.get<Device[]>('/devices').then((items) => { if (active) setDevices(items) }).catch(() => {})
+    }
+    load()
+    const timer = window.setInterval(load, 15_000)
     return () => { active = false; window.clearInterval(timer) }
   }, [authed, location.pathname])
 
   return (
     <div className={authed && location.pathname !== '/login' ? 'layout authenticated-layout' : 'layout'}>
       {authed && location.pathname !== '/login' && (
-        <Sidebar recentHistory={recentHistory} />
+        <Sidebar services={services} devices={devices} />
       )}
       <main className="content">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/" element={<Navigate to="/services" replace />} />
           <Route path="/dashboard" element={<RequireAuth><DashboardPage /></RequireAuth>} />
           <Route path="/services" element={<RequireAuth><ServicesPage /></RequireAuth>} />
           <Route path="/services/:id/run" element={<RequireAuth><WorkflowRunPage /></RequireAuth>} />
@@ -60,7 +63,6 @@ export default function App() {
           <Route path="/settings" element={<RequireAuth><SettingsPage /></RequireAuth>} />
           <Route path="/executions/:id" element={<RequireAuth><ExecutionPage /></RequireAuth>} />
         </Routes>
-        {authed && location.pathname !== '/login' && <DeviceMonitor />}
       </main>
     </div>
   )
