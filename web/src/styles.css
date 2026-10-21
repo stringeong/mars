@@ -727,3 +727,6 @@ body.resizing-sidebar { cursor: col-resize; user-select: none; }
   .authenticated-layout { --sidebar-width: 64px !important; }
   .sidebar.side .side-resizer, .sidebar.side .side-toggle { display: none; }
 }
+
+/* 워커로 생성하는 동안 보내기 버튼이 멈춤(■) 버튼이 된다 */
+.home-stop { width: 11px; height: 11px; border-radius: 2px; background: #fff; }
