@@ -151,6 +151,11 @@ class AgentNode(BaseModel):
     # 사용자 파일을 직접 읽어야 하는 블록과, 그 파일이 들어갈 슬롯
     needs_file: bool = False
     input_slot_ids: list[str] = Field(default_factory=list)
+    # 블록에 직접 넣는 텍스트 데이터. 켜져 있을 때만 작업 입력으로 전달된다.
+    text_input_enabled: bool = False
+    text_input: str = Field(default="", max_length=20000)
+    # 시작 블록을 파일·텍스트 없이 역할 프롬프트만으로 실행해도 된다는 사용자 확인
+    allow_no_input: bool = False
     # 생성기가 제안한 값과 사용자가 직접 지정했는지. 자동 규칙(dag.apply_auto_flags)은
     # 직접 지정한 값을 덮어쓰지 않는다.
     final_hint: bool = False
