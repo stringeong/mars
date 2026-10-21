@@ -128,6 +128,20 @@ export function generationLabel(info: GenerationInfo | null | undefined) {
   return `${where} · ${info.model}`
 }
 
+// 사이드바·편집 화면 등 여러 곳에서 워크플로우 이름을 바꿨을 때 열려 있는 화면에 알린다
+const SERVICE_RENAMED = 'mars:service-renamed'
+
+export function announceServiceRenamed(id: number, name: string) {
+  window.dispatchEvent(new CustomEvent(SERVICE_RENAMED, { detail: { id, name } }))
+}
+
+/** 이름 변경을 구독하고 해제 함수를 돌려준다 (useEffect에서 그대로 반환해 쓴다) */
+export function onServiceRenamed(handler: (renamed: { id: number; name: string }) => void) {
+  const listener = (event: Event) => handler((event as CustomEvent<{ id: number; name: string }>).detail)
+  window.addEventListener(SERVICE_RENAMED, listener)
+  return () => window.removeEventListener(SERVICE_RENAMED, listener)
+}
+
 /** 실행 이력의 입력 파일을 한 줄로: "card_A.csv 외 2개" */
 export function inputFilesSummary(records: RunInputRecord[] | null | undefined) {
   // 여러 슬롯이 같은 파일을 쓰면 한 번만 센다

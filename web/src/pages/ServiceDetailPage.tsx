@@ -8,7 +8,7 @@ import DeletableEdge from '../components/DeletableEdge'
 import ValidationPanel from '../components/ValidationPanel'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
 import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { applyAutoFlags, blockingErrors, FlagExplanation, generationLabel, issuesByNode } from '../workflow'
+import { announceServiceRenamed, applyAutoFlags, blockingErrors, FlagExplanation, generationLabel, issuesByNode, onServiceRenamed } from '../workflow'
 
 const nodeTypes = { agent: AgentBlockNode }
 const edgeTypes = { deletable: DeletableEdge }
@@ -181,6 +181,13 @@ export default function ServiceDetailPage() {
   useEffect(() => {
     setNodes((current) => current.map((node) => ({ ...node, data: agents[node.id] ? nodeData(agents[node.id]) : node.data })))
   }, [agents, nodeData, setNodes])
+
+  // 사이드바에서 이름을 바꾸면 이 화면의 이름도 바꿔 둔다 (저장할 때 예전 이름으로 덮어쓰지 않도록)
+  useEffect(() => onServiceRenamed((renamed) => {
+    if (String(renamed.id) !== id) return
+    setSvcName(renamed.name)
+    setService((current) => (current ? { ...current, name: renamed.name } : current))
+  }), [id])
 
   function currentGraph(): Graph {
     return {
@@ -374,6 +381,7 @@ export default function ServiceDetailPage() {
   async function save(): Promise<Service | null> {
     try {
       const updated = await api.put<Service>(`/services/${id}`, { name: svcName, description: svcDesc, graph: currentGraph() })
+      if (updated.name !== service?.name) announceServiceRenamed(updated.id, updated.name)
       setService(updated)
       setValidation(updated.validation ?? null)
       setError('')

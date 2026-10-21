@@ -641,3 +641,12 @@ body, .layout { background: #fff; color: var(--text); }
 .result-viewer-page { grid-template-columns: minmax(0, 1fr) 254px; max-width: 1280px; }
 .result-viewer-page .result-history-panel { display: none; }
 @media (max-width: 1180px) { .result-viewer-page { grid-template-columns: minmax(0, 1fr); } }
+
+/* 사이드바 워크플로우 이름 바꾸기 (대화 목록처럼 마우스를 올리면 연필 버튼) */
+.sidebar.side .side-item { position: relative; }
+.sidebar.side .side-item:hover > a, .sidebar.side .side-item:focus-within > a { padding-right: 32px; }
+.sidebar.side .side-rename-button { position: absolute; top: 4px; right: 4px; width: 26px; height: 26px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; opacity: 0; }
+.sidebar.side .side-item:hover .side-rename-button, .sidebar.side .side-rename-button:focus-visible { opacity: 1; }
+.sidebar.side .side-rename-button:hover { background: #dededa; color: var(--text); }
+.sidebar.side .side-rename-button .app-icon { width: 15px; height: 15px; }
+.sidebar.side .side-rename { width: 100%; padding: 6px 9px; border: 1px solid #b9b9b5; border-radius: 8px; background: #fff; color: var(--text); font: inherit; font-size: 13.5px; outline: 0; }

@@ -3,13 +3,13 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { api, getToken } from './api'
 import { Device, Service } from './types'
 import Sidebar from './components/Sidebar'
+import { onServiceRenamed } from './workflow'
 import DashboardPage from './pages/DashboardPage'
 import DevicesPage from './pages/DevicesPage'
 import ExecutionPage from './pages/ExecutionPage'
 import FilesPage from './pages/FilesPage'
 import HistoryPage from './pages/HistoryPage'
 import LoginPage from './pages/LoginPage'
-import MarketplacePage from './pages/MarketplacePage'
 import SettingsPage from './pages/SettingsPage'
 import ServiceDetailPage from './pages/ServiceDetailPage'
 import ServicesPage from './pages/ServicesPage'
@@ -42,6 +42,11 @@ export default function App() {
     const timer = window.setInterval(load, 15_000)
     return () => { active = false; window.clearInterval(timer) }
   }, [authed, location.pathname])
+
+  // 어디서 이름을 바꾸든 사이드바 목록에 바로 반영한다
+  useEffect(() => onServiceRenamed(({ id, name }) => {
+    setServices((current) => current.map((service) => (service.id === id ? { ...service, name } : service)))
+  }), [])
 
   return (
     <div className={authed && location.pathname !== '/login' ? 'layout authenticated-layout' : 'layout'}>

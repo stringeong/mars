@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import ValidationPanel from '../components/ValidationPanel'
 import { AgentNode, Execution, ExecutionListItem, RunInputRecord, Service, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { generationLabel } from '../workflow'
+import { generationLabel, onServiceRenamed } from '../workflow'
 
 type Transfer = { node_id: string; node_name: string; provider: string; type: 'user_input' | 'derived_text' | 'file_text'; file_ids?: number[]; sources?: string[] }
 type Preview = { requires_consent: boolean; consent_token: string | null; transfers: Transfer[]; validation: ValidationResult }
@@ -83,6 +83,10 @@ export default function WorkflowRunPage() {
     }
     load()
   }, [id, fromExecution])
+
+  useEffect(() => onServiceRenamed((renamed) => {
+    if (String(renamed.id) === id) setService((current) => (current ? { ...current, name: renamed.name } : current))
+  }), [id])
 
   function selected(entry: InputEntry) {
     const bucket = entry.kind === 'slot' ? inputs.slots : inputs.nodes
