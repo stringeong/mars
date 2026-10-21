@@ -36,6 +36,14 @@ export default function AgentBlockNode({ data, selected }: { data: any; selected
           <span>Files</span>
           <strong>{files.length ? files.join(', ') : 'None'}</strong>
         </div>
+        {data.text && <div className="resource-slot text-slot" title={data.text}>
+          <span>✎ Text</span>
+          <strong>{data.text}</strong>
+        </div>}
+        {data.roleOnly && <div className="resource-slot role-only-slot">
+          <span>Input</span>
+          <strong>입력 없이 실행</strong>
+        </div>}
       </div>
 
       <Handle type="target" position={Position.Left} id="workflow-input" className="block-handle workflow-input-handle" />

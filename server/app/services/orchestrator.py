@@ -197,7 +197,7 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
 
 
 def populate_task_context(db: Session, task: models.TaskRecord) -> None:
-    """Build prompt context from the run prompt and completed parent outputs."""
+    """Build prompt context from the run prompt, the block's text data and completed parent outputs."""
     execution = db.get(models.Execution, task.execution_id)
     parents = dag.parents_of(execution.graph_snapshot).get(task.node_id, [])
     parts: list[str] = []
@@ -208,9 +208,9 @@ def populate_task_context(db: Session, task: models.TaskRecord) -> None:
         (item for item in (execution.graph_snapshot or {}).get("nodes", []) if item.get("id") == task.node_id),
         {},
     )
-    text_input = node.get("text_input")
-    if node.get("text_input_enabled") and isinstance(text_input, str) and text_input:
-        parts.append(f"[텍스트 데이터 입력]\n{text_input}")
+    text = dag.text_input(node)
+    if text:
+        parts.append(f"[텍스트 데이터 입력]\n{text}")
     if execution.run_prompt:
         parts.append(f"[사용자 실행 요청]\n{execution.run_prompt}")
     if parents:

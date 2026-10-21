@@ -12,13 +12,15 @@ export interface AgentNode {
   final?: boolean
   needs_file?: boolean
   input_slot_ids?: string[]
-  text_input_enabled?: boolean
-  text_input?: string
   // 생성기가 제안한 값과 사용자가 직접 지정했는지 (자동 규칙은 직접 지정한 값을 덮어쓰지 않는다)
   final_hint?: boolean
   needs_file_hint?: boolean
   final_manual?: boolean
   needs_file_manual?: boolean
+  // 블록에 직접 넣는 텍스트 데이터(켜져 있을 때만 쓰임)와 시작 블록의 '입력 없이 실행 허용'
+  text_input_enabled?: boolean
+  text_input?: string
+  allow_no_input?: boolean
   position?: { x: number; y: number } | null
 }
 
@@ -58,9 +60,11 @@ export type CloudProvider = 'openai' | 'anthropic' | 'gemini'
 
 export interface GenerationInfo {
   source: 'llm' | 'fallback'
-  location: 'local' | 'cloud' | null
+  location: 'local' | 'cloud' | 'worker' | null
   provider: string | null
   model: string | null
+  // 워커로 생성한 경우 그 워커
+  device_name?: string
   generated_at?: string
   fallback_reason?: string
 }
@@ -68,14 +72,41 @@ export interface GenerationInfo {
 export interface GenerationError {
   stage: 'connection' | 'parse' | 'validation'
   message: string
-  location: 'local' | 'cloud'
+  location: 'local' | 'cloud' | 'worker'
   provider: string
   model: string
+  device_name?: string
+}
+
+/** 생성에 쓸 수 있는 사용자 워커 (서버 GPU 대신 그 기기의 Ollama로 생성) */
+export interface WorkerGenerator {
+  device_id: number
+  name: string
+  online: boolean
+  models: string[]
+  default_model: string
 }
 
 export interface GeneratorModels {
   local: { available: boolean; models: string[]; default_model: string; error: string | null }
   cloud: { provider: CloudProvider; configured: boolean; status: string; default_model: string; models: string[] }[]
+  workers: WorkerGenerator[]
+}
+
+/** 워커에 맡긴 워크플로우 생성 요청 */
+export interface GenerationJob {
+  id: number
+  status: 'pending' | 'running' | 'done' | 'failed' | 'canceled'
+  attempt: number
+  device_id: number
+  device_name: string | null
+  model: string
+  created_at: string
+  claimed_at: string | null
+  finished_at: string | null
+  service_id: number | null
+  generation_error: GenerationError | null
+  worker_busy: boolean
 }
 
 export interface ValidationIssue {
@@ -83,7 +114,6 @@ export interface ValidationIssue {
   severity: 'error' | 'warning'
   message: string
   node_ids: string[]
-  resolvable_by_run_prompt?: boolean
 }
 
 export interface ValidationResult {
@@ -163,12 +193,32 @@ export interface UploadedFile {
 }
 
 export interface RunInputRecord {
-  kind: 'slot' | 'node'
+  kind: 'slot' | 'node' | 'text'
   id: string
   label: string
   node_ids: string[]
   files: { id: number; name: string }[]
   directories: { id: number; alias: string }[]
+  text?: string
+}
+
+/** 실행 전 확인 창의 블록별 직접 입력 (POST /executions/preview의 review) */
+export interface InputReviewBlock {
+  node_id: string
+  name: string
+  is_start: boolean
+  executor: 'local' | 'cloud'
+  provider: CloudProvider | null
+  device_name: string | null
+  files: { id: number; name: string; size_bytes: number | null }[]
+  directories: { id: number; alias: string; device_name: string | null }[]
+  text: string
+  allow_no_input: boolean
+}
+
+export interface InputReview {
+  blocks: InputReviewBlock[]
+  totals: { files: number; bytes: number; directories: number; texts: number }
 }
 
 export interface Task {

@@ -151,9 +151,11 @@ class AgentNode(BaseModel):
     # 사용자 파일을 직접 읽어야 하는 블록과, 그 파일이 들어갈 슬롯
     needs_file: bool = False
     input_slot_ids: list[str] = Field(default_factory=list)
-    # 파일 대신 블록에 직접 전달할 텍스트. 활성화되어 있으면 빈 문자열도 유효한 입력이다.
+    # 블록에 직접 넣는 텍스트 데이터. 켜져 있을 때만 작업 입력으로 전달된다.
     text_input_enabled: bool = False
-    text_input: str = ""
+    text_input: str = Field(default="", max_length=20000)
+    # 시작 블록을 파일·텍스트 없이 역할 프롬프트만으로 실행해도 된다는 사용자 확인
+    allow_no_input: bool = False
     # 생성기가 제안한 값과 사용자가 직접 지정했는지. 자동 규칙(dag.apply_auto_flags)은
     # 직접 지정한 값을 덮어쓰지 않는다.
     final_hint: bool = False
@@ -215,6 +217,30 @@ class ServiceGenerate(BaseModel):
     # 생성 실패 후 사용자가 규칙 기반 기본 워크플로우를 고른 경우
     use_fallback: bool = False
     fallback_reason: str = Field(default="", max_length=500)
+
+
+class GenerationJobCreate(BaseModel):
+    """서버 GPU 대신 사용자의 Worker(그 기기의 Ollama)로 워크플로우를 생성한다."""
+
+    prompt: str = Field(min_length=5, description="만들고자 하는 서비스를 설명하는 자연어")
+    device_id: int
+    # 비우면 그 Worker의 기본 모델
+    model: str = Field(default="", max_length=128)
+
+
+class GenerationJobOut(BaseModel):
+    id: int
+    status: Literal["pending", "running", "done", "failed", "canceled"]
+    attempt: int
+    device_id: int
+    device_name: str | None
+    model: str
+    created_at: UTCDateTime
+    claimed_at: UTCDateTime | None
+    finished_at: UTCDateTime | None
+    service_id: int | None
+    generation_error: dict | None
+    worker_busy: bool = False
 
 
 class ServiceRevise(BaseModel):

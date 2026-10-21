@@ -4,13 +4,16 @@
 """
 
 import copy
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import models
 from app.database import get_db
 from app.main import app
 from tests.conftest import LINEAR
+from tests.test_generator import CYCLIC_LLM_REPLY, VALID_LLM_REPLY
 
 
 GENERATE_CALLS: list = []
@@ -22,7 +25,7 @@ def client(db, monkeypatch):
         graph = copy.deepcopy(LINEAR)
         graph["name"] = "테스트 서비스"
         graph["description"] = prompt
-        # 시작 블록 a는 사용자가 '파일 필요'를 해제해 실행 프롬프트만으로 실행하는 블록이다
+        # 시작 블록 a는 파일이 필요 없는 블록이다. 입력(파일·텍스트·입력 없이 실행)은 테스트마다 정한다
         graph["nodes"][0].update(needs_file=False, needs_file_manual=True)
         GENERATE_CALLS.append(choice)
         return graph, {
@@ -181,9 +184,9 @@ class TestAutoFlags:
         r = client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
         nodes = {n["id"]: n for n in r.json()["graph"]["nodes"]}
         assert [i for i, n in nodes.items() if n["final"]] == ["b"]
-        # 들어오는 연결이 없는 a는 자동으로 파일 필요 → 파일 누락 오류
-        assert nodes["a"]["needs_file"] is True
-        assert {e["code"] for e in r.json()["validation"]["errors"]} == {"missing_file"}
+        # a는 생성기 제안(파일 불필요)대로 돌아가고, 시작 블록 입력이 없어 입력 없음 오류
+        assert nodes["a"]["needs_file"] is False
+        assert {e["code"] for e in r.json()["validation"]["errors"]} == {"no_input"}
 
 
 class TestGenerationChoice:
@@ -373,7 +376,7 @@ class TestExecutionGuards:
         assert r.status_code == 409
 
     def test_blank_run_prompt_rejected_only_when_start_block_has_no_input(self, client):
-        """실행 프롬프트는 선택 사항이다. 시작 블록에 파일도 프롬프트도 없을 때만 막는다."""
+        """실행 프롬프트는 선택 사항이다. 시작 블록에 파일·텍스트·'입력 없이 실행 허용'이 모두 없을 때만 막는다."""
         auth = signup_and_login(client)
         key = register_device(client, auth)
         client.post("/worker/heartbeat", headers=key)
@@ -575,6 +578,228 @@ class TestRunInputsAndReuse:
         assert copy_["generation_info"] == service["generation_info"]
         intruder = signup_and_login(client, username="user2", email="u2@example.com")
         assert client.post(f"/services/{service['id']}/duplicate", headers=intruder).status_code == 404
+
+
+class TestStartBlockInputs:
+    """시작 블록은 파일·텍스트 데이터·'입력 없이 실행 허용' 중 하나만 있으면 실행된다."""
+
+    def _save(self, client, auth, service, **changes):
+        graph = editable_graph(service)
+        for node_id, fields in changes.items():
+            next(n for n in graph["nodes"] if n["id"] == node_id).update(fields)
+        r = client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def _online(self, client, auth):
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        return key
+
+    def test_text_data_reaches_task_and_history(self, client):
+        auth = signup_and_login(client)
+        key = self._online(client, auth)
+        service = self._save(client, auth, create_service(client, auth), a={"text_input_enabled": True, "text_input": "  이번 주 회의록 요약  "})
+        assert service["validation"]["valid"] is True
+
+        r = client.post(f"/services/{service['id']}/executions", json={}, headers=auth)
+        assert r.status_code == 201, r.text
+        assert r.json()["input_files"] == [{
+            "kind": "text", "id": "a", "label": "에이전트 a", "node_ids": ["a"],
+            "files": [], "directories": [], "text": "이번 주 회의록 요약",
+        }]
+        task = client.post("/worker/tasks/next", headers=key).json()
+        assert task["agent_name"] == "에이전트 a"
+        assert "[텍스트 데이터 입력]\n이번 주 회의록 요약" in task["input_context"]
+
+    def test_disabled_text_is_not_sent(self, client):
+        auth = signup_and_login(client)
+        key = self._online(client, auth)
+        service = self._save(
+            client, auth, create_service(client, auth),
+            a={"text_input_enabled": False, "text_input": "꺼 둔 내용", "allow_no_input": True},
+        )
+        r = client.post(f"/services/{service['id']}/executions", json={}, headers=auth)
+        assert r.status_code == 201, r.text
+        assert r.json()["input_files"] == []
+        task = client.post("/worker/tasks/next", headers=key).json()
+        assert "꺼 둔 내용" not in task["input_context"]
+
+    def test_empty_enabled_text_blocks_execution(self, client):
+        auth = signup_and_login(client)
+        self._online(client, auth)
+        service = self._save(client, auth, create_service(client, auth), a={"text_input_enabled": True, "text_input": " "})
+        assert [e["code"] for e in service["validation"]["errors"]] == ["empty_text"]
+        r = client.post(f"/services/{service['id']}/executions", json={}, headers=auth)
+        assert r.status_code == 422
+
+    def test_preview_reviews_direct_inputs_in_stage_order(self, client):
+        auth = signup_and_login(client)
+        self._online(client, auth)
+        file = upload(client, auth, "회의록.txt", "안건 1\n".encode())
+        service = create_service(client, auth)
+        graph = editable_graph(service)
+        graph["input_slots"] = [{"id": "slot1", "description": "회의록", "file_ids": [file["id"]]}]
+        graph["nodes"][0].update(input_slot_ids=["slot1"])
+        graph["nodes"][1].update(text_input_enabled=True, text_input="말투: 공손하게")
+        client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
+
+        preview = client.post(f"/services/{service['id']}/executions/preview", json={}, headers=auth).json()
+        assert preview["validation"]["valid"] is True
+        review = preview["review"]
+        # 시작 블록 a(파일)와 텍스트를 직접 받는 b만 보인다. c는 앞 블록 결과만 받는다
+        assert [(b["node_id"], b["is_start"]) for b in review["blocks"]] == [("a", True), ("b", False)]
+        a, b = review["blocks"]
+        assert a["files"] == [{"id": file["id"], "name": "회의록.txt", "size_bytes": len("안건 1\n".encode())}]
+        assert a["executor"] == "local" and a["device_name"] is None
+        assert b["text"] == "말투: 공손하게" and b["files"] == []
+        assert review["totals"] == {"files": 1, "bytes": len("안건 1\n".encode()), "directories": 0, "texts": 1}
+
+    def test_preview_marks_start_block_without_input(self, client):
+        auth = signup_and_login(client)
+        service = self._save(client, auth, create_service(client, auth), a={"allow_no_input": True})
+        preview = client.post(f"/services/{service['id']}/executions/preview", json={}, headers=auth).json()
+        assert preview["validation"]["valid"] is True
+        start = preview["review"]["blocks"][0]
+        assert (start["node_id"], start["allow_no_input"], start["files"], start["text"]) == ("a", True, [], "")
+
+
+class TestWorkerGeneration:
+    """서버 GPU 대신 사용자의 Worker(그 기기의 Ollama)로 워크플로우를 생성한다."""
+
+    def _worker(self, client, auth, name="맥북", installed=("qwen3:4b", "gemma3:4b")):
+        key = register_device(client, auth, name)
+        specs = {"models": list(installed), "default_model": "qwen3:4b"}
+        assert client.post("/worker/heartbeat", json={"specs": specs}, headers=key).status_code == 200
+        return key
+
+    def _device_id(self, client, auth, name="맥북"):
+        return next(d["id"] for d in client.get("/devices", headers=auth).json() if d["name"] == name)
+
+    def _queue(self, client, auth, device_id, **extra):
+        body = {"prompt": "문서 요약 서비스 만들기", "device_id": device_id, **extra}
+        return client.post("/services/generation-jobs", json=body, headers=auth)
+
+    def _claim(self, client, key):
+        r = client.post("/worker/generations/next", headers=key)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def test_generator_models_lists_online_workers_first(self, client, monkeypatch):
+        async def fake_local():
+            return {"available": False, "models": [], "default_model": "gemma3:4b", "error": "없음"}
+
+        monkeypatch.setattr("app.routers.services.list_local_models", fake_local)
+        auth = signup_and_login(client)
+        register_device(client, auth, "꺼진 PC")
+        self._worker(client, auth)
+        workers = client.get("/services/generator-models", headers=auth).json()["workers"]
+        assert [(w["name"], w["online"]) for w in workers] == [("맥북", True), ("꺼진 PC", False)]
+        assert workers[0]["models"] == ["gemma3:4b", "qwen3:4b"] and workers[0]["default_model"] == "qwen3:4b"
+
+    def test_worker_generates_and_workflow_is_saved(self, client):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        r = self._queue(client, auth, self._device_id(client, auth))
+        assert r.status_code == 202, r.text
+        queued = r.json()
+        assert (queued["status"], queued["model"], queued["device_name"]) == ("pending", "qwen3:4b", "맥북")
+
+        job = self._claim(client, key)
+        assert (job["job_id"], job["model"], job["prompt"], job["temperature"]) == (queued["id"], "qwen3:4b", "문서 요약 서비스 만들기", 0.3)
+        assert "DAG" in job["system"]
+        assert client.get(f"/services/generation-jobs/{queued['id']}", headers=auth).json()["status"] == "running"
+
+        r = client.post(f"/worker/generations/{job['job_id']}/result", json={"content": VALID_LLM_REPLY}, headers=key)
+        assert r.json() == {"ok": True, "status": "done"}
+        done = client.get(f"/services/generation-jobs/{queued['id']}", headers=auth).json()
+        assert done["status"] == "done" and done["generation_error"] is None
+        service = client.get(f"/services/{done['service_id']}", headers=auth).json()
+        assert service["name"] == "요약 서비스"
+        info = service["generation_info"]
+        assert (info["location"], info["provider"], info["model"], info["device_name"]) == ("worker", "ollama", "qwen3:4b", "맥북")
+        # 처리한 요청은 다시 가져가지 않는다
+        assert client.post("/worker/generations/next", headers=key).status_code == 204
+
+    def test_unreadable_reply_is_asked_again_then_reported(self, client):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        job_id = self._queue(client, auth, self._device_id(client, auth), model="gemma3:4b").json()["id"]
+
+        first = self._claim(client, key)
+        assert client.post(f"/worker/generations/{job_id}/result", json={"content": "JSON 아님"}, headers=key).json()["status"] == "pending"
+        second = self._claim(client, key)
+        assert (first["temperature"], second["temperature"], second["model"]) == (0.3, 0.1, "gemma3:4b")
+        client.post(f"/worker/generations/{job_id}/result", json={"content": CYCLIC_LLM_REPLY}, headers=key)
+
+        failed = client.get(f"/services/generation-jobs/{job_id}", headers=auth).json()
+        assert (failed["status"], failed["attempt"]) == ("failed", 2)
+        error = failed["generation_error"]
+        assert (error["stage"], error["location"], error["model"], error["device_name"]) == ("validation", "worker", "gemma3:4b", "맥북")
+        assert client.get("/services", headers=auth).json() == []
+
+    def test_worker_model_error_is_reported(self, client):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        job_id = self._queue(client, auth, self._device_id(client, auth)).json()["id"]
+        self._claim(client, key)
+        client.post(f"/worker/generations/{job_id}/result", json={"error": "Ollama에 연결할 수 없음"}, headers=key)
+        error = client.get(f"/services/generation-jobs/{job_id}", headers=auth).json()["generation_error"]
+        assert error["stage"] == "connection" and "맥북" in error["message"] and "Ollama에 연결할 수 없음" in error["message"]
+
+    def test_only_own_online_worker_with_the_model(self, client):
+        auth = signup_and_login(client)
+        self._worker(client, auth)
+        register_device(client, auth, "꺼진 PC")
+        assert self._queue(client, auth, self._device_id(client, auth, "꺼진 PC")).status_code == 409
+        assert self._queue(client, auth, self._device_id(client, auth), model="llama3:70b").status_code == 422
+        intruder = signup_and_login(client, username="user2", email="u2@example.com")
+        assert self._queue(client, intruder, self._device_id(client, auth)).status_code == 404
+        job_id = self._queue(client, auth, self._device_id(client, auth)).json()["id"]
+        assert client.get(f"/services/generation-jobs/{job_id}", headers=intruder).status_code == 404
+        # 다른 사용자의 Worker는 이 요청을 가져가지 못한다
+        other_key = self._worker(client, intruder, "남의 PC")
+        assert client.post("/worker/generations/next", headers=other_key).status_code == 204
+
+    def test_unclaimed_request_times_out(self, client, db):
+        auth = signup_and_login(client)
+        self._worker(client, auth)
+        job_id = self._queue(client, auth, self._device_id(client, auth)).json()["id"]
+        db.get(models.GenerationJob, job_id).queued_at -= timedelta(seconds=31)
+        db.commit()
+        failed = client.get(f"/services/generation-jobs/{job_id}", headers=auth).json()
+        assert failed["status"] == "failed"
+        assert failed["generation_error"]["stage"] == "connection" and "30초" in failed["generation_error"]["message"]
+
+    def test_busy_worker_gets_time_to_finish_its_task(self, client, db):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        service = create_service(client, auth)
+        graph = editable_graph(service)
+        graph["nodes"][0]["allow_no_input"] = True
+        client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
+        assert client.post(f"/services/{service['id']}/executions", json={}, headers=auth).status_code == 201
+        assert client.post("/worker/tasks/next", headers=key).json()["agent_name"]  # 작업 실행 중
+
+        job_id = self._queue(client, auth, self._device_id(client, auth)).json()["id"]
+        db.get(models.GenerationJob, job_id).queued_at -= timedelta(minutes=2)
+        db.commit()
+        waiting = client.get(f"/services/generation-jobs/{job_id}", headers=auth).json()
+        assert (waiting["status"], waiting["worker_busy"]) == ("pending", True)
+        db.get(models.GenerationJob, job_id).queued_at -= timedelta(minutes=4)
+        db.commit()
+        failed = client.get(f"/services/generation-jobs/{job_id}", headers=auth).json()
+        assert failed["status"] == "failed" and "다른 작업" in failed["generation_error"]["message"]
+
+    def test_cancel_ignores_late_reply(self, client):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        job_id = self._queue(client, auth, self._device_id(client, auth)).json()["id"]
+        self._claim(client, key)
+        assert client.post(f"/services/generation-jobs/{job_id}/cancel", headers=auth).json()["status"] == "canceled"
+        r = client.post(f"/worker/generations/{job_id}/result", json={"content": VALID_LLM_REPLY}, headers=key)
+        assert r.status_code == 409
+        assert client.get("/services", headers=auth).json() == []
 
 
 class TestWorkerResultGuards:

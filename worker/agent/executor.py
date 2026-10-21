@@ -33,23 +33,35 @@ def _chunk_document(path: str, content: str) -> list[str]:
     ]
 
 
-def _chat(config: dict, model: str, messages: list[dict], temperature: float) -> str:
-    resp = httpx.post(
-        f"{config['ollama_url']}/api/chat",
-        json={
-            "model": model,
-            "messages": messages,
-            "stream": False,
-            "options": {"temperature": temperature},
-        },
-        timeout=300,
-    )
+def _chat(config: dict, model: str, messages: list[dict], temperature: float, response_format: str | None = None) -> str:
+    payload = {
+        "model": model,
+        "messages": messages,
+        "stream": False,
+        "options": {"temperature": temperature},
+    }
+    if response_format:
+        payload["format"] = response_format
+    resp = httpx.post(f"{config['ollama_url']}/api/chat", json=payload, timeout=300)
     resp.raise_for_status()
     content = resp.json()["message"]["content"]
     # qwen3 등 reasoning 모델의 <think> 블록 제거
     if "</think>" in content:
         content = content.split("</think>", 1)[1]
     return content.strip()
+
+
+def generate_workflow_reply(config: dict, job: dict) -> str:
+    """서버가 맡긴 워크플로우 생성 요청을 이 기기의 Ollama로 처리하고 JSON 응답 텍스트를 돌려준다.
+
+    응답 해석과 구성 검증은 서버가 한다.
+    """
+    model = job.get("model") or config.get("default_model", "")
+    messages = [
+        {"role": "system", "content": job["system"]},
+        {"role": "user", "content": job["prompt"]},
+    ]
+    return _chat(config, model, messages, float(job.get("temperature", 0.3)), response_format="json")
 
 
 def _select_relevant_files(task: dict, files: list[str], config: dict) -> list[str]:
