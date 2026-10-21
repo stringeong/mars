@@ -14,7 +14,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..config import UPLOAD_DIR
 from ..security import hash_device_key
-from ..services import directory_access, orchestrator
+from ..services import directory_access, generation_jobs, orchestrator
 
 router = APIRouter(prefix="/worker", tags=["worker"])
 
@@ -235,6 +235,43 @@ def submit_directory_inspection(
     device.last_heartbeat = models.utcnow()
     db.commit()
     return {"ok": True}
+
+
+@router.post("/generations/next")
+def next_generation(
+    response: Response,
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    """사용자가 이 Worker에 맡긴 워크플로우 생성 요청 (서버 GPU 대신 Worker의 Ollama 사용)."""
+    job = generation_jobs.claim_next(db, device)
+    device.last_heartbeat = models.utcnow()
+    db.commit()
+    if job is None:
+        response.status_code = 204
+        return None
+    return job
+
+
+@router.post("/generations/{job_id}/result")
+def submit_generation(
+    job_id: int,
+    body: dict,
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    job = db.get(models.GenerationJob, job_id)
+    if job is None or job.device_id != device.id:
+        raise HTTPException(404, "할당된 생성 요청이 아닙니다.")
+    if job.status != "running":
+        # 사용자가 취소했거나 시간이 지나 실패로 정리된 요청
+        raise HTTPException(409, "이미 종료된 생성 요청입니다.")
+    generation_jobs.submit_result(
+        db, job, device, str(body.get("content") or ""), str(body.get("error") or ""),
+    )
+    device.last_heartbeat = models.utcnow()
+    db.commit()
+    return {"ok": True, "status": job.status}
 
 
 @router.post("/tasks/{task_id}/result")

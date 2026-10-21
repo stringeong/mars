@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..security import get_current_user
-from ..services import dag, directory_access, orchestrator
+from ..services import dag, directory_access, generation_jobs, orchestrator
 from ..services.credentials import decrypt_secret
 from ..services.generator import (
     GenerationError,
@@ -29,10 +29,16 @@ async def generator_models(
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """워크플로우 생성에 쓸 수 있는 모델. 외부 LLM은 API 키를 등록한 제공자만 고를 수 있다."""
+    """워크플로우 생성에 쓸 수 있는 모델. 외부 LLM은 API 키를 등록한 제공자만, Worker는 온라인일 때만 고를 수 있다."""
     rows = {row.provider: row for row in db.query(models.LLMCredential).filter_by(user_id=user.id).all()}
+    devices = db.query(models.Device).filter_by(user_id=user.id).order_by(models.Device.id).all()
     return {
         "local": await list_local_models(),
+        # 서버 GPU 대신 사용자의 Worker에서 생성할 수 있다. 온라인이고 모델이 있는 Worker를 앞에 둔다.
+        "workers": sorted(
+            (_worker_generator(device) for device in devices),
+            key=lambda item: not (item["online"] and item["models"]),
+        ),
         "cloud": [
             {
                 "provider": provider,
@@ -43,6 +49,20 @@ async def generator_models(
             }
             for provider, choices in PROVIDER_MODELS.items()
         ],
+    }
+
+
+def _worker_generator(device: models.Device) -> dict:
+    specs = device.specs or {}
+    names = sorted({str(m).strip() for m in specs.get("models") or [] if isinstance(m, str) and m.strip()})
+    default = specs.get("default_model") if isinstance(specs.get("default_model"), str) else ""
+    return {
+        "device_id": device.id,
+        "name": device.name,
+        "online": orchestrator.device_is_online(device),
+        "models": names,
+        # 기본 모델이 설치되어 있지 않으면 설치된 첫 모델을 기본으로 보여준다
+        "default_model": default if default in names else (names[0] if names else ""),
     }
 
 
@@ -97,21 +117,73 @@ async def generate_service(
                 cached_tokens=usage.get("cached_tokens", 0) or 0,
             ))
     try:
-        dag.validate_graph(graph)
+        service = generation_jobs.save_service(db, user.id, prompt, graph, info)
     except dag.DagError as e:
         raise HTTPException(422, f"유효한 서비스를 생성하지 못했습니다: {e}")  # e401
-    graph = dag.apply_auto_flags(graph)
-    service = models.Service(
-        user_id=user.id,
-        name=graph.pop("name", "새 서비스"),
-        description=graph.pop("description", prompt),
-        graph=graph,
-        generation_info=info,
-    )
-    db.add(service)
     db.commit()
     db.refresh(service)
     return service
+
+
+@router.post("/generation-jobs", response_model=schemas.GenerationJobOut, status_code=202)
+def queue_worker_generation(
+    body: schemas.GenerationJobCreate,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """서버 GPU 대신 사용자의 Worker로 생성한다. 웹은 GET으로 상태를 확인하다가 완료되면 워크플로우로 이동한다."""
+    prompt = body.prompt.strip()
+    if not prompt:
+        raise HTTPException(422, "프롬프트가 비어 있습니다.")
+    device = db.get(models.Device, body.device_id)
+    if device is None or device.user_id != user.id:
+        raise HTTPException(404, "워커를 찾을 수 없습니다.")
+    if not orchestrator.device_is_online(device):
+        raise HTTPException(409, f"워커 '{device.name}'가 오프라인입니다. 워커를 실행한 뒤 다시 시도해 주세요.")
+    worker = _worker_generator(device)
+    model = body.model.strip() or worker["default_model"]
+    if not model:
+        raise HTTPException(422, f"워커 '{device.name}'에 설치된 Ollama 모델이 없습니다. 워커 화면에서 모델을 받아 주세요.")
+    if worker["models"] and model not in worker["models"]:
+        raise HTTPException(422, f"워커 '{device.name}'에 {model} 모델이 설치되어 있지 않습니다.")
+    job = models.GenerationJob(user_id=user.id, device_id=device.id, prompt=prompt, model=model)
+    db.add(job)
+    db.commit()
+    db.refresh(job)
+    return generation_jobs.to_out(db, job)
+
+
+def _get_job(job_id: int, user: models.User, db: Session) -> models.GenerationJob:
+    job = db.get(models.GenerationJob, job_id)
+    if job is None or job.user_id != user.id:
+        raise HTTPException(404, "생성 요청을 찾을 수 없습니다.")
+    return job
+
+
+@router.get("/generation-jobs/{job_id}", response_model=schemas.GenerationJobOut)
+def get_worker_generation(
+    job_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    job = _get_job(job_id, user, db)
+    generation_jobs.expire(db, job)
+    db.commit()
+    return generation_jobs.to_out(db, job)
+
+
+@router.post("/generation-jobs/{job_id}/cancel", response_model=schemas.GenerationJobOut)
+def cancel_worker_generation(
+    job_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    job = _get_job(job_id, user, db)
+    if job.status in generation_jobs.ACTIVE:
+        job.status = "canceled"
+        job.finished_at = models.utcnow()
+        db.commit()
+    return generation_jobs.to_out(db, job)
 
 
 @router.get("", response_model=list[schemas.ServiceOut])
