@@ -8,7 +8,7 @@ import DeletableEdge from '../components/DeletableEdge'
 import ValidationPanel from '../components/ValidationPanel'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
 import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { applyAutoFlags, blockingErrors, FlagExplanation, generationLabel, issuesByNode } from '../workflow'
+import { announceServiceRenamed, applyAutoFlags, blockingErrors, FlagExplanation, generationLabel, issuesByNode, onServiceRenamed } from '../workflow'
 
 const nodeTypes = { agent: AgentBlockNode }
 const edgeTypes = { deletable: DeletableEdge }
@@ -182,6 +182,13 @@ export default function ServiceDetailPage() {
     setNodes((current) => current.map((node) => ({ ...node, data: agents[node.id] ? nodeData(agents[node.id]) : node.data })))
   }, [agents, nodeData, setNodes])
 
+  // 사이드바에서 이름을 바꾸면 이 화면의 이름도 바꿔 둔다 (저장할 때 예전 이름으로 덮어쓰지 않도록)
+  useEffect(() => onServiceRenamed((renamed) => {
+    if (String(renamed.id) !== id) return
+    setSvcName(renamed.name)
+    setService((current) => (current ? { ...current, name: renamed.name } : current))
+  }), [id])
+
   function currentGraph(): Graph {
     return {
       nodes: nodes.filter((node) => agents[node.id]).map((node) => ({ ...agents[node.id], position: node.position, directory_ids: agents[node.id].directory_ids ?? [], uploaded_file_ids: agents[node.id].uploaded_file_ids ?? [] })),
@@ -269,6 +276,16 @@ export default function ServiceDetailPage() {
   function changeFlags(patch: Partial<AgentNode>) {
     pushHistory()
     updateAgent(patch)
+  }
+
+  function setNeedsFile(checked: boolean) {
+    if (!selectedAgent) return
+    const isStartBlock = !edges.some((edge) => edge.target === selectedAgent.id)
+    changeFlags({
+      needs_file: checked,
+      needs_file_manual: true,
+      ...(!checked && isStartBlock ? { text_input_enabled: true } : {}),
+    })
   }
 
   // 패널의 연결 목록에서 지울 때. 캔버스에서 지울 때는 onBeforeDelete가 기록을 남긴다.
@@ -374,6 +391,7 @@ export default function ServiceDetailPage() {
   async function save(): Promise<Service | null> {
     try {
       const updated = await api.put<Service>(`/services/${id}`, { name: svcName, description: svcDesc, graph: currentGraph() })
+      if (updated.name !== service?.name) announceServiceRenamed(updated.id, updated.name)
       setService(updated)
       setValidation(updated.validation ?? null)
       setError('')
@@ -460,7 +478,12 @@ export default function ServiceDetailPage() {
           {selectedIssues.length > 0 && <ul className="validation-list node-issues">{selectedIssues.map((issue, index) => <li key={`${issue.code}-${index}`} className={issue.severity}>{issue.message}</li>)}</ul>}
           <label>이름</label><input value={selectedAgent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
           <FlagToggle label="최종 블록 (출력이 실행 결과가 됨)" checked={!!selectedAgent.final} explanation={flagReasons[selectedAgent.id]?.final} onChange={setFinal} onReset={() => changeFlags({ final_manual: false })} />
-          <FlagToggle label="사용자 파일 필요" checked={!!selectedAgent.needs_file} explanation={flagReasons[selectedAgent.id]?.needsFile} onChange={(checked) => changeFlags({ needs_file: checked, needs_file_manual: true })} onReset={() => changeFlags({ needs_file_manual: false })} />
+          <FlagToggle label="사용자 파일 필요" checked={!!selectedAgent.needs_file} explanation={flagReasons[selectedAgent.id]?.needsFile} onChange={setNeedsFile} onReset={() => changeFlags({ needs_file_manual: false })} />
+          <div className="text-input-setting">
+            <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.text_input_enabled} onChange={(event) => updateAgent({ text_input_enabled: event.target.checked })} />텍스트 데이터 입력</label>
+            <small className="flag-reason">활성화하면 내용이 비어 있어도 이 블록을 실행할 수 있습니다.</small>
+            {selectedAgent.text_input_enabled && <textarea rows={4} value={selectedAgent.text_input ?? ''} onChange={(event) => updateAgent({ text_input: event.target.value })} placeholder="이 블록에 전달할 텍스트 데이터를 입력하세요. (선택)" />}
+          </div>
           <label>연결</label>
           <div className="connection-list">
             {([['incoming', '들어오는 연결', edges.filter((edge) => edge.target === selectedAgent.id)], ['outgoing', '나가는 연결', edges.filter((edge) => edge.source === selectedAgent.id)]] as const).map(([kind, title, list]) => <div className="connection-group" key={kind}>

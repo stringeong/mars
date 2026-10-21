@@ -51,7 +51,7 @@ export function applyAutoFlags(agents: AgentNode[], edges: { source: string; tar
   const reasons: Record<string, AutoFlagReasons> = {}
   for (const agent of next) {
     const needsFile: FlagExplanation = agent.needs_file_manual
-      ? { manual: true, reason: agent.needs_file ? '직접 지정: 실행할 때 파일이 필요합니다.' : '직접 지정: 파일 없이 실행 프롬프트나 앞 단계 결과로 실행합니다.' }
+      ? { manual: true, reason: agent.needs_file ? '직접 지정: 실행할 때 파일이 필요합니다.' : agent.text_input_enabled ? '직접 지정: 텍스트 데이터 입력으로 실행합니다.' : '직접 지정: 파일 없이 실행 프롬프트나 앞 단계 결과로 실행합니다.' }
       : agent.needs_file_hint ? { manual: false, reason: '생성기가 사용자 파일을 직접 읽는 블록으로 정했습니다.' }
         : !hasParent.has(agent.id) ? { manual: false, reason: '들어오는 연결이 없어 파일이 필요합니다.' }
           : { manual: false, reason: '앞 단계 결과를 입력으로 받습니다.' }
@@ -126,6 +126,20 @@ export function generationLabel(info: GenerationInfo | null | undefined) {
   if (info.source === 'fallback') return '기본 워크플로우 (규칙 기반)'
   const where = info.location === 'cloud' ? `외부 LLM API · ${PROVIDER_LABELS[info.provider ?? ''] ?? info.provider}` : '서버 로컬 LLM · Ollama'
   return `${where} · ${info.model}`
+}
+
+// 사이드바·편집 화면 등 여러 곳에서 워크플로우 이름을 바꿨을 때 열려 있는 화면에 알린다
+const SERVICE_RENAMED = 'mars:service-renamed'
+
+export function announceServiceRenamed(id: number, name: string) {
+  window.dispatchEvent(new CustomEvent(SERVICE_RENAMED, { detail: { id, name } }))
+}
+
+/** 이름 변경을 구독하고 해제 함수를 돌려준다 (useEffect에서 그대로 반환해 쓴다) */
+export function onServiceRenamed(handler: (renamed: { id: number; name: string }) => void) {
+  const listener = (event: Event) => handler((event as CustomEvent<{ id: number; name: string }>).detail)
+  window.addEventListener(SERVICE_RENAMED, listener)
+  return () => window.removeEventListener(SERVICE_RENAMED, listener)
 }
 
 /** 실행 이력의 입력 파일을 한 줄로: "card_A.csv 외 2개" */

@@ -253,25 +253,11 @@ class TestInspectGraph:
         graph["nodes"][1].update(needs_file=True, directory_ids=[3])
         assert dag.inspect_graph(graph)["errors"] == []
 
-    def test_start_block_needs_file_text_or_allow_no_input(self):
+    def test_root_without_input_is_error_until_run_prompt_given(self):
         graph = graph_of(["a", "b"], [("a", "b")])
-        assert _codes(dag.inspect_graph(graph)) == [("no_input", ("a",))]
-        # 셋 중 하나만 있으면 실행할 수 있다
-        assert dag.inspect_graph(_with_file(graph, "a"))["valid"] is True
-        graph["nodes"][0].update(text_input_enabled=True, text_input="2026년 10월 매출")
-        assert dag.inspect_graph(graph)["valid"] is True
-        graph["nodes"][0].update(text_input_enabled=False, allow_no_input=True)
-        assert dag.inspect_graph(graph)["valid"] is True
-
-    def test_text_is_used_only_when_enabled(self):
-        graph = graph_of(["a"], [])
-        graph["nodes"][0].update(text_input_enabled=False, text_input="저장만 된 내용")
-        assert _codes(dag.inspect_graph(graph)) == [("no_input", ("a",))]
-        graph["nodes"][0].update(text_input_enabled=True, text_input="   ")
-        assert _codes(dag.inspect_graph(graph)) == [("empty_text", ("a",))]
-
-    def test_legacy_run_prompt_still_satisfies_start_block(self):
-        graph = graph_of(["a", "b"], [("a", "b")])
+        result = dag.inspect_graph(graph)
+        assert _codes(result) == [("no_input", ("a",))]
+        assert result["errors"][0]["resolvable_by_run_prompt"] is True
         assert dag.inspect_graph(graph, run_prompt="이번 달 분석")["valid"] is True
 
     def test_enabled_text_input_allows_root_to_run_even_when_blank(self):
@@ -332,13 +318,12 @@ class TestApplyAutoFlags:
     def _flags(graph, key):
         return {n["id"]: n[key] for n in dag.apply_auto_flags(graph)["nodes"]}
 
-    def test_needs_file_follows_hint_unless_manual(self):
+    def test_start_blocks_need_files_unless_hinted_or_manual(self):
         graph = graph_of(["a", "b", "c"], [("a", "b"), ("b", "c")])
-        # 시작 블록이라고 파일이 자동으로 필요해지지는 않는다
-        assert self._flags(graph, "needs_file") == {"a": False, "b": False, "c": False}
-        graph["nodes"][1]["needs_file_hint"] = True               # 생성기가 b는 파일을 읽는다고 함
-        graph["nodes"][0].update(needs_file=True, needs_file_manual=True)  # a는 직접 지정
-        assert self._flags(graph, "needs_file") == {"a": True, "b": True, "c": False}
+        assert self._flags(graph, "needs_file") == {"a": True, "b": False, "c": False}
+        graph["nodes"][1]["needs_file_hint"] = True               # 생성기가 b도 파일을 읽는다고 함
+        graph["nodes"][0].update(needs_file=False, needs_file_manual=True)  # a는 직접 해제
+        assert self._flags(graph, "needs_file") == {"a": False, "b": True, "c": False}
 
     def test_single_sink_becomes_final(self):
         assert self._flags(LINEAR, "final") == {"a": False, "b": False, "c": True}

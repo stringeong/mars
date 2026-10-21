@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, getDeviceDirectories, getDeviceModels } from '../api'
 import ValidationPanel from '../components/ValidationPanel'
 import { AgentNode, CloudProvider, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { applyAutoFlags, blockingErrors, generationLabel, issuesByNode, PROVIDER_LABELS } from '../workflow'
+import { applyAutoFlags, blockingErrors, generationLabel, issuesByNode, onServiceRenamed, PROVIDER_LABELS } from '../workflow'
 
 type Provider = NonNullable<AgentNode['provider']>
 type ProviderStatus = { provider: CloudProvider; configured: boolean; default_model: string }
@@ -65,6 +65,10 @@ export default function WorkflowSetupPage() {
     }
     load()
   }, [id])
+
+  useEffect(() => onServiceRenamed((renamed) => {
+    if (String(renamed.id) === id) setService((current) => (current ? { ...current, name: renamed.name } : current))
+  }), [id])
 
   useEffect(() => {
     if (!graph) return

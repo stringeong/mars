@@ -170,7 +170,6 @@ def _agent_node(node: dict, index: int) -> dict:
         "input_slot_ids": list(node.get("input_slot_ids") or []),
         "text_input_enabled": bool(node.get("text_input_enabled")),
         "text_input": str(node.get("text_input") or ""),
-        "allow_no_input": bool(node.get("allow_no_input")),
         **({"position": node["position"]} if node.get("position") is not None else {}),
     }
 
@@ -178,7 +177,8 @@ def _agent_node(node: dict, index: int) -> dict:
 def _input_slots(raw_nodes: list[dict], nodes: list[dict]) -> list[dict]:
     """needs_file 블록의 파일 안내를 슬롯으로 묶는다. 같은 file_key를 쓰는 블록은 한 슬롯을 함께 읽는다.
 
-    생성기가 설명을 주지 않은 블록은 "〈블록 이름〉 입력 파일" 슬롯을 받는다.
+    생성기가 설명을 주지 않은 블록(들어오는 연결이 없어 자동으로 파일이 필요해진 블록 등)은
+    "〈블록 이름〉 입력 파일" 슬롯을 받는다.
     """
     slots: dict[str, dict] = {}
     first_names: dict[str, str] = {}
@@ -262,7 +262,7 @@ async def _generate_once(prompt: str, choice: GeneratorChoice, temperature: floa
     }
     # LLM이 순환 그래프 등 실행 불가능한 구성을 제안하면 여기서 예외 발생
     dag.validate_graph(graph)
-    # 최종 블록은 정확히 하나로, 파일 필요는 생성기 제안대로 맞춘 뒤 슬롯을 만든다
+    # 최종 블록은 정확히 하나로, 들어오는 연결이 없는 블록은 파일 필요로 맞춘 뒤 슬롯을 만든다
     graph = dag.apply_auto_flags(graph)
     graph["input_slots"] = _input_slots(raw_nodes, graph["nodes"])
     return graph, usage
@@ -442,8 +442,7 @@ async def revise_workflow(graph: dict, instruction: str) -> dict:
             "needs_file_manual": bool(prev.get("needs_file_manual")),
             "input_slot_ids": prev.get("input_slot_ids", []),
             "text_input_enabled": bool(prev.get("text_input_enabled")),
-            "text_input": prev.get("text_input", ""),
-            "allow_no_input": bool(prev.get("allow_no_input")),
+            "text_input": str(prev.get("text_input") or ""),
             "position": prev.get("position"),
         })
     from . import dag

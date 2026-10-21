@@ -22,7 +22,7 @@ def client(db, monkeypatch):
         graph = copy.deepcopy(LINEAR)
         graph["name"] = "테스트 서비스"
         graph["description"] = prompt
-        # 시작 블록 a는 파일이 필요 없는 블록이다. 입력(파일·텍스트·입력 없이 실행)은 테스트마다 정한다
+        # 시작 블록 a는 사용자가 '파일 필요'를 해제해 실행 프롬프트만으로 실행하는 블록이다
         graph["nodes"][0].update(needs_file=False, needs_file_manual=True)
         GENERATE_CALLS.append(choice)
         return graph, {
@@ -181,9 +181,9 @@ class TestAutoFlags:
         r = client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
         nodes = {n["id"]: n for n in r.json()["graph"]["nodes"]}
         assert [i for i, n in nodes.items() if n["final"]] == ["b"]
-        # a는 생성기 제안(파일 불필요)대로 돌아가고, 시작 블록 입력이 없어 입력 없음 오류
-        assert nodes["a"]["needs_file"] is False
-        assert {e["code"] for e in r.json()["validation"]["errors"]} == {"no_input"}
+        # 들어오는 연결이 없는 a는 자동으로 파일 필요 → 파일 누락 오류
+        assert nodes["a"]["needs_file"] is True
+        assert {e["code"] for e in r.json()["validation"]["errors"]} == {"missing_file"}
 
 
 class TestGenerationChoice:
@@ -373,7 +373,7 @@ class TestExecutionGuards:
         assert r.status_code == 409
 
     def test_blank_run_prompt_rejected_only_when_start_block_has_no_input(self, client):
-        """실행 프롬프트는 선택 사항이다. 시작 블록에 파일·텍스트·'입력 없이 실행 허용'이 모두 없을 때만 막는다."""
+        """실행 프롬프트는 선택 사항이다. 시작 블록에 파일도 프롬프트도 없을 때만 막는다."""
         auth = signup_and_login(client)
         key = register_device(client, auth)
         client.post("/worker/heartbeat", headers=key)
@@ -575,90 +575,6 @@ class TestRunInputsAndReuse:
         assert copy_["generation_info"] == service["generation_info"]
         intruder = signup_and_login(client, username="user2", email="u2@example.com")
         assert client.post(f"/services/{service['id']}/duplicate", headers=intruder).status_code == 404
-
-
-class TestStartBlockInputs:
-    """시작 블록은 파일·텍스트 데이터·'입력 없이 실행 허용' 중 하나만 있으면 실행된다."""
-
-    def _save(self, client, auth, service, **changes):
-        graph = editable_graph(service)
-        for node_id, fields in changes.items():
-            next(n for n in graph["nodes"] if n["id"] == node_id).update(fields)
-        r = client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
-        assert r.status_code == 200, r.text
-        return r.json()
-
-    def _online(self, client, auth):
-        key = register_device(client, auth)
-        client.post("/worker/heartbeat", headers=key)
-        return key
-
-    def test_text_data_reaches_task_and_history(self, client):
-        auth = signup_and_login(client)
-        key = self._online(client, auth)
-        service = self._save(client, auth, create_service(client, auth), a={"text_input_enabled": True, "text_input": "  이번 주 회의록 요약  "})
-        assert service["validation"]["valid"] is True
-
-        r = client.post(f"/services/{service['id']}/executions", json={}, headers=auth)
-        assert r.status_code == 201, r.text
-        assert r.json()["input_files"] == [{
-            "kind": "text", "id": "a", "label": "에이전트 a", "node_ids": ["a"],
-            "files": [], "directories": [], "text": "이번 주 회의록 요약",
-        }]
-        task = client.post("/worker/tasks/next", headers=key).json()
-        assert task["agent_name"] == "에이전트 a"
-        assert "[입력 텍스트]\n이번 주 회의록 요약" in task["input_context"]
-
-    def test_disabled_text_is_not_sent(self, client):
-        auth = signup_and_login(client)
-        key = self._online(client, auth)
-        service = self._save(
-            client, auth, create_service(client, auth),
-            a={"text_input_enabled": False, "text_input": "꺼 둔 내용", "allow_no_input": True},
-        )
-        r = client.post(f"/services/{service['id']}/executions", json={}, headers=auth)
-        assert r.status_code == 201, r.text
-        assert r.json()["input_files"] == []
-        task = client.post("/worker/tasks/next", headers=key).json()
-        assert "꺼 둔 내용" not in task["input_context"]
-
-    def test_empty_enabled_text_blocks_execution(self, client):
-        auth = signup_and_login(client)
-        self._online(client, auth)
-        service = self._save(client, auth, create_service(client, auth), a={"text_input_enabled": True, "text_input": " "})
-        assert [e["code"] for e in service["validation"]["errors"]] == ["empty_text"]
-        r = client.post(f"/services/{service['id']}/executions", json={}, headers=auth)
-        assert r.status_code == 422
-
-    def test_preview_reviews_direct_inputs_in_stage_order(self, client):
-        auth = signup_and_login(client)
-        self._online(client, auth)
-        file = upload(client, auth, "회의록.txt", "안건 1\n".encode())
-        service = create_service(client, auth)
-        graph = editable_graph(service)
-        graph["input_slots"] = [{"id": "slot1", "description": "회의록", "file_ids": [file["id"]]}]
-        graph["nodes"][0].update(input_slot_ids=["slot1"])
-        graph["nodes"][1].update(text_input_enabled=True, text_input="말투: 공손하게")
-        client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
-
-        preview = client.post(f"/services/{service['id']}/executions/preview", json={}, headers=auth).json()
-        assert preview["validation"]["valid"] is True
-        review = preview["review"]
-        # 시작 블록 a(파일)와 텍스트를 직접 받는 b만 보인다. c는 앞 블록 결과만 받는다
-        assert [(b["node_id"], b["is_start"]) for b in review["blocks"]] == [("a", True), ("b", False)]
-        a, b = review["blocks"]
-        assert a["files"] == [{"id": file["id"], "name": "회의록.txt", "size_bytes": len("안건 1\n".encode())}]
-        assert a["executor"] == "local" and a["device_name"] is None
-        assert b["text"] == "말투: 공손하게" and b["files"] == []
-        assert review["totals"] == {"files": 1, "bytes": len("안건 1\n".encode()), "directories": 0, "texts": 1}
-
-    def test_preview_marks_start_block_without_input(self, client):
-        auth = signup_and_login(client)
-        service = self._save(client, auth, create_service(client, auth), a={"allow_no_input": True})
-        preview = client.post(f"/services/{service['id']}/executions/preview", json={}, headers=auth).json()
-        assert preview["validation"]["valid"] is True
-        start = preview["review"]["blocks"][0]
-        assert (start["node_id"], start["allow_no_input"], start["files"], start["text"]) == ("a", True, [], "")
 
 
 class TestWorkerResultGuards:

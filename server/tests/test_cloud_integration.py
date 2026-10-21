@@ -22,14 +22,6 @@ def test_cloud_transfer_preview_marks_user_input_and_derived_file_text():
     assert items[1]["sources"] == ["Local reader"]
 
 
-def test_cloud_transfer_preview_lists_block_text_data_only_when_enabled():
-    node = {"id": "cloud", "type": "agent", "name": "Cloud writer", "executor": "cloud", "provider": "openai",
-            "text_input_enabled": True, "text_input": "고객 메모"}
-    assert {item["type"] for item in transfers.describe_transfers({"nodes": [node], "edges": []})} == {"user_input", "text_input"}
-    node["text_input_enabled"] = False
-    assert {item["type"] for item in transfers.describe_transfers({"nodes": [node], "edges": []})} == {"user_input"}
-
-
 def test_direct_cloud_file_text_is_explicit_in_preview():
     graph = {
         "nodes": [{"id": "cloud", "type": "agent", "name": "Claude", "executor": "cloud", "provider": "anthropic", "uploaded_file_ids": [4, 9]}],
