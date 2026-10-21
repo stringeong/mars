@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, getDeviceDirectories, getDeviceModels } from '../api'
 import ValidationPanel from '../components/ValidationPanel'
 import { AgentNode, CloudProvider, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { applyAutoFlags, blockInputs, generationLabel, issuesByNode, onServiceRenamed, PROVIDER_LABELS } from '../workflow'
+import { applyAutoFlags, blockingErrors, generationLabel, issuesByNode, PROVIDER_LABELS } from '../workflow'
 
 type Provider = NonNullable<AgentNode['provider']>
 type ProviderStatus = { provider: CloudProvider; configured: boolean; default_model: string }
@@ -65,10 +65,6 @@ export default function WorkflowSetupPage() {
     }
     load()
   }, [id])
-
-  useEffect(() => onServiceRenamed((renamed) => {
-    if (String(renamed.id) === id) setService((current) => (current ? { ...current, name: renamed.name } : current))
-  }), [id])
 
   useEffect(() => {
     if (!graph) return
@@ -200,7 +196,7 @@ export default function WorkflowSetupPage() {
   async function saveAndRun() {
     const updated = dirty ? await save() : service
     if (!updated) return
-    const blocking = (dirty ? updated.validation : validation)?.errors ?? []
+    const blocking = blockingErrors(dirty ? updated.validation : validation)
     if (blocking.length) {
       setError(`실행하기 전에 오류 ${blocking.length}개를 고쳐 주세요: ${blocking[0].message}`)
       return
@@ -290,8 +286,6 @@ export default function WorkflowSetupPage() {
                   const issues = issueMap.get(node.id) ?? []
                   const options = modelOptions(node)
                   const stage = stageOf.get(node.id)
-                  const isStart = !hasParent.has(node.id)
-                  const inputs = blockInputs(node, slots, isStart)
                   return <tr id={`setup-row-${node.id}`} key={node.id} className={issues.some((issue) => issue.severity === 'error') ? 'has-error' : issues.length ? 'has-warning' : ''}>
                     <td className="setup-block-cell">
                       <strong>{node.name}</strong>
@@ -325,8 +319,6 @@ export default function WorkflowSetupPage() {
                       </select>
                     </td>
                     <td className="setup-input-cell">
-                      <small className={`input-summary${inputs.missing ? ' missing' : ''}`}>{isStart ? '시작 · ' : ''}{inputs.label}</small>
-                      {inputs.hasText && <small className="text-preview" title={node.text_input}>텍스트 · {node.text_input!.trim()}</small>}
                       {nodeSlots.map((slot) => {
                         const count = slot.file_ids.length + slot.directory_ids.length
                         return <div className="slot-inline" key={slot.id}>
@@ -335,9 +327,10 @@ export default function WorkflowSetupPage() {
                           <button type="button" className="text-button" disabled={busy} onClick={() => startUpload(slot.id)}>올리기</button>
                         </div>
                       })}
-                      {!nodeSlots.length && (node.needs_file || isStart) && <button type="button" className="text-button" onClick={() => createSlotFor(node)}>파일 슬롯 추가</button>}
-                      {isStart && (inputs.missing || inputs.roleOnly) && <label className="toggle-row compact"><input type="checkbox" checked={!!node.allow_no_input} onChange={(event) => updateNode(node.id, { allow_no_input: event.target.checked })} />입력 없이 실행 허용</label>}
-                      {isStart && inputs.missing && <Link className="text-button" to={`/services/${id}`}>텍스트 데이터는 편집 화면에서 입력</Link>}
+                      {!nodeSlots.length && <>
+                        <small className="muted">{hasParent.has(node.id) ? '앞 단계 결과' : (node.uploaded_file_ids?.length || node.directory_ids?.length) ? '블록에 직접 연결된 자료' : '입력 없음'}</small>
+                        {(node.needs_file || !hasParent.has(node.id)) && <button type="button" className="text-button" onClick={() => createSlotFor(node)}>파일 슬롯 추가</button>}
+                      </>}
                     </td>
                     <td>
                       {issues.length

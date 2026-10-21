@@ -30,7 +30,7 @@ export default function HistoryPage() {
         <div className="execution-list">
           {visibleItems.map((item) => <button type="button" className="execution-list-item" key={item.id} onClick={() => navigate(`/executions/${item.id}`)}>
             <div><strong>{item.service_name}</strong><span className={`status-pill ${item.status}`}>{item.status}</span></div>
-            <p>{item.run_prompt && `${item.run_prompt} · `}입력: {inputFilesSummary(item.input_files)}</p>
+            <p>{item.run_prompt || '실행 프롬프트 없음'} · 입력: {inputFilesSummary(item.input_files)}</p>
             <small>#{item.id} · {new Date(item.created_at).toLocaleString()} · 생성 모델: {generationLabel(item.generation_info)}</small>
           </button>)}
           {!visibleItems.length && <div className="list-empty">No matching executions.</div>}

@@ -1,7 +1,11 @@
 import { ChangeEvent, DragEvent, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import { UploadedFile } from '../types'
-import { formatBytes } from '../workflow'
+
+function formatBytes(value: number) {
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`
+}
 
 function typeLabel(file: UploadedFile) {
   const extension = file.original_name.split('.').pop()?.toUpperCase()

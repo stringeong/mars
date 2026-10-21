@@ -21,6 +21,7 @@ export default function ValidationPanel({ validation, nodeNames, onSelectNode, s
         <button type="button" disabled={!onSelectNode || !issue.node_ids.length} onClick={() => issue.node_ids[0] && onSelectNode?.(issue.node_ids[0])}>
           {issue.message}
         </button>
+        {issue.resolvable_by_run_prompt && <small>실행 화면에서 실행 프롬프트를 입력하면 해소됩니다.</small>}
       </li>)}
     </ul>}
     {showStages && validation.stages.length > 0 && <div className="stage-preview">

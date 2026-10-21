@@ -8,7 +8,7 @@ import DeletableEdge from '../components/DeletableEdge'
 import ValidationPanel from '../components/ValidationPanel'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
 import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { announceServiceRenamed, applyAutoFlags, blockInputs, FlagExplanation, generationLabel, issuesByNode, onServiceRenamed } from '../workflow'
+import { applyAutoFlags, blockingErrors, FlagExplanation, generationLabel, issuesByNode } from '../workflow'
 
 const nodeTypes = { agent: AgentBlockNode }
 const edgeTypes = { deletable: DeletableEdge }
@@ -113,14 +113,9 @@ export default function ServiceDetailPage() {
     ? [selectedAgent.model, ...modelOptions]
     : modelOptions
   const selectedDeviceModelInfo = selectedAgent?.worker_id ? deviceModels[selectedAgent.worker_id] : undefined
-  // 들어오는 연결이 있는 블록. 선택 표시만 바뀔 때는 다시 계산하지 않도록 대상 id 목록으로 묶는다
-  const targetKey = edges.map((edge) => edge.target).sort().join('|')
-  const hasIncoming = useMemo(() => new Set(targetKey.split('|')), [targetKey])
-  const selectedInputs = selectedAgent ? blockInputs(selectedAgent, inputSlots, !hasIncoming.has(selectedAgent.id)) : null
 
   const nodeData = useCallback((agent: AgentNode) => {
     const issues = issueMap.get(agent.id) ?? []
-    const inputs = blockInputs(agent, inputSlots, !hasIncoming.has(agent.id))
     return {
     label: agent.name,
     model: agent.model,
@@ -134,10 +129,8 @@ export default function ServiceDetailPage() {
       ...(agent.uploaded_file_ids ?? []),
       ...inputSlots.filter((slot) => (agent.input_slot_ids ?? []).includes(slot.id)).flatMap((slot) => slot.file_ids),
     ].map((fileId) => uploadedFileById.get(fileId)?.original_name ?? `#${fileId}`),
-    text: inputs.hasText ? agent.text_input!.trim() : '',
-    roleOnly: inputs.roleOnly,
     }
-  }, [deviceById, directoryById, hasIncoming, inputSlots, issueMap, uploadedFileById])
+  }, [deviceById, directoryById, inputSlots, issueMap, uploadedFileById])
 
   const applyAgents = useCallback((nextAgents: AgentNode[], graphEdges: Graph['edges'] = []) => {
     const positions = layout(nextAgents)
@@ -188,13 +181,6 @@ export default function ServiceDetailPage() {
   useEffect(() => {
     setNodes((current) => current.map((node) => ({ ...node, data: agents[node.id] ? nodeData(agents[node.id]) : node.data })))
   }, [agents, nodeData, setNodes])
-
-  // 사이드바에서 이름을 바꾸면 이 화면의 이름도 바꿔 둔다 (저장할 때 예전 이름으로 덮어쓰지 않도록)
-  useEffect(() => onServiceRenamed((renamed) => {
-    if (String(renamed.id) !== id) return
-    setSvcName(renamed.name)
-    setService((current) => (current ? { ...current, name: renamed.name } : current))
-  }), [id])
 
   function currentGraph(): Graph {
     return {
@@ -283,16 +269,6 @@ export default function ServiceDetailPage() {
   function changeFlags(patch: Partial<AgentNode>) {
     pushHistory()
     updateAgent(patch)
-  }
-
-  function setNeedsFile(checked: boolean) {
-    if (!selectedAgent) return
-    const isStartBlock = !edges.some((edge) => edge.target === selectedAgent.id)
-    changeFlags({
-      needs_file: checked,
-      needs_file_manual: true,
-      ...(!checked && isStartBlock ? { text_input_enabled: true } : {}),
-    })
   }
 
   // 패널의 연결 목록에서 지울 때. 캔버스에서 지울 때는 onBeforeDelete가 기록을 남긴다.
@@ -398,7 +374,6 @@ export default function ServiceDetailPage() {
   async function save(): Promise<Service | null> {
     try {
       const updated = await api.put<Service>(`/services/${id}`, { name: svcName, description: svcDesc, graph: currentGraph() })
-      if (updated.name !== service?.name) announceServiceRenamed(updated.id, updated.name)
       setService(updated)
       setValidation(updated.validation ?? null)
       setError('')
@@ -415,7 +390,8 @@ export default function ServiceDetailPage() {
   async function configureAndRun() {
     const updated = await save()
     if (!updated) return
-    const blocking = updated.validation?.errors ?? []
+    // 실행 프롬프트로 풀리는 '입력 없음' 오류만 남았다면 실행 화면으로 넘어간다
+    const blocking = blockingErrors(updated.validation)
     if (blocking.length) {
       setError(`실행하기 전에 오류 ${blocking.length}개를 고쳐 주세요: ${blocking[0].message}`)
       return
@@ -484,12 +460,7 @@ export default function ServiceDetailPage() {
           {selectedIssues.length > 0 && <ul className="validation-list node-issues">{selectedIssues.map((issue, index) => <li key={`${issue.code}-${index}`} className={issue.severity}>{issue.message}</li>)}</ul>}
           <label>이름</label><input value={selectedAgent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
           <FlagToggle label="최종 블록 (출력이 실행 결과가 됨)" checked={!!selectedAgent.final} explanation={flagReasons[selectedAgent.id]?.final} onChange={setFinal} onReset={() => changeFlags({ final_manual: false })} />
-          <FlagToggle label="사용자 파일 필요" checked={!!selectedAgent.needs_file} explanation={flagReasons[selectedAgent.id]?.needsFile} onChange={setNeedsFile} onReset={() => changeFlags({ needs_file_manual: false })} />
-          <div className="text-input-setting">
-            <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.text_input_enabled} onChange={(event) => updateAgent({ text_input_enabled: event.target.checked })} />텍스트 데이터 입력</label>
-            <small className="flag-reason">활성화하면 내용이 비어 있어도 이 블록을 실행할 수 있습니다.</small>
-            {selectedAgent.text_input_enabled && <textarea rows={4} value={selectedAgent.text_input ?? ''} onChange={(event) => updateAgent({ text_input: event.target.value })} placeholder="이 블록에 전달할 텍스트 데이터를 입력하세요. (선택)" />}
-          </div>
+          <FlagToggle label="사용자 파일 필요" checked={!!selectedAgent.needs_file} explanation={flagReasons[selectedAgent.id]?.needsFile} onChange={(checked) => changeFlags({ needs_file: checked, needs_file_manual: true })} onReset={() => changeFlags({ needs_file_manual: false })} />
           <label>연결</label>
           <div className="connection-list">
             {([['incoming', '들어오는 연결', edges.filter((edge) => edge.target === selectedAgent.id)], ['outgoing', '나가는 연결', edges.filter((edge) => edge.source === selectedAgent.id)]] as const).map(([kind, title, list]) => <div className="connection-group" key={kind}>
@@ -505,16 +476,6 @@ export default function ServiceDetailPage() {
             </div>)}
           </div>
           {inputSlots.filter((slot) => (selectedAgent.input_slot_ids ?? []).includes(slot.id)).map((slot) => <div className="slot-inline node-slot" key={slot.id}><span title={slot.format}>파일 슬롯 · {slot.description}</span><small className={slot.file_ids.length + slot.directory_ids.length ? 'ok' : 'empty'}>{slot.file_ids.length + slot.directory_ids.length ? `${slot.file_ids.length + slot.directory_ids.length}개 연결` : '비어 있음'}</small></div>)}
-          <label>입력</label>
-          <div className={`block-input-box${selectedInputs?.missing ? ' missing' : ''}`}>
-            <div className="block-input-status"><span>{hasIncoming.has(selectedAgent.id) ? '중간 블록' : '시작 블록'}</span><strong>{selectedInputs?.label}</strong></div>
-            <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.text_input_enabled} onChange={(event) => changeFlags({ text_input_enabled: event.target.checked })} />텍스트 데이터 입력</label>
-            {selectedAgent.text_input_enabled && <textarea rows={4} value={selectedAgent.text_input ?? ''} placeholder="이 블록이 실행할 때 함께 읽을 내용 (예: 고객 메모, 기준 날짜, 말투)" onChange={(event) => updateAgent({ text_input: event.target.value })} />}
-            {!hasIncoming.has(selectedAgent.id) && <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.allow_no_input} onChange={(event) => changeFlags({ allow_no_input: event.target.checked })} />입력 없이 실행 허용</label>}
-            <small className="muted">{hasIncoming.has(selectedAgent.id)
-              ? '앞 단계 결과에 더해 텍스트 데이터를 함께 받을 수 있습니다.'
-              : '시작 블록은 파일·텍스트 데이터·입력 없이 실행 허용 중 하나만 있으면 실행됩니다. 입력 없이 실행하면 역할 프롬프트만으로 시작합니다.'}</small>
-          </div>
           <label>역할 프롬프트</label><textarea rows={5} value={selectedAgent.role_prompt} onChange={(event) => updateAgent({ role_prompt: event.target.value })} />
           <label>실행 위치</label><select value={selectedAgent.provider || 'ollama'} onChange={(event) => { const provider = event.target.value as 'ollama' | 'openai' | 'anthropic' | 'gemini'; updateAgent({ provider, executor: provider === 'ollama' ? 'local' : 'cloud', worker_id: provider === 'ollama' ? selectedAgent.worker_id : null, model: '' }) }}><option value="ollama">Local Worker · Ollama</option><option value="openai">Cloud · OpenAI</option><option value="anthropic">Cloud · Anthropic</option><option value="gemini">Cloud · Google Gemini</option></select>
           <label>컴퓨팅 자원 (Worker)</label><select disabled={selectedProvider !== 'ollama'} value={selectedAgent.worker_id ?? ''} onChange={(event) => updateAgent({ worker_id: event.target.value ? Number(event.target.value) : null, model: '' })}><option value="">자동 배정</option>{devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.online ? ' · 온라인' : ' · 오프라인'}</option>)}</select>
@@ -541,7 +502,7 @@ export default function ServiceDetailPage() {
           <h2>서비스 정보</h2><label>이름</label><input value={svcName} onChange={(event) => setSvcName(event.target.value)} /><label>설명</label><textarea rows={3} value={svcDesc} onChange={(event) => setSvcDesc(event.target.value)} />
           <h2 style={{ marginTop: 20 }}>구성 검사</h2>
           <ValidationPanel validation={validation} nodeNames={nodeNames} onSelectNode={setSelected} />
-          <h2 style={{ marginTop: 20 }}>Workflow execution</h2><p className="muted">실행 화면에서 입력 파일을 고르고, 실행 직전에 이번 실행에 쓰이는 입력을 한 번 더 확인합니다.</p><button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={configureAndRun}>Configure and run</button>
+          <h2 style={{ marginTop: 20 }}>Workflow execution</h2><p className="muted">Enter the run-specific prompt on a separate execution input screen.</p><button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={configureAndRun}>Configure and run</button>
         </>}
       </aside>
     </div>
