@@ -2,18 +2,29 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 're
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import ValidationPanel from '../components/ValidationPanel'
-import { AgentNode, Execution, ExecutionListItem, RunInputRecord, Service, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { generationLabel } from '../workflow'
+import { AgentNode, Execution, ExecutionListItem, InputReview, InputReviewBlock, RunInputRecord, Service, UploadedFile, ValidationResult, WorkflowNode } from '../types'
+import { blockInputs, formatBytes, generationLabel, PROVIDER_LABELS } from '../workflow'
 
-type Transfer = { node_id: string; node_name: string; provider: string; type: 'user_input' | 'derived_text' | 'file_text'; file_ids?: number[]; sources?: string[] }
-type Preview = { requires_consent: boolean; consent_token: string | null; transfers: Transfer[]; validation: ValidationResult }
+type Transfer = { node_id: string; node_name: string; provider: string; type: 'user_input' | 'text_input' | 'derived_text' | 'file_text'; file_ids?: number[]; sources?: string[] }
+type Preview = { requires_consent: boolean; consent_token: string | null; transfers: Transfer[]; validation: ValidationResult; review: InputReview }
 type RunInputs = { slots: Record<string, number[]>; nodes: Record<string, number[]> }
 type InputEntry = { kind: 'slot' | 'node'; id: string; label: string; format?: string; blocks: string[]; directories: number[]; defaults: number[] }
 
 const isAgent = (node: WorkflowNode): node is AgentNode => !node.type || node.type === 'agent'
 const sameIds = (a: number[], b: number[]) => a.length === b.length && a.every((value, index) => value === b[index])
 
-/** 실행 화면: 주 입력은 이번 실행의 입력 파일이고, 실행 프롬프트는 선택 사항이다. */
+const providerName = (provider: string | null) => (provider && PROVIDER_LABELS[provider as keyof typeof PROVIDER_LABELS]) || provider || '외부 API'
+
+/** 블록이 실행되는 곳. 업로드 파일은 서버를 거쳐 이곳으로 전달된다. */
+function destination(block: InputReviewBlock) {
+  if (block.executor === 'cloud') return `외부 API · ${providerName(block.provider)}`
+  return block.device_name ? `워커 · ${block.device_name}` : '워커 · 실행할 때 자동 배정'
+}
+
+/**
+ * 실행 화면: 이번 실행의 입력 파일을 고른다. 블록별 텍스트 데이터·'입력 없이 실행 허용'은 편집 화면에서 정하고,
+ * 실행 직전 확인 창에서 이번 실행에 쓰이는 입력(나가는 파일·텍스트)을 한 번에 보여준다.
+ */
 export default function WorkflowRunPage() {
   const { id } = useParams()
   const [searchParams] = useSearchParams()
@@ -24,7 +35,6 @@ export default function WorkflowRunPage() {
   const [inputs, setInputs] = useState<RunInputs>({ slots: {}, nodes: {} })
   const [prefillSource, setPrefillSource] = useState('워크플로우 기본값')
   const [droppedFiles, setDroppedFiles] = useState(0)
-  const [prompt, setPrompt] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -52,6 +62,16 @@ export default function WorkflowRunPage() {
     return [...slotEntries, ...nodeEntries]
   }, [service])
 
+  // 시작 블록과 텍스트 데이터를 받는 블록 (파일 외 입력을 실행 전에 보여준다)
+  const blockEntries = useMemo(() => {
+    if (!service) return []
+    const targets = new Set(service.graph.edges.filter((edge) => (edge.relation ?? 'workflow') === 'workflow').map((edge) => edge.target))
+    const slots = service.graph.input_slots ?? []
+    return service.graph.nodes.filter(isAgent)
+      .map((agent) => ({ agent, isStart: !targets.has(agent.id), inputs: blockInputs(agent, slots, !targets.has(agent.id)) }))
+      .filter(({ isStart, inputs }) => isStart || inputs.hasText)
+  }, [service])
+
   useEffect(() => {
     async function load() {
       try {
@@ -59,13 +79,15 @@ export default function WorkflowRunPage() {
         setService(loaded)
         setFiles(loadedFiles)
         // 지정한 실행(다시 실행) 또는 이 워크플로우의 가장 최근 실행 값으로 입력 파일을 미리 채운다
-        let previous: { id: number; run_prompt: string; input_files?: RunInputRecord[] | null } | undefined
+        let previous: { id: number; input_files?: RunInputRecord[] | null } | undefined
         if (fromExecution) previous = await api.get<Execution>(`/executions/${fromExecution}`).catch(() => undefined)
         else previous = (await api.get<ExecutionListItem[]>(`/executions?service_id=${id}`).catch(() => []))[0]
         const existing = new Set(loadedFiles.map((file) => file.id))
         const next: RunInputs = { slots: {}, nodes: {} }
         let dropped = 0
         for (const record of previous?.input_files ?? []) {
+          // 텍스트 데이터는 실행마다 바꾸지 않고 워크플로우에 저장된 값을 쓴다
+          if (record.kind === 'text') continue
           const ids = record.files.map((file) => file.id)
           const kept = ids.filter((fileId) => existing.has(fileId))
           dropped += ids.length - kept.length
@@ -74,9 +96,7 @@ export default function WorkflowRunPage() {
         }
         setInputs(next)
         setDroppedFiles(dropped)
-        if (previous?.input_files?.length) setPrefillSource(`이전 실행 #${previous.id} 값`)
-        // 다시 실행할 때는 그 실행의 프롬프트도 가져온다
-        if (fromExecution && previous?.run_prompt) setPrompt(previous.run_prompt)
+        if (previous?.input_files?.some((record) => record.kind !== 'text')) setPrefillSource(`이전 실행 #${previous.id} 값`)
       } catch (cause) {
         setError(cause instanceof Error ? cause.message : 'Unable to load workflow.')
       }
@@ -112,7 +132,7 @@ export default function WorkflowRunPage() {
     setLoading(true)
     setError('')
     try {
-      const execution = await api.post<Execution>(`/services/${id}/executions`, { run_prompt: prompt, input_files: payloadInputs(), consent_token: consentToken || null, acknowledge_warnings: acknowledged })
+      const execution = await api.post<Execution>(`/services/${id}/executions`, { input_files: payloadInputs(), consent_token: consentToken || null, acknowledge_warnings: acknowledged })
       navigate(`/executions/${execution.id}`)
     } catch (cause) {
       setPreview(null)
@@ -123,17 +143,17 @@ export default function WorkflowRunPage() {
     }
   }
 
+  // 실행을 누르면 검사하고, 오류가 없으면 이번 실행에 쓰이는 입력을 확인 창으로 보여준다
   async function run(event: FormEvent) {
     event.preventDefault()
     setLoading(true)
     setError('')
     try {
-      const result = await api.post<Preview>(`/services/${id}/executions/preview`, { run_prompt: prompt, input_files: payloadInputs() })
+      const result = await api.post<Preview>(`/services/${id}/executions/preview`, { input_files: payloadInputs() })
       setValidation(result.validation)
       if (result.validation.errors.length) { setError('구성 오류를 고친 뒤 실행할 수 있습니다.'); return }
-      if (result.validation.warnings.length && !acknowledged) { setError('구성 경고를 확인하고 체크한 뒤 다시 실행해 주세요.'); return }
-      if (result.requires_consent) setPreview(result)
-      else await start()
+      setAcknowledged(false)
+      setPreview(result)
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Unable to inspect workflow.')
     } finally {
@@ -212,11 +232,17 @@ export default function WorkflowRunPage() {
               </div>
             </div>
           })}
-          {!entries.length && <p className="muted">이 워크플로우에는 파일 입력이 없습니다. 실행 프롬프트로 지시를 전달하세요.</p>}
+          {!entries.length && <p className="muted">이 워크플로우에는 파일 입력이 없습니다.</p>}
         </div>
-        <label className="run-prompt-label">실행 프롬프트 <small>(선택)</small></label>
-        <textarea className="run-prompt-input" value={prompt} onChange={(event) => { setPrompt(event.target.value); setValidation(null) }} placeholder="이번 실행에만 덧붙일 지시가 있으면 적어 주세요. 비워 두면 입력 파일과 워크플로우 설정만으로 실행합니다." />
-        {validation && (validation.errors.length > 0 || validation.warnings.length > 0) && <><ValidationPanel validation={validation} nodeNames={Object.fromEntries(service.graph.nodes.map((node) => [node.id, node.name]))} showStages={false} />{validation.errors.length > 0 && <Link className="btn sm ghost" to={`/services/${service.id}/setup`}>설정 확인 화면에서 고치기</Link>}{!validation.errors.length && <label className="ack-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />경고 내용을 확인했고 그대로 실행합니다.</label>}</>}
+        {blockEntries.length > 0 && <div className="run-block-inputs">
+          <div className="run-block-inputs-head"><strong>블록 입력</strong><Link className="text-button" to={`/services/${service.id}`}>편집 화면에서 바꾸기</Link></div>
+          {blockEntries.map(({ agent, isStart, inputs }) => <div className={`run-block-input${inputs.missing ? ' missing' : ''}`} key={agent.id}>
+            <span>{agent.name}{isStart && <small>시작 블록</small>}</span>
+            <strong>{inputs.label}</strong>
+            {inputs.hasText && <p>{agent.text_input!.trim()}</p>}
+          </div>)}
+        </div>}
+        {validation && validation.errors.length > 0 && <><ValidationPanel validation={validation} nodeNames={Object.fromEntries(service.graph.nodes.map((node) => [node.id, node.name]))} showStages={false} /><Link className="btn sm ghost" to={`/services/${service.id}/setup`}>설정 확인 화면에서 고치기</Link></>}
         <div className="run-card-footer"><span>Workflow: <strong>{service.name}</strong></span><button className="generate-button" disabled={loading}>{loading ? 'Checking...' : 'Run workflow'} <b>→</b></button></div>
         {error && <div className="error">{error}</div>}
       </form>
@@ -229,6 +255,38 @@ export default function WorkflowRunPage() {
       </aside>
     </div>
     <input ref={uploadRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx" onChange={onUpload} />
-    {preview && <div className="file-library-modal-backdrop" role="presentation"><section className="file-library-modal transfer-consent-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title"><header><div><span className="eyebrow">EXTERNAL DATA TRANSFER</span><h2 id="transfer-title">클라우드 전송 내용을 확인해 주세요</h2></div><button className="modal-close" onClick={() => setPreview(null)}>×</button></header><p>API 키는 서버에만 보관되며 아래 입력과 결과만 외부 공급자에 전달됩니다.</p><div className="transfer-list">{preview.transfers.map((item, index) => <div className={`transfer-item ${item.type}`} key={`${item.node_id}-${item.type}-${index}`}><strong>{item.node_name} → {item.provider}</strong><span>{item.type === 'user_input' ? '사용자 실행 요청' : item.type === 'derived_text' ? `로컬 파일에서 파생된 텍스트: ${(item.sources || []).join(', ')}` : `첨부파일에서 추출한 텍스트: ${(item.file_ids || []).map(fileName).join(', ')}`}</span></div>)}</div><footer><span>이번 실행에만 적용됩니다.</span><div><button className="btn sm ghost" onClick={() => setPreview(null)}>취소</button><button className="btn sm" disabled={loading} onClick={() => start(preview.consent_token)}>동의하고 실행</button></div></footer></section></div>}
+    {preview && <div className="file-library-modal-backdrop" role="presentation">
+      <section className="file-library-modal input-review-modal" role="dialog" aria-modal="true" aria-labelledby="input-review-title">
+        <header><div><span className="eyebrow">INPUT CHECK</span><h2 id="input-review-title">이 실행에 쓰이는 입력</h2></div><button className="modal-close" aria-label="닫기" onClick={() => setPreview(null)}>×</button></header>
+        <p>실행하면 아래 파일과 텍스트가 각 블록으로 전달됩니다. 업로드 파일은 서버를 거쳐 전달되고, 공유 디렉터리 파일은 해당 기기 안에서만 읽힙니다.</p>
+        <div className="input-review-body">
+          <div className="input-review-totals">
+            <span><b>{preview.review.totals.files}</b>파일{preview.review.totals.files > 0 && ` · ${formatBytes(preview.review.totals.bytes)}`}</span>
+            <span><b>{preview.review.totals.directories}</b>공유 디렉터리</span>
+            <span><b>{preview.review.totals.texts}</b>텍스트 데이터</span>
+          </div>
+          {preview.review.blocks.map((block) => <div className="input-review-block" key={block.node_id}>
+            <div className="input-review-block-head"><strong>{block.name}</strong><span className={`input-review-badge${block.is_start ? ' start' : ''}`}>{block.is_start ? '시작 블록' : '직접 입력'}</span><small>{destination(block)}</small></div>
+            <ul>
+              {block.files.map((file) => <li className="upload" key={`f${file.id}`}><span>{file.name}</span><small>{formatBytes(file.size_bytes)} · 서버 → {block.executor === 'cloud' ? providerName(block.provider) : block.device_name ?? '배정된 워커'}</small></li>)}
+              {block.directories.map((directory) => <li className="directory" key={`d${directory.id}`}><span>디렉터리 · {directory.alias}</span><small>{directory.device_name ?? '해당 기기'} 안에서만 읽음</small></li>)}
+              {block.text && <li className="text"><span>텍스트 데이터</span><p>{block.text}</p></li>}
+              {block.allow_no_input && <li className="none"><span>입력 없이 실행</span><small>역할 프롬프트만으로 시작합니다.</small></li>}
+            </ul>
+          </div>)}
+          {preview.requires_consent && <div className="input-review-section consent">
+            <strong>외부 API 전송</strong>
+            <small>API 키는 서버에만 보관되며 아래 입력과 결과만 외부 공급자에 전달됩니다.</small>
+            <div className="transfer-list">{preview.transfers.map((item, index) => <div className={`transfer-item ${item.type}`} key={`${item.node_id}-${item.type}-${index}`}><strong>{item.node_name} → {providerName(item.provider)}</strong><span>{item.type === 'user_input' ? '블록 입력과 앞 단계 결과' : item.type === 'text_input' ? '블록 텍스트 데이터' : item.type === 'derived_text' ? `로컬 파일에서 파생된 텍스트: ${(item.sources || []).join(', ')}` : `첨부파일에서 추출한 텍스트: ${(item.file_ids || []).map(fileName).join(', ')}`}</span></div>)}</div>
+          </div>}
+          {preview.validation.warnings.length > 0 && <div className="input-review-section warnings">
+            <strong>구성 경고</strong>
+            <ul className="validation-list">{preview.validation.warnings.map((issue, index) => <li className="warning" key={`${issue.code}-${index}`}>{issue.message}</li>)}</ul>
+            <label className="ack-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />경고 내용을 확인했고 그대로 실행합니다.</label>
+          </div>}
+        </div>
+        <footer><span>이번 실행에만 적용됩니다.</span><div><button className="btn sm ghost" onClick={() => setPreview(null)}>돌아가서 고치기</button><button className="btn sm" disabled={loading || (preview.validation.warnings.length > 0 && !acknowledged)} onClick={() => start(preview.consent_token)}>{preview.requires_consent ? '동의하고 실행' : '확인하고 실행'}</button></div></footer>
+      </section>
+    </div>}
   </div>
 }

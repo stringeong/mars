@@ -1,4 +1,4 @@
-import { AgentNode, GenerationInfo, RunInputRecord, Task, ValidationIssue, ValidationResult } from './types'
+import { AgentNode, GenerationInfo, InputSlot, RunInputRecord, Task, ValidationIssue, ValidationResult } from './types'
 
 export type FlagExplanation = { manual: boolean; reason: string }
 export type AutoFlagReasons = { needsFile: FlagExplanation; final: FlagExplanation }
@@ -35,7 +35,7 @@ export function applyAutoFlags(agents: AgentNode[], edges: { source: string; tar
   const levels = longestPathLevels(ids, pairs)
   const next = agents.map((agent) => ({
     ...agent,
-    needs_file: agent.needs_file_manual ? !!agent.needs_file : !!agent.needs_file_hint || !hasParent.has(agent.id),
+    needs_file: agent.needs_file_manual ? !!agent.needs_file : !!agent.needs_file_hint,
     final: agent.final_manual ? !!agent.final : false,
   }))
   const manualFinal = next.find((agent) => agent.final_manual && agent.final)
@@ -51,9 +51,9 @@ export function applyAutoFlags(agents: AgentNode[], edges: { source: string; tar
   const reasons: Record<string, AutoFlagReasons> = {}
   for (const agent of next) {
     const needsFile: FlagExplanation = agent.needs_file_manual
-      ? { manual: true, reason: agent.needs_file ? '직접 지정: 실행할 때 파일이 필요합니다.' : '직접 지정: 파일 없이 실행 프롬프트나 앞 단계 결과로 실행합니다.' }
+      ? { manual: true, reason: agent.needs_file ? '직접 지정: 실행할 때 파일이 필요합니다.' : '직접 지정: 파일 없이 실행합니다.' }
       : agent.needs_file_hint ? { manual: false, reason: '생성기가 사용자 파일을 직접 읽는 블록으로 정했습니다.' }
-        : !hasParent.has(agent.id) ? { manual: false, reason: '들어오는 연결이 없어 파일이 필요합니다.' }
+        : !hasParent.has(agent.id) ? { manual: false, reason: '시작 블록은 파일·텍스트 데이터·입력 없이 실행 허용 중 하나만 있으면 됩니다.' }
           : { manual: false, reason: '앞 단계 결과를 입력으로 받습니다.' }
     let final: FlagExplanation
     if (agent.final_manual) final = { manual: true, reason: agent.final ? '직접 최종 블록으로 지정했습니다.' : '직접 최종 블록에서 뺐습니다.' }
@@ -128,12 +128,13 @@ export function generationLabel(info: GenerationInfo | null | undefined) {
   return `${where} · ${info.model}`
 }
 
-/** 실행 이력의 입력 파일을 한 줄로: "card_A.csv 외 2개" */
+/** 실행 이력의 입력을 한 줄로: "card_A.csv 외 2개 · 텍스트 1개" */
 export function inputFilesSummary(records: RunInputRecord[] | null | undefined) {
   // 여러 슬롯이 같은 파일을 쓰면 한 번만 센다
   const names = [...new Map((records ?? []).flatMap((record) => record.files.map((file) => [file.id, file.name] as const))).values()]
-  if (!names.length) return '입력 파일 없음'
-  return names.length > 1 ? `${names[0]} 외 ${names.length - 1}개` : names[0]
+  const texts = (records ?? []).filter((record) => record.kind === 'text').length
+  const files = names.length > 1 ? `${names[0]} 외 ${names.length - 1}개` : names[0]
+  return [files, texts ? `텍스트 ${texts}개` : ''].filter(Boolean).join(' · ') || '입력 파일 없음'
 }
 
 /** "신용카드 거래 분류 에이전트" → "분류": 단계 요약에 쓰는 역할 단어 */
@@ -160,7 +161,28 @@ export function issuesByNode(validation: ValidationResult | null | undefined) {
   return byNode
 }
 
-/** 실행 프롬프트를 넣어도 풀리지 않는 오류 */
-export function blockingErrors(validation: ValidationResult | null | undefined) {
-  return (validation?.errors ?? []).filter((issue) => !issue.resolvable_by_run_prompt)
+/**
+ * 블록이 직접 받는 입력 요약. 시작 블록은 파일·텍스트 데이터·'입력 없이 실행 허용' 중 하나가 있어야 한다
+ * (서버 dag.inspect_graph의 no_input 규칙과 같다).
+ */
+export function blockInputs(agent: AgentNode, slots: InputSlot[], isStart: boolean) {
+  const own = slots.filter((slot) => (agent.input_slot_ids ?? []).includes(slot.id))
+  const files = (agent.uploaded_file_ids?.length ?? 0) + own.reduce((sum, slot) => sum + slot.file_ids.length, 0)
+  const directories = (agent.directory_ids?.length ?? 0) + own.reduce((sum, slot) => sum + slot.directory_ids.length, 0)
+  const hasText = !!agent.text_input_enabled && !!agent.text_input?.trim()
+  const parts = [
+    isStart ? '' : '앞 단계 결과',
+    files ? `파일 ${files}개` : '',
+    directories ? `디렉터리 ${directories}개` : '',
+    hasText ? '텍스트 데이터' : '',
+  ].filter(Boolean)
+  const roleOnly = isStart && !parts.length && !!agent.allow_no_input
+  const missing = isStart && !parts.length && !agent.allow_no_input
+  return { label: roleOnly ? '입력 없이 실행 (역할 프롬프트만)' : missing ? '입력 없음' : parts.join(' + '), hasText, roleOnly, missing }
+}
+
+export function formatBytes(value: number | null | undefined) {
+  if (value == null) return '크기 알 수 없음'
+  if (value < 1024 * 1024) return `${Math.max(1, Math.round(value / 1024))} KB`
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`
 }
