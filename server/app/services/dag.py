@@ -341,16 +341,16 @@ def result_node_ids(graph: dict) -> list[str]:
 def apply_auto_flags(graph: dict) -> dict:
     """최종 블록과 '사용자 파일 필요'를 규칙으로 정한 복사본. 직접 지정한 값(*_manual)은 바꾸지 않는다.
 
-    - 파일 필요: 생성기가 필요하다고 했거나(needs_file_hint) 들어오는 연결이 없는 블록
+    - 파일 필요: 생성기가 필요하다고 한 블록(needs_file_hint). 시작 블록이라고 파일이 꼭 필요하지는
+      않다. 시작 블록은 파일·텍스트 데이터·'입력 없이 실행 허용' 중 하나만 있으면 된다(inspect_graph).
     - 최종 블록: 직접 지정한 최종 블록이 있으면 그 블록만. 없으면 끝나는 블록 중 생성기가 고른
       블록(final_hint), 그것도 없으면 가장 뒤 단계(같으면 블록 순서상 뒤)의 끝나는 블록 하나
     """
     result = copy.deepcopy(graph)
     agents = _agent_nodes(result)
-    parents = parents_of(result)
     for node in agents:
         if not node.get("needs_file_manual"):
-            node["needs_file"] = bool(node.get("needs_file_hint")) or not parents.get(node["id"])
+            node["needs_file"] = bool(node.get("needs_file_hint"))
         if not node.get("final_manual"):
             node["final"] = False
     if any(node.get("final_manual") and node.get("final") for node in agents):
@@ -420,6 +420,11 @@ def expand_input_slots(graph: dict) -> dict:
     return expanded
 
 
+def text_input(node: dict) -> str:
+    """블록에 켜 둔 텍스트 데이터. 꺼져 있으면 저장된 내용이 있어도 쓰지 않는다."""
+    return str(node.get("text_input") or "").strip() if node.get("text_input_enabled") else ""
+
+
 def _ancestors(graph: dict, node_id: str) -> set[str]:
     parents: dict[str, list[str]] = defaultdict(list)
     for source, target in _workflow_pairs(graph):
@@ -463,19 +468,25 @@ def inspect_graph(graph: dict, *, run_prompt: str = "", has_model=None) -> dict:
     for node in agents:
         node_id = node["id"]
         file_ids, directory_ids = input_sources(graph, node)
-        # 텍스트 입력은 사용자가 명시적으로 활성화한 것 자체를 입력으로 본다.
-        # 따라서 내용이 빈 문자열이어도 시작 블록을 실행할 수 있다.
-        has_input = bool(file_ids or directory_ids or node.get("text_input_enabled"))
-        if node.get("needs_file") and not has_input:
+        has_file = bool(file_ids or directory_ids)
+        has_text = bool(text_input(node))
+        if node.get("needs_file") and not has_file:
             add("error", "missing_file", f"'{names[node_id]}' 블록에 필요한 파일이 비어 있습니다.", [node_id])
-        elif not has_input and not parents.get(node_id) and not run_prompt.strip():
+        elif node.get("text_input_enabled") and not has_text:
+            add("error", "empty_text", f"'{names[node_id]}' 블록의 텍스트 데이터가 비어 있습니다.", [node_id])
+        # 시작 블록은 파일·텍스트 데이터·'입력 없이 실행 허용' 중 하나가 있어야 한다.
+        # run_prompt는 이전 버전 API 호출(공통 실행 프롬프트)과의 호환용이다.
+        elif (
+            not parents.get(node_id)
+            and not (has_file or has_text or node.get("allow_no_input"))
+            and not run_prompt.strip()
+        ):
             add(
                 "error",
                 "no_input",
-                f"'{names[node_id]}' 블록에 입력이 없습니다. 파일·공유 디렉터리를 연결하거나 "
-                "실행할 때 실행 프롬프트를 입력하세요.",
+                f"'{names[node_id]}' 시작 블록에 입력이 없습니다. 파일을 연결하거나 텍스트 데이터를 입력하거나 "
+                "'입력 없이 실행 허용'을 켜세요.",
                 [node_id],
-                resolvable_by_run_prompt=True,
             )
 
     finals = final_node_ids(graph)

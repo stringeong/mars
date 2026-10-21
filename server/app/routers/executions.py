@@ -85,7 +85,99 @@ def input_record(db: Session, user_id: int, graph: dict) -> list[dict]:
         for n in agents
         if n.get("uploaded_file_ids")
     ]
+    record += [
+        {
+            "kind": "text",
+            "id": n["id"],
+            "label": n.get("name") or n["id"],
+            "node_ids": [n["id"]],
+            "files": [],
+            "directories": [],
+            "text": dag.text_input(n),
+        }
+        for n in agents
+        if dag.text_input(n)
+    ]
     return record
+
+
+def input_review(db: Session, user_id: int, graph: dict) -> dict:
+    """실행 전 확인 창에 보여줄 입력. 시작 블록과 파일·디렉터리·텍스트를 직접 받는 블록을 단계 순서로 모은다.
+
+    업로드 파일은 서버를 거쳐 워커(또는 외부 API)로 전달되고, 공유 디렉터리는 그 기기 안에서만 읽힌다.
+    """
+    agents = {n["id"]: n for n in graph.get("nodes", []) if n.get("type", "agent") == "agent"}
+    parents = dag.parents_of(graph)
+    ordered = [node_id for stage in dag.stages(graph) for node_id in stage]
+    ordered += [node_id for node_id in agents if node_id not in ordered]
+    sources = {node_id: dag.input_sources(graph, agents[node_id]) for node_id in ordered}
+    file_ids = {v for files, _ in sources.values() for v in files}
+    directory_ids = {v for _, dirs in sources.values() for v in dirs}
+    files = {
+        row.id: row
+        for row in db.query(models.UploadedFile)
+        .filter(models.UploadedFile.user_id == user_id, models.UploadedFile.id.in_(file_ids))
+        .all()
+    } if file_ids else {}
+    directories = {
+        row.id: row
+        for row in db.query(models.SharedDirectory)
+        .filter(models.SharedDirectory.user_id == user_id, models.SharedDirectory.id.in_(directory_ids))
+        .all()
+    } if directory_ids else {}
+    device_ids = {d.device_id for d in directories.values()} | {
+        n.get("worker_id") for n in agents.values() if isinstance(n.get("worker_id"), int)
+    }
+    device_names = dict(
+        db.query(models.Device.id, models.Device.name)
+        .filter(models.Device.user_id == user_id, models.Device.id.in_(device_ids))
+        .all()
+    ) if device_ids else {}
+
+    blocks = []
+    for node_id in ordered:
+        node = agents[node_id]
+        node_files, node_dirs = sources[node_id]
+        text = dag.text_input(node)
+        is_start = not parents.get(node_id)
+        if not (is_start or node_files or node_dirs or text):
+            continue
+        cloud = transfers.is_cloud_node(node)
+        blocks.append({
+            "node_id": node_id,
+            "name": node.get("name") or node_id,
+            "is_start": is_start,
+            "executor": "cloud" if cloud else "local",
+            "provider": transfers.provider_for(node) if cloud else None,
+            "device_name": None if cloud else device_names.get(node.get("worker_id")),
+            "files": [
+                {
+                    "id": v,
+                    "name": files[v].original_name if v in files else f"파일 #{v}",
+                    "size_bytes": files[v].size_bytes if v in files else None,
+                }
+                for v in node_files
+            ],
+            "directories": [
+                {
+                    "id": v,
+                    "alias": directories[v].alias if v in directories else f"디렉터리 #{v}",
+                    "device_name": device_names.get(directories[v].device_id) if v in directories else None,
+                }
+                for v in node_dirs
+            ],
+            "text": text,
+            "allow_no_input": bool(is_start and node.get("allow_no_input") and not (node_files or node_dirs or text)),
+        })
+    return {
+        "blocks": blocks,
+        "totals": {
+            "files": len(file_ids),
+            "bytes": sum(files[v].size_bytes for v in file_ids if v in files),
+            "directories": len(directory_ids),
+            "texts": sum(1 for block in blocks if block["text"]),
+        },
+    }
 
 
 @router.post("/services/{service_id}/executions/preview")
@@ -106,7 +198,13 @@ def preview_execution(
         transfers.issue_consent(db, user.id, service.id, graph, body.run_prompt, items)
         if items and validation["valid"] else None
     )
-    return {"requires_consent": bool(items), "consent_token": token, "transfers": items, "validation": validation}
+    return {
+        "requires_consent": bool(items),
+        "consent_token": token,
+        "transfers": items,
+        "validation": validation,
+        "review": input_review(db, user.id, graph),
+    }
 
 
 @router.post(

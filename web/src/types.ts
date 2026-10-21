@@ -19,6 +19,10 @@ export interface AgentNode {
   needs_file_hint?: boolean
   final_manual?: boolean
   needs_file_manual?: boolean
+  // 블록에 직접 넣는 텍스트 데이터(켜져 있을 때만 쓰임)와 시작 블록의 '입력 없이 실행 허용'
+  text_input_enabled?: boolean
+  text_input?: string
+  allow_no_input?: boolean
   position?: { x: number; y: number } | null
 }
 
@@ -83,7 +87,6 @@ export interface ValidationIssue {
   severity: 'error' | 'warning'
   message: string
   node_ids: string[]
-  resolvable_by_run_prompt?: boolean
 }
 
 export interface ValidationResult {
@@ -163,12 +166,32 @@ export interface UploadedFile {
 }
 
 export interface RunInputRecord {
-  kind: 'slot' | 'node'
+  kind: 'slot' | 'node' | 'text'
   id: string
   label: string
   node_ids: string[]
   files: { id: number; name: string }[]
   directories: { id: number; alias: string }[]
+  text?: string
+}
+
+/** 실행 전 확인 창의 블록별 직접 입력 (POST /executions/preview의 review) */
+export interface InputReviewBlock {
+  node_id: string
+  name: string
+  is_start: boolean
+  executor: 'local' | 'cloud'
+  provider: CloudProvider | null
+  device_name: string | null
+  files: { id: number; name: string; size_bytes: number | null }[]
+  directories: { id: number; alias: string; device_name: string | null }[]
+  text: string
+  allow_no_input: boolean
+}
+
+export interface InputReview {
+  blocks: InputReviewBlock[]
+  totals: { files: number; bytes: number; directories: number; texts: number }
 }
 
 export interface Task {
