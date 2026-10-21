@@ -524,6 +524,10 @@ tr.clickable:hover { background: #f8fafc; }
 /* 최종 블록·파일 필요 자동 지정 */
 .flag-toggle { display: grid; gap: 2px; margin-top: 6px; }
 .flag-toggle .toggle-row { margin-top: 4px; }
+.text-input-setting { display: grid; gap: 4px; margin-top: 6px; }
+.text-input-setting .toggle-row { margin-top: 4px; }
+.text-input-setting .toggle-row input { width: auto; }
+.text-input-setting textarea { margin-top: 4px; }
 .flag-source { margin-left: auto; padding: 1px 7px; border-radius: 999px; font-size: 10px; font-weight: 800; }
 .flag-source.auto { background: #eef2ff; color: #4338ca; }
 .flag-source.manual { background: #fff7ed; color: #9a3412; }

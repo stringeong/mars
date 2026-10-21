@@ -204,6 +204,13 @@ def populate_task_context(db: Session, task: models.TaskRecord) -> None:
     goal = (execution.graph_snapshot or {}).get("goal")
     if goal and not parents:
         parts.append(f"[서비스 목표]\n{goal}")
+    node = next(
+        (item for item in (execution.graph_snapshot or {}).get("nodes", []) if item.get("id") == task.node_id),
+        {},
+    )
+    text_input = node.get("text_input")
+    if node.get("text_input_enabled") and isinstance(text_input, str) and text_input:
+        parts.append(f"[텍스트 데이터 입력]\n{text_input}")
     if execution.run_prompt:
         parts.append(f"[사용자 실행 요청]\n{execution.run_prompt}")
     if parents:

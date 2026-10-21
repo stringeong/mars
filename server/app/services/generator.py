@@ -168,6 +168,8 @@ def _agent_node(node: dict, index: int) -> dict:
         "final_manual": bool(node.get("final_manual")),
         "needs_file_manual": bool(node.get("needs_file_manual")),
         "input_slot_ids": list(node.get("input_slot_ids") or []),
+        "text_input_enabled": bool(node.get("text_input_enabled")),
+        "text_input": str(node.get("text_input") or ""),
         **({"position": node["position"]} if node.get("position") is not None else {}),
     }
 
@@ -439,6 +441,8 @@ async def revise_workflow(graph: dict, instruction: str) -> dict:
             "final_manual": bool(prev.get("final_manual")),
             "needs_file_manual": bool(prev.get("needs_file_manual")),
             "input_slot_ids": prev.get("input_slot_ids", []),
+            "text_input_enabled": bool(prev.get("text_input_enabled")),
+            "text_input": str(prev.get("text_input") or ""),
             "position": prev.get("position"),
         })
     from . import dag

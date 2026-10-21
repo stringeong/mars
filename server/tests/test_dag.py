@@ -260,6 +260,11 @@ class TestInspectGraph:
         assert result["errors"][0]["resolvable_by_run_prompt"] is True
         assert dag.inspect_graph(graph, run_prompt="이번 달 분석")["valid"] is True
 
+    def test_enabled_text_input_allows_root_to_run_even_when_blank(self):
+        graph = graph_of(["a", "b"], [("a", "b")])
+        graph["nodes"][0].update(text_input_enabled=True, text_input="")
+        assert dag.inspect_graph(graph)["valid"] is True
+
     def test_multiple_sinks_without_final_is_error(self):
         graph = _with_file(graph_of(["a", "b", "c"], [("a", "b"), ("a", "c")]), "a")
         assert ("final_missing", ("b", "c")) in _codes(dag.inspect_graph(graph))

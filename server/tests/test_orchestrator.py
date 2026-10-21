@@ -294,6 +294,20 @@ class TestCompleteTask:
         orchestrator.populate_task_context(db, tasks["b"])
         assert "서비스 목표" not in tasks["b"].input_context
 
+    def test_node_text_input_is_given_only_to_its_block(
+        self, db, make_user, make_execution
+    ):
+        graph = graph_of(["a", "b"], [("a", "b")])
+        graph["nodes"][0].update(text_input_enabled=True, text_input="직접 입력한 자료")
+        execution, tasks = self._start(db, make_user, make_execution, graph)
+
+        orchestrator.populate_task_context(db, tasks["a"])
+        assert "[텍스트 데이터 입력]\n직접 입력한 자료" in tasks["a"].input_context
+
+        self._finish(db, tasks["a"], output="a 결과")
+        orchestrator.populate_task_context(db, tasks["b"])
+        assert "텍스트 데이터 입력" not in tasks["b"].input_context
+
     def test_final_mark_limits_result_to_final_block(
         self, db, make_user, make_execution
     ):

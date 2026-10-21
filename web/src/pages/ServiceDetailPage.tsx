@@ -278,6 +278,16 @@ export default function ServiceDetailPage() {
     updateAgent(patch)
   }
 
+  function setNeedsFile(checked: boolean) {
+    if (!selectedAgent) return
+    const isStartBlock = !edges.some((edge) => edge.target === selectedAgent.id)
+    changeFlags({
+      needs_file: checked,
+      needs_file_manual: true,
+      ...(!checked && isStartBlock ? { text_input_enabled: true } : {}),
+    })
+  }
+
   // 패널의 연결 목록에서 지울 때. 캔버스에서 지울 때는 onBeforeDelete가 기록을 남긴다.
   function removeConnection(edgeId: string) {
     pushHistory()
@@ -468,7 +478,12 @@ export default function ServiceDetailPage() {
           {selectedIssues.length > 0 && <ul className="validation-list node-issues">{selectedIssues.map((issue, index) => <li key={`${issue.code}-${index}`} className={issue.severity}>{issue.message}</li>)}</ul>}
           <label>이름</label><input value={selectedAgent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
           <FlagToggle label="최종 블록 (출력이 실행 결과가 됨)" checked={!!selectedAgent.final} explanation={flagReasons[selectedAgent.id]?.final} onChange={setFinal} onReset={() => changeFlags({ final_manual: false })} />
-          <FlagToggle label="사용자 파일 필요" checked={!!selectedAgent.needs_file} explanation={flagReasons[selectedAgent.id]?.needsFile} onChange={(checked) => changeFlags({ needs_file: checked, needs_file_manual: true })} onReset={() => changeFlags({ needs_file_manual: false })} />
+          <FlagToggle label="사용자 파일 필요" checked={!!selectedAgent.needs_file} explanation={flagReasons[selectedAgent.id]?.needsFile} onChange={setNeedsFile} onReset={() => changeFlags({ needs_file_manual: false })} />
+          <div className="text-input-setting">
+            <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.text_input_enabled} onChange={(event) => updateAgent({ text_input_enabled: event.target.checked })} />텍스트 데이터 입력</label>
+            <small className="flag-reason">활성화하면 내용이 비어 있어도 이 블록을 실행할 수 있습니다.</small>
+            {selectedAgent.text_input_enabled && <textarea rows={4} value={selectedAgent.text_input ?? ''} onChange={(event) => updateAgent({ text_input: event.target.value })} placeholder="이 블록에 전달할 텍스트 데이터를 입력하세요. (선택)" />}
+          </div>
           <label>연결</label>
           <div className="connection-list">
             {([['incoming', '들어오는 연결', edges.filter((edge) => edge.target === selectedAgent.id)], ['outgoing', '나가는 연결', edges.filter((edge) => edge.source === selectedAgent.id)]] as const).map(([kind, title, list]) => <div className="connection-group" key={kind}>

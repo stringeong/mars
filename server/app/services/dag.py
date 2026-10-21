@@ -463,7 +463,9 @@ def inspect_graph(graph: dict, *, run_prompt: str = "", has_model=None) -> dict:
     for node in agents:
         node_id = node["id"]
         file_ids, directory_ids = input_sources(graph, node)
-        has_input = bool(file_ids or directory_ids)
+        # 텍스트 입력은 사용자가 명시적으로 활성화한 것 자체를 입력으로 본다.
+        # 따라서 내용이 빈 문자열이어도 시작 블록을 실행할 수 있다.
+        has_input = bool(file_ids or directory_ids or node.get("text_input_enabled"))
         if node.get("needs_file") and not has_input:
             add("error", "missing_file", f"'{names[node_id]}' 블록에 필요한 파일이 비어 있습니다.", [node_id])
         elif not has_input and not parents.get(node_id) and not run_prompt.strip():
