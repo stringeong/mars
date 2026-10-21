@@ -13,9 +13,11 @@ export function setToken(token: string | null) {
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  detail: unknown
+  constructor(status: number, message: string, detail?: unknown) {
     super(message)
     this.status = status
+    this.detail = detail
   }
 }
 
@@ -33,13 +35,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   if (resp.status === 204) return undefined as T
   const data = await resp.json().catch(() => null)
   if (!resp.ok) {
+    // 구성 검사처럼 구조화된 detail은 {message, ...} 형태로 온다
     const detail =
-      typeof data?.detail === 'string' ? data.detail : JSON.stringify(data?.detail ?? resp.statusText)
+      typeof data?.detail === 'string' ? data.detail
+        : typeof data?.detail?.message === 'string' ? data.detail.message
+          : JSON.stringify(data?.detail ?? resp.statusText)
     if (resp.status === 401 && !path.startsWith('/auth')) {
       setToken(null)
       window.location.href = '/login'
     }
-    throw new ApiError(resp.status, detail)
+    throw new ApiError(resp.status, detail, data?.detail)
   }
   return data as T
 }

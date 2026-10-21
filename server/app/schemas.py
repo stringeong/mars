@@ -146,6 +146,17 @@ class AgentNode(BaseModel):
     worker_id: int | None = None
     directory_ids: list[int] = Field(default_factory=list)
     uploaded_file_ids: list[int] = Field(default_factory=list)
+    # 실행 결과를 내는 블록. 워크플로우에 하나만 둔다.
+    final: bool = False
+    # 사용자 파일을 직접 읽어야 하는 블록과, 그 파일이 들어갈 슬롯
+    needs_file: bool = False
+    input_slot_ids: list[str] = Field(default_factory=list)
+    # 생성기가 제안한 값과 사용자가 직접 지정했는지. 자동 규칙(dag.apply_auto_flags)은
+    # 직접 지정한 값을 덮어쓰지 않는다.
+    final_hint: bool = False
+    needs_file_hint: bool = False
+    final_manual: bool = False
+    needs_file_manual: bool = False
     position: dict | None = None
 
 
@@ -172,13 +183,35 @@ class Edge(BaseModel):
 
 
 
+class InputSlot(BaseModel):
+    """사용자가 올릴 파일 하나. 여러 블록이 같은 슬롯을 함께 읽을 수 있다."""
+
+    id: str
+    description: str = ""
+    format: str = ""
+    file_ids: list[int] = Field(default_factory=list)
+    directory_ids: list[int] = Field(default_factory=list)
+
+
 class Graph(BaseModel):
     nodes: list[WorkflowNode] = Field(default_factory=list)
     edges: list[Edge] = Field(default_factory=list)
+    input_slots: list[InputSlot] = Field(default_factory=list)
+    # 기본 워크플로우의 생성 프롬프트. 시작 블록 컨텍스트로 전달된다.
+    goal: str = ""
 
 
 class ServiceGenerate(BaseModel):
     prompt: str = Field(min_length=5, description="만들고자 하는 서비스를 설명하는 자연어")
+    # 워크플로우를 생성할 LLM. 기본값은 서버 로컬 LLM(Ollama)의 기본 모델.
+    location: Literal["local", "cloud"] = "local"
+    provider: Literal["ollama", "openai", "anthropic", "gemini"] = "ollama"
+    model: str = Field(default="", max_length=128)
+    # 외부 LLM으로 생성 프롬프트가 전송된다는 안내를 사용자가 확인했는지
+    external_transfer_ack: bool = False
+    # 생성 실패 후 사용자가 규칙 기반 기본 워크플로우를 고른 경우
+    use_fallback: bool = False
+    fallback_reason: str = Field(default="", max_length=500)
 
 
 class ServiceRevise(BaseModel):
@@ -191,6 +224,13 @@ class ServiceUpdate(BaseModel):
     graph: Graph | None = None
 
 
+class ServiceValidate(BaseModel):
+    """저장 전 편집 중인 그래프를 검사할 때 사용한다. graph가 없으면 저장된 그래프를 검사한다."""
+
+    graph: Graph | None = None
+    run_prompt: str = ""
+
+
 class ServiceOut(BaseModel):
     id: int
     name: str
@@ -198,6 +238,8 @@ class ServiceOut(BaseModel):
     graph: dict
     created_at: UTCDateTime
     updated_at: UTCDateTime
+    generation_info: dict | None = None
+    validation: dict | None = None
 
     model_config = {"from_attributes": True}
 
@@ -205,13 +247,25 @@ class ServiceOut(BaseModel):
 # ---------- Execution ----------
 
 
+class RunInputs(BaseModel):
+    """이번 실행에만 쓰는 입력 파일. 저장된 워크플로우의 기본값을 덮어쓴다."""
+
+    slots: dict[str, list[int]] = Field(default_factory=dict)
+    # 슬롯 없이 블록에 직접 파일을 붙인 이전 버전 워크플로우용
+    nodes: dict[str, list[int]] = Field(default_factory=dict)
+
+
 class ExecutionCreate(BaseModel):
-    run_prompt: str = Field(min_length=1, description="이번 실행에 대한 지시")
+    run_prompt: str = Field(default="", description="이번 실행에 대한 추가 지시(선택)")
+    input_files: RunInputs = Field(default_factory=RunInputs)
     consent_token: str | None = None
+    # 구성 검사 경고를 사용자가 확인했는지
+    acknowledge_warnings: bool = False
 
 
 class ExecutionPreview(BaseModel):
-    run_prompt: str = Field(min_length=1)
+    run_prompt: str = ""
+    input_files: RunInputs = Field(default_factory=RunInputs)
 
 
 class ProviderCredentialUpdate(BaseModel):
@@ -251,6 +305,11 @@ class TaskOut(BaseModel):
     error: str | None
     started_at: UTCDateTime | None
     finished_at: UTCDateTime | None
+    # 실행 타임라인용: DAG 깊이(0부터), 배정 워커 이름, 실행 위치
+    depth: int | None = None
+    assigned_device_name: str | None = None
+    executor: str = "local"
+    provider: str | None = None
 
     model_config = {"from_attributes": True}
 
@@ -264,8 +323,14 @@ class ExecutionOut(BaseModel):
     error: str | None
     created_at: UTCDateTime
     finished_at: UTCDateTime | None
+    generation_info: dict | None = None
+    input_files: list[dict] | None = None
     progress: float = 0.0
     tasks: list[TaskOut] = Field(default_factory=list)
+    # 실행 스냅샷의 DAG 단계(같은 단계는 동시에 실행 가능)와 블록 간 연결
+    stages: list[list[str]] = Field(default_factory=list)
+    edges: list[dict] = Field(default_factory=list)
+    final_node_ids: list[str] = Field(default_factory=list)
 
     model_config = {"from_attributes": True}
 
@@ -278,6 +343,8 @@ class ExecutionListItem(BaseModel):
     status: str
     created_at: UTCDateTime
     finished_at: UTCDateTime | None
+    generation_info: dict | None = None
+    input_files: list[dict] | None = None
 
     model_config = {"from_attributes": True}
 

@@ -242,6 +242,8 @@ class Service(Base):
     # {"nodes": [{"id","name","role_prompt","model","directory_ids",...}],
     #  "edges": [{"source","target"}]}
     graph: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 어떤 모델로 생성했는지 {"source": "llm"|"fallback", "location", "provider", "model", ...}
+    generation_info: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
@@ -262,6 +264,10 @@ class Execution(Base):
     status: Mapped[str] = mapped_column(String(16), default="pending")
     # 실행 시점의 그래프 스냅샷 (이후 서비스가 수정돼도 이력은 보존)
     graph_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 실행 시점 서비스의 생성 모델 정보 (이력 보존용 복사본)
+    generation_info: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 이번 실행에 쓴 입력 파일 [{"kind": "slot"|"node", "id", "label", "node_ids", "files", "directories"}]
+    input_files: Mapped[list | None] = mapped_column(JSON, nullable=True)
     result: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -283,6 +283,29 @@ class TestCompleteTask:
             "## 에이전트 b\n\nb 결과\n\n---\n\n## 에이전트 c\n\nc 결과"
         )
 
+    def test_goal_is_given_to_root_blocks_only(
+        self, db, make_user, make_execution
+    ):
+        graph = {**LINEAR, "goal": "이력서 첨삭"}
+        execution, tasks = self._start(db, make_user, make_execution, graph)
+        orchestrator.populate_task_context(db, tasks["a"])
+        assert tasks["a"].input_context.startswith("[서비스 목표]\n이력서 첨삭")
+        self._finish(db, tasks["a"], output="a 결과")
+        orchestrator.populate_task_context(db, tasks["b"])
+        assert "서비스 목표" not in tasks["b"].input_context
+
+    def test_final_mark_limits_result_to_final_block(
+        self, db, make_user, make_execution
+    ):
+        graph = graph_of(["a", "b", "c"], [("a", "b"), ("a", "c")])
+        graph["nodes"][2]["final"] = True
+        execution, tasks = self._start(db, make_user, make_execution, graph)
+        for nid in ("a", "b", "c"):
+            self._finish(db, tasks[nid], output=f"{nid} 결과")
+
+        assert execution.status == "completed"
+        assert execution.result == "## 에이전트 c\n\nc 결과"
+
     def test_failure_fails_execution_and_cancels_pending(
         self, db, make_user, make_execution
     ):

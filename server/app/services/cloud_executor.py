@@ -14,8 +14,8 @@ def _node_for(execution: models.Execution, node_id: str) -> dict:
     return next((n for n in execution.graph_snapshot.get("nodes", []) if n.get("id") == node_id), {})
 
 
-def _call(provider: str, key: str, model: str, system: str, user: str) -> tuple[str, dict]:
-    with httpx.Client(timeout=TIMEOUT) as client:
+def _call(provider: str, key: str, model: str, system: str, user: str, timeout: httpx.Timeout = TIMEOUT) -> tuple[str, dict]:
+    with httpx.Client(timeout=timeout) as client:
         if provider == "openai":
             response = client.post("https://api.openai.com/v1/responses", headers={"Authorization": f"Bearer {key}"}, json={"model": model, "instructions": system, "input": user})
             response.raise_for_status()

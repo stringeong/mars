@@ -9,6 +9,14 @@ export interface AgentNode {
   worker_id?: number | null
   directory_ids?: number[]
   uploaded_file_ids?: number[]
+  final?: boolean
+  needs_file?: boolean
+  input_slot_ids?: string[]
+  // 생성기가 제안한 값과 사용자가 직접 지정했는지 (자동 규칙은 직접 지정한 값을 덮어쓰지 않는다)
+  final_hint?: boolean
+  needs_file_hint?: boolean
+  final_manual?: boolean
+  needs_file_manual?: boolean
   position?: { x: number; y: number } | null
 }
 
@@ -29,9 +37,61 @@ export interface GraphEdge {
   relation: 'workflow' | 'directory'
 }
 
+export interface InputSlot {
+  id: string
+  description: string
+  format: string
+  file_ids: number[]
+  directory_ids: number[]
+}
+
 export interface Graph {
   nodes: WorkflowNode[]
   edges: GraphEdge[]
+  input_slots?: InputSlot[]
+  goal?: string
+}
+
+export type CloudProvider = 'openai' | 'anthropic' | 'gemini'
+
+export interface GenerationInfo {
+  source: 'llm' | 'fallback'
+  location: 'local' | 'cloud' | null
+  provider: string | null
+  model: string | null
+  generated_at?: string
+  fallback_reason?: string
+}
+
+export interface GenerationError {
+  stage: 'connection' | 'parse' | 'validation'
+  message: string
+  location: 'local' | 'cloud'
+  provider: string
+  model: string
+}
+
+export interface GeneratorModels {
+  local: { available: boolean; models: string[]; default_model: string; error: string | null }
+  cloud: { provider: CloudProvider; configured: boolean; status: string; default_model: string; models: string[] }[]
+}
+
+export interface ValidationIssue {
+  code: string
+  severity: 'error' | 'warning'
+  message: string
+  node_ids: string[]
+  resolvable_by_run_prompt?: boolean
+}
+
+export interface ValidationResult {
+  valid: boolean
+  order: string[]
+  errors: ValidationIssue[]
+  warnings: ValidationIssue[]
+  stages: string[][]
+  final_node_ids: string[]
+  reason?: string | null
 }
 
 export interface Service {
@@ -41,6 +101,8 @@ export interface Service {
   graph: Graph
   created_at: string
   updated_at: string
+  generation_info?: GenerationInfo | null
+  validation?: ValidationResult | null
 }
 
 export interface DeviceModels {
@@ -98,6 +160,15 @@ export interface UploadedFile {
   created_at: string
 }
 
+export interface RunInputRecord {
+  kind: 'slot' | 'node'
+  id: string
+  label: string
+  node_ids: string[]
+  files: { id: number; name: string }[]
+  directories: { id: number; alias: string }[]
+}
+
 export interface Task {
   id: number
   node_id: string
@@ -108,6 +179,10 @@ export interface Task {
   error: string | null
   started_at: string | null
   finished_at: string | null
+  depth?: number | null
+  assigned_device_name?: string | null
+  executor?: 'local' | 'cloud'
+  provider?: string | null
 }
 
 export interface Execution {
@@ -119,8 +194,13 @@ export interface Execution {
   error: string | null
   created_at: string
   finished_at: string | null
+  generation_info?: GenerationInfo | null
+  input_files?: RunInputRecord[] | null
   progress: number
   tasks: Task[]
+  stages?: string[][]
+  edges?: { source: string; target: string }[]
+  final_node_ids?: string[]
 }
 
 export interface ExecutionListItem {
@@ -131,4 +211,6 @@ export interface ExecutionListItem {
   status: string
   created_at: string
   finished_at: string | null
+  generation_info?: GenerationInfo | null
+  input_files?: RunInputRecord[] | null
 }
