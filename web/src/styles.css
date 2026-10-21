@@ -544,6 +544,13 @@ tr.clickable:hover { background: #f8fafc; }
 .connection-item button { flex: none; width: 22px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: #fff; color: var(--danger); font-weight: 700; cursor: pointer; }
 .connection-item button:hover { border-color: var(--danger); }
 
+/* 워커로 워크플로우 생성: 진행 안내와 취소 */
+.worker-generation-progress { display: flex; align-items: center; gap: 10px; margin-top: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fafbfe; font-size: 13px; }
+.worker-generation-progress .btn { margin-left: auto; }
+.worker-generation-spinner { flex: none; width: 14px; height: 14px; border: 2px solid #d4d4d8; border-top-color: #52525b; border-radius: 50%; animation: worker-generation-spin .8s linear infinite; }
+@keyframes worker-generation-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .worker-generation-spinner { animation: none; } }
+
 /* ==========================================================================
    단순한 화면 톤 — 대화형 앱(ChatGPT·Claude)처럼: 흰 바탕, 밝은 회색 사이드바,
    검은 강조 버튼 하나, 그라데이션·그림자 없음. 이 블록 아래만 지우면 이전 모습으로 돌아간다.

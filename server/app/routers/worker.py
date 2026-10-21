@@ -14,7 +14,7 @@ from .. import models, schemas
 from ..database import get_db
 from ..config import UPLOAD_DIR
 from ..security import hash_device_key
-from ..services import directory_access, orchestrator
+from ..services import directory_access, generation_jobs, orchestrator, worker_queue
 
 router = APIRouter(prefix="/worker", tags=["worker"])
 
@@ -105,18 +105,10 @@ def delete_own_device(
     db.commit()
 
 
-@router.post("/tasks/next", response_model=schemas.WorkerTaskOut | None)
-def next_task(
-    response: Response,
-    device: models.Device = Depends(get_device),
-    db: Session = Depends(get_db),
-):
-    device.last_heartbeat = models.utcnow()
-    task = orchestrator.claim_next_task(db, device)
-    if task is None:
-        db.commit()
-        response.status_code = 204
-        return None
+def _execution_payload(
+    db: Session, device: models.Device, task: models.TaskRecord,
+) -> schemas.WorkerTaskOut | None:
+    """기존 실행 TASK를 Worker 프로토콜 payload로 변환한다."""
     execution = db.get(models.Execution, task.execution_id)
     directory_ids = task.directory_ids or []
     directory_paths = directory_access.local_paths_for_device(
@@ -127,8 +119,6 @@ def next_task(
         task.status = "ready"
         task.assigned_device_id = None
         task.started_at = None
-        db.commit()
-        response.status_code = 204
         return None
     agent = next(
         (node for node in (execution.graph_snapshot or {}).get("nodes", []) if node.get("id") == task.node_id),
@@ -146,7 +136,7 @@ def next_task(
         .all()
         if uploaded_file_ids else []
     )
-    payload = schemas.WorkerTaskOut(
+    return schemas.WorkerTaskOut(
         task_id=task.id,
         execution_id=task.execution_id,
         agent_name=task.agent_name,
@@ -160,6 +150,52 @@ def next_task(
         input_context=task.input_context,
         run_prompt=execution.run_prompt if execution else "",
     )
+
+
+@router.post("/work/next", response_model=schemas.WorkerWorkOut | None)
+def next_work(
+    response: Response,
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    """일반 실행과 워크플로우 생성 중 서버 정책으로 선택한 작업 하나를 반환한다."""
+    device.last_heartbeat = models.utcnow()
+    claimed = worker_queue.claim_next(db, device)
+    if claimed is None:
+        db.commit()
+        response.status_code = 204
+        return None
+    if claimed.kind == "generation":
+        result = schemas.WorkerWorkOut(kind="generation", payload=claimed.item)
+    else:
+        payload = _execution_payload(db, device, claimed.item)
+        if payload is None:
+            db.commit()
+            response.status_code = 204
+            return None
+        result = schemas.WorkerWorkOut(kind="execution", payload=payload.model_dump())
+    db.commit()
+    return result
+
+
+@router.post("/tasks/next", response_model=schemas.WorkerTaskOut | None)
+def next_task(
+    response: Response,
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    """구버전 Worker 호환용 실행 TASK endpoint."""
+    device.last_heartbeat = models.utcnow()
+    task = orchestrator.claim_next_task(db, device)
+    if task is None:
+        db.commit()
+        response.status_code = 204
+        return None
+    payload = _execution_payload(db, device, task)
+    if payload is None:
+        db.commit()
+        response.status_code = 204
+        return None
     db.commit()
     return payload
 
@@ -235,6 +271,43 @@ def submit_directory_inspection(
     device.last_heartbeat = models.utcnow()
     db.commit()
     return {"ok": True}
+
+
+@router.post("/generations/next")
+def next_generation(
+    response: Response,
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    """사용자가 이 Worker에 맡긴 워크플로우 생성 요청 (서버 GPU 대신 Worker의 Ollama 사용)."""
+    job = generation_jobs.claim_next(db, device)
+    device.last_heartbeat = models.utcnow()
+    db.commit()
+    if job is None:
+        response.status_code = 204
+        return None
+    return job
+
+
+@router.post("/generations/{job_id}/result")
+def submit_generation(
+    job_id: int,
+    body: dict,
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    job = db.get(models.GenerationJob, job_id)
+    if job is None or job.device_id != device.id:
+        raise HTTPException(404, "할당된 생성 요청이 아닙니다.")
+    if job.status != "running":
+        # 사용자가 취소했거나 시간이 지나 실패로 정리된 요청
+        raise HTTPException(409, "이미 종료된 생성 요청입니다.")
+    generation_jobs.submit_result(
+        db, job, device, str(body.get("content") or ""), str(body.get("error") or ""),
+    )
+    device.last_heartbeat = models.utcnow()
+    db.commit()
+    return {"ok": True, "status": job.status}
 
 
 @router.post("/tasks/{task_id}/result")

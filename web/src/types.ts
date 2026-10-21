@@ -58,9 +58,11 @@ export type CloudProvider = 'openai' | 'anthropic' | 'gemini'
 
 export interface GenerationInfo {
   source: 'llm' | 'fallback'
-  location: 'local' | 'cloud' | null
+  location: 'local' | 'cloud' | 'worker' | null
   provider: string | null
   model: string | null
+  // 워커로 생성한 경우 그 워커
+  device_name?: string
   generated_at?: string
   fallback_reason?: string
 }
@@ -68,14 +70,41 @@ export interface GenerationInfo {
 export interface GenerationError {
   stage: 'connection' | 'parse' | 'validation'
   message: string
-  location: 'local' | 'cloud'
+  location: 'local' | 'cloud' | 'worker'
   provider: string
   model: string
+  device_name?: string
+}
+
+/** 생성에 쓸 수 있는 사용자 워커 (서버 GPU 대신 그 기기의 Ollama로 생성) */
+export interface WorkerGenerator {
+  device_id: number
+  name: string
+  online: boolean
+  models: string[]
+  default_model: string
 }
 
 export interface GeneratorModels {
   local: { available: boolean; models: string[]; default_model: string; error: string | null }
   cloud: { provider: CloudProvider; configured: boolean; status: string; default_model: string; models: string[] }[]
+  workers: WorkerGenerator[]
+}
+
+/** 워커에 맡긴 워크플로우 생성 요청 */
+export interface GenerationJob {
+  id: number
+  status: 'pending' | 'running' | 'done' | 'failed' | 'canceled'
+  attempt: number
+  device_id: number
+  device_name: string | null
+  model: string
+  created_at: string
+  claimed_at: string | null
+  finished_at: string | null
+  service_id: number | null
+  generation_error: GenerationError | null
+  worker_busy: boolean
 }
 
 export interface ValidationIssue {

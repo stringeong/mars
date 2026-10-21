@@ -4,13 +4,16 @@
 """
 
 import copy
+from datetime import timedelta
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app import models
 from app.database import get_db
 from app.main import app
 from tests.conftest import LINEAR
+from tests.test_generator import CYCLIC_LLM_REPLY, VALID_LLM_REPLY
 
 
 GENERATE_CALLS: list = []
@@ -575,6 +578,194 @@ class TestRunInputsAndReuse:
         assert copy_["generation_info"] == service["generation_info"]
         intruder = signup_and_login(client, username="user2", email="u2@example.com")
         assert client.post(f"/services/{service['id']}/duplicate", headers=intruder).status_code == 404
+
+
+class TestWorkerGeneration:
+    """서버 GPU 대신 사용자의 Worker(그 기기의 Ollama)로 워크플로우를 생성한다."""
+
+    def _worker(self, client, auth, name="맥북", installed=("qwen3:4b", "gemma3:4b")):
+        key = register_device(client, auth, name)
+        specs = {"models": list(installed), "default_model": "qwen3:4b"}
+        assert client.post("/worker/heartbeat", json={"specs": specs}, headers=key).status_code == 200
+        return key
+
+    def _device_id(self, client, auth, name="맥북"):
+        return next(d["id"] for d in client.get("/devices", headers=auth).json() if d["name"] == name)
+
+    def _queue(self, client, auth, device_id, **extra):
+        body = {"prompt": "문서 요약 서비스 만들기", "device_id": device_id, **extra}
+        return client.post("/services/generation-jobs", json=body, headers=auth)
+
+    def _claim(self, client, key):
+        r = client.post("/worker/generations/next", headers=key)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def test_generator_models_lists_online_workers_first(self, client, monkeypatch):
+        async def fake_local():
+            return {"available": False, "models": [], "default_model": "gemma3:4b", "error": "없음"}
+
+        monkeypatch.setattr("app.routers.services.list_local_models", fake_local)
+        auth = signup_and_login(client)
+        register_device(client, auth, "꺼진 PC")
+        self._worker(client, auth)
+        workers = client.get("/services/generator-models", headers=auth).json()["workers"]
+        assert [(w["name"], w["online"]) for w in workers] == [("맥북", True), ("꺼진 PC", False)]
+        assert workers[0]["models"] == ["gemma3:4b", "qwen3:4b"] and workers[0]["default_model"] == "qwen3:4b"
+
+    def test_worker_generates_and_workflow_is_saved(self, client):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        r = self._queue(client, auth, self._device_id(client, auth))
+        assert r.status_code == 202, r.text
+        queued = r.json()
+        assert (queued["status"], queued["model"], queued["device_name"]) == ("pending", "qwen3:4b", "맥북")
+
+        job = self._claim(client, key)
+        assert (job["job_id"], job["model"], job["prompt"], job["temperature"]) == (queued["id"], "qwen3:4b", "문서 요약 서비스 만들기", 0.3)
+        assert "DAG" in job["system"]
+        assert client.get(f"/services/generation-jobs/{queued['id']}", headers=auth).json()["status"] == "running"
+
+        r = client.post(f"/worker/generations/{job['job_id']}/result", json={"content": VALID_LLM_REPLY}, headers=key)
+        assert r.json() == {"ok": True, "status": "done"}
+        done = client.get(f"/services/generation-jobs/{queued['id']}", headers=auth).json()
+        assert done["status"] == "done" and done["generation_error"] is None
+        service = client.get(f"/services/{done['service_id']}", headers=auth).json()
+        assert service["name"] == "요약 서비스"
+        info = service["generation_info"]
+        assert (info["location"], info["provider"], info["model"], info["device_name"]) == ("worker", "ollama", "qwen3:4b", "맥북")
+        # 처리한 요청은 다시 가져가지 않는다
+        assert client.post("/worker/generations/next", headers=key).status_code == 204
+
+    def test_unreadable_reply_is_asked_again_then_reported(self, client):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        job_id = self._queue(client, auth, self._device_id(client, auth), model="gemma3:4b").json()["id"]
+
+        first = self._claim(client, key)
+        assert client.post(f"/worker/generations/{job_id}/result", json={"content": "JSON 아님"}, headers=key).json()["status"] == "pending"
+        second = self._claim(client, key)
+        assert (first["temperature"], second["temperature"], second["model"]) == (0.3, 0.1, "gemma3:4b")
+        client.post(f"/worker/generations/{job_id}/result", json={"content": CYCLIC_LLM_REPLY}, headers=key)
+
+        failed = client.get(f"/services/generation-jobs/{job_id}", headers=auth).json()
+        assert (failed["status"], failed["attempt"]) == ("failed", 2)
+        error = failed["generation_error"]
+        assert (error["stage"], error["location"], error["model"], error["device_name"]) == ("validation", "worker", "gemma3:4b", "맥북")
+        assert client.get("/services", headers=auth).json() == []
+
+    def test_worker_model_error_is_reported(self, client):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        job_id = self._queue(client, auth, self._device_id(client, auth)).json()["id"]
+        self._claim(client, key)
+        client.post(f"/worker/generations/{job_id}/result", json={"error": "Ollama에 연결할 수 없음"}, headers=key)
+        error = client.get(f"/services/generation-jobs/{job_id}", headers=auth).json()["generation_error"]
+        assert error["stage"] == "connection" and "맥북" in error["message"] and "Ollama에 연결할 수 없음" in error["message"]
+
+    def test_only_own_online_worker_with_the_model(self, client):
+        auth = signup_and_login(client)
+        self._worker(client, auth)
+        register_device(client, auth, "꺼진 PC")
+        assert self._queue(client, auth, self._device_id(client, auth, "꺼진 PC")).status_code == 409
+        assert self._queue(client, auth, self._device_id(client, auth), model="llama3:70b").status_code == 422
+        intruder = signup_and_login(client, username="user2", email="u2@example.com")
+        assert self._queue(client, intruder, self._device_id(client, auth)).status_code == 404
+        job_id = self._queue(client, auth, self._device_id(client, auth)).json()["id"]
+        assert client.get(f"/services/generation-jobs/{job_id}", headers=intruder).status_code == 404
+        # 다른 사용자의 Worker는 이 요청을 가져가지 못한다
+        other_key = self._worker(client, intruder, "남의 PC")
+        assert client.post("/worker/generations/next", headers=other_key).status_code == 204
+
+    def test_unclaimed_request_times_out(self, client, db):
+        auth = signup_and_login(client)
+        self._worker(client, auth)
+        job_id = self._queue(client, auth, self._device_id(client, auth)).json()["id"]
+        db.get(models.GenerationJob, job_id).queued_at -= timedelta(seconds=31)
+        db.commit()
+        failed = client.get(f"/services/generation-jobs/{job_id}", headers=auth).json()
+        assert failed["status"] == "failed"
+        assert failed["generation_error"]["stage"] == "connection" and "30초" in failed["generation_error"]["message"]
+
+    def test_busy_worker_gets_time_to_finish_its_task(self, client, db):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        service = create_service(client, auth)
+        assert client.post(
+            f"/services/{service['id']}/executions",
+            json={"run_prompt": "실행"},
+            headers=auth,
+        ).status_code == 201
+        assert client.post("/worker/tasks/next", headers=key).json()["agent_name"]  # 작업 실행 중
+
+        job_id = self._queue(client, auth, self._device_id(client, auth)).json()["id"]
+        db.get(models.GenerationJob, job_id).queued_at -= timedelta(minutes=2)
+        db.commit()
+        waiting = client.get(f"/services/generation-jobs/{job_id}", headers=auth).json()
+        assert (waiting["status"], waiting["worker_busy"]) == ("pending", True)
+        db.get(models.GenerationJob, job_id).queued_at -= timedelta(minutes=4)
+        db.commit()
+        failed = client.get(f"/services/generation-jobs/{job_id}", headers=auth).json()
+        assert failed["status"] == "failed" and "다른 작업" in failed["generation_error"]["message"]
+
+    def test_unified_queue_prefers_generation_and_labels_kind(self, client):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        service = create_service(client, auth)
+        assert client.post(
+            f"/services/{service['id']}/executions",
+            json={"run_prompt": "실행"},
+            headers=auth,
+        ).status_code == 201
+        generation_id = self._queue(
+            client, auth, self._device_id(client, auth),
+        ).json()["id"]
+
+        work = client.post("/worker/work/next", headers=key).json()
+        assert work["kind"] == "generation"
+        assert work["payload"]["job_id"] == generation_id
+        # 하나를 실행 중이면 같은 Worker에 다음 작업을 중복 할당하지 않는다.
+        assert client.post("/worker/work/next", headers=key).status_code == 204
+
+    def test_unified_queue_returns_execution_task(self, client):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        service = create_service(client, auth)
+        assert client.post(
+            f"/services/{service['id']}/executions",
+            json={"run_prompt": "실행"},
+            headers=auth,
+        ).status_code == 201
+
+        work = client.post("/worker/work/next", headers=key).json()
+        assert work["kind"] == "execution"
+        assert work["payload"]["agent_name"] == "에이전트 a"
+        assert work["payload"]["run_prompt"] == "실행"
+
+    def test_pending_generation_waits_for_running_generation(self, client, db):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        device_id = self._device_id(client, auth)
+        first_id = self._queue(client, auth, device_id).json()["id"]
+        second_id = self._queue(client, auth, device_id).json()["id"]
+
+        first = client.post("/worker/work/next", headers=key).json()
+        assert first["kind"] == "generation" and first["payload"]["job_id"] == first_id
+        db.get(models.GenerationJob, second_id).queued_at -= timedelta(minutes=2)
+        db.commit()
+
+        waiting = client.get(f"/services/generation-jobs/{second_id}", headers=auth).json()
+        assert (waiting["status"], waiting["worker_busy"]) == ("pending", True)
+
+    def test_cancel_ignores_late_reply(self, client):
+        auth = signup_and_login(client)
+        key = self._worker(client, auth)
+        job_id = self._queue(client, auth, self._device_id(client, auth)).json()["id"]
+        self._claim(client, key)
+        assert client.post(f"/services/generation-jobs/{job_id}/cancel", headers=auth).json()["status"] == "canceled"
+        r = client.post(f"/worker/generations/{job_id}/result", json={"content": VALID_LLM_REPLY}, headers=key)
+        assert r.status_code == 409
+        assert client.get("/services", headers=auth).json() == []
 
 
 class TestWorkerResultGuards:

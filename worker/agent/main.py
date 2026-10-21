@@ -229,6 +229,102 @@ def process_directory_inspection(server: str, headers: dict) -> bool:
     return True
 
 
+def process_generation_job(
+    server: str, headers: dict, config: dict, job: dict | None = None,
+) -> bool:
+    """Generate a workflow with the local Ollama when the user queued one for this Worker.
+
+    The server GPU may not be enough, so the first-screen workflow generation can run here.
+    Older servers answer 404 and the Worker simply moves on to regular tasks.
+    """
+    if job is None:
+        response = httpx.post(f"{server}/worker/generations/next", headers=headers, timeout=15)
+        if response.status_code != 200 or not response.content:
+            return False
+        job = response.json()
+    model = job.get("model") or config.get("default_model", "")
+    runtime_state.write(
+        status="running",
+        task={
+            "task_id": job["job_id"],
+            "agent_name": "워크플로우 생성",
+            "label": "워크플로우 생성",
+            "model": model,
+            "started_at": time.time(),
+        },
+    )
+    print(f"[RECEIVED] 워크플로우 생성 요청: #{job['job_id']} ({model})")
+    try:
+        with heartbeat_while_running(server, headers):
+            content = executor.generate_workflow_reply(config, job)
+        result = {"content": content, "error": ""}
+        print(f"[DONE] 워크플로우 생성 응답: #{job['job_id']} ({len(content)}자)")
+    except Exception as exc:  # Ollama 미실행·모델 없음 등 -> 서버가 원인을 사용자에게 보여준다
+        result = {"content": "", "error": str(exc)}
+        print(f"[ERROR] 워크플로우 생성 실패: #{job['job_id']} - {exc}")
+    finally:
+        runtime_state.write(status="idle")
+    # 사용자가 그사이 취소했으면 409가 오고, 따로 할 일은 없다
+    httpx.post(
+        f"{server}/worker/generations/{job['job_id']}/result", headers=headers, json=result, timeout=30,
+    )
+    return True
+
+
+def process_execution_task(server: str, headers: dict, config: dict, task: dict) -> None:
+    """통합 큐와 구버전 endpoint가 공통으로 사용하는 실행 TASK 처리."""
+    runtime_state.write(
+        status="running",
+        task={
+            "task_id": task["task_id"],
+            "execution_id": task["execution_id"],
+            "agent_name": task["agent_name"],
+            "model": task.get("model") or config.get("default_model", ""),
+            "started_at": time.time(),
+        },
+    )
+    print(f"[RECEIVED] 작업 수신: #{task['task_id']} {task['agent_name']}")
+    staging_dir = None
+    try:
+        with heartbeat_while_running(server, headers):
+            staging_dir = stage_uploaded_files(server, headers, task)
+            output = executor.run_task(task, config)
+        result = {"status": "done", "output": output, "error": ""}
+        print(f"[DONE] 작업 완료: #{task['task_id']} ({len(output)}자)")
+    except Exception as exc:  # LLM 실패 등 -> 서버에 실패 보고
+        result = {"status": "failed", "output": "", "error": str(exc)}
+        print(f"[ERROR] 작업 실패: #{task['task_id']} - {exc}")
+    finally:
+        if staging_dir:
+            shutil.rmtree(staging_dir, ignore_errors=True)
+    httpx.post(
+        f"{server}/worker/tasks/{task['task_id']}/result",
+        headers=headers,
+        json=result,
+        timeout=15,
+    )
+    runtime_state.write(status="idle")
+
+
+def process_next_work(server: str, headers: dict, config: dict) -> bool | None:
+    """서버가 선택한 다음 작업을 처리한다.
+
+    True는 작업 처리, False는 대기, None은 구버전 서버(통합 endpoint 없음)를 뜻한다.
+    """
+    response = httpx.post(f"{server}/worker/work/next", headers=headers, timeout=15)
+    if response.status_code == 404:
+        return None
+    if response.status_code != 200 or not response.content:
+        return False
+    work = response.json()
+    if work.get("kind") == "generation":
+        return process_generation_job(server, headers, config, work["payload"])
+    if work.get("kind") == "execution":
+        process_execution_task(server, headers, config, work["payload"])
+        return True
+    raise ValueError(f"지원하지 않는 Worker 작업 종류입니다: {work.get('kind')}")
+
+
 def stage_uploaded_files(server: str, headers: dict, task: dict) -> str | None:
     """Download files selected in the agent block to a private, temporary folder."""
     uploads = task.get("uploaded_files") or []
@@ -276,45 +372,21 @@ def cmd_run(_args: argparse.Namespace) -> None:
             # 하트비트 겸 작업 요청
             if process_directory_inspection(server, headers):
                 continue
-            resp = httpx.post(
-                f"{server}/worker/tasks/next", headers=headers, timeout=15
-            )
-            if resp.status_code == 200 and resp.content and resp.text != "null":
-                task = resp.json()
-                runtime_state.write(
-                    status="running",
-                    task={
-                        "task_id": task["task_id"],
-                        "execution_id": task["execution_id"],
-                        "agent_name": task["agent_name"],
-                        "model": task.get("model") or config.get("default_model", ""),
-                        "started_at": time.time(),
-                    },
+            handled = process_next_work(server, headers, config)
+            if handled:
+                continue
+            if handled is None:
+                # 구버전 서버와의 호환: 생성과 실행 endpoint를 순서대로 조회한다.
+                if process_generation_job(server, headers, config):
+                    continue
+                response = httpx.post(
+                    f"{server}/worker/tasks/next", headers=headers, timeout=15
                 )
-                print(f"[RECEIVED] 작업 수신: #{task['task_id']} {task['agent_name']}")
-                staging_dir = None
-                try:
-                    with heartbeat_while_running(server, headers):
-                        staging_dir = stage_uploaded_files(server, headers, task)
-                        output = executor.run_task(task, config)
-                    result = {"status": "done", "output": output, "error": ""}
-                    print(f"[DONE] 작업 완료: #{task['task_id']} ({len(output)}자)")
-                except Exception as e:  # LLM 실패 등 -> 서버에 실패 보고
-                    result = {"status": "failed", "output": "", "error": str(e)}
-                    print(f"[ERROR] 작업 실패: #{task['task_id']} - {e}")
-                finally:
-                    if staging_dir:
-                        shutil.rmtree(staging_dir, ignore_errors=True)
-                httpx.post(
-                    f"{server}/worker/tasks/{task['task_id']}/result",
-                    headers=headers,
-                    json=result,
-                    timeout=15,
-                )
-                runtime_state.write(status="idle")
-            else:
-                # 대기 중에도 주기적으로 상태(사양) 보고
-                send_heartbeat(server, headers)
+                if response.status_code == 200 and response.content and response.text != "null":
+                    process_execution_task(server, headers, config, response.json())
+                    continue
+            # 대기 중에도 주기적으로 상태(사양) 보고
+            send_heartbeat(server, headers)
         except KeyboardInterrupt:
             runtime_state.clear()
             print("\n종료합니다.")
