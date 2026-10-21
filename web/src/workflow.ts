@@ -51,11 +51,7 @@ export function applyAutoFlags(agents: AgentNode[], edges: { source: string; tar
   const reasons: Record<string, AutoFlagReasons> = {}
   for (const agent of next) {
     const needsFile: FlagExplanation = agent.needs_file_manual
-<<<<<<< HEAD
-      ? { manual: true, reason: agent.needs_file ? '직접 지정: 실행할 때 파일이 필요합니다.' : agent.text_input_enabled ? '직접 지정: 텍스트 데이터 입력으로 실행합니다.' : '직접 지정: 파일 없이 실행 프롬프트나 앞 단계 결과로 실행합니다.' }
-=======
-      ? { manual: true, reason: agent.needs_file ? '직접 지정: 실행할 때 파일이 필요합니다.' : '직접 지정: 파일 없이 실행합니다.' }
->>>>>>> origin/feature/simple-ui
+      { manual: true, reason: agent.needs_file ? '직접 지정: 실행할 때 파일이 필요합니다.' : '직접 지정: 파일 없이 실행합니다.' }
       : agent.needs_file_hint ? { manual: false, reason: '생성기가 사용자 파일을 직접 읽는 블록으로 정했습니다.' }
         : !hasParent.has(agent.id) ? { manual: false, reason: '시작 블록은 파일·텍스트 데이터·입력 없이 실행 허용 중 하나만 있으면 됩니다.' }
           : { manual: false, reason: '앞 단계 결과를 입력으로 받습니다.' }
