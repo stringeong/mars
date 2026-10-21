@@ -215,6 +215,31 @@ class DirectoryInspection(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class GenerationJob(Base):
+    """첫 화면 워크플로우 생성을 사용자의 Worker가 대신 처리하는 요청.
+
+    서버는 Worker에 먼저 연결할 수 없으므로(pull 방식) 대기열에 넣고 Worker가 가져간다.
+    """
+
+    __tablename__ = "generation_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    device_id: Mapped[int] = mapped_column(ForeignKey("devices.id"), index=True)
+    prompt: Mapped[str] = mapped_column(Text)
+    model: Mapped[str] = mapped_column(String(128), default="")
+    # 1회차 응답을 워크플로우로 해석하지 못하면 온도를 낮춰 2회차를 다시 대기열에 넣는다
+    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    # pending -> running -> done | failed | canceled
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    error: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    service_id: Mapped[int | None] = mapped_column(ForeignKey("services.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    queued_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class UploadedFile(Base):
     """A file uploaded by a user for use as workflow input."""
 

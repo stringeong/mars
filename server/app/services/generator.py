@@ -1,6 +1,7 @@
 """자연어 생성 프롬프트 -> MAS 워크플로우(DAG) 생성.
 
-사용자가 고른 생성 모델(서버 로컬 Ollama 또는 등록된 외부 LLM API)에 JSON 스키마로 요청한다.
+사용자가 고른 생성 모델(서버 로컬 Ollama, 등록된 외부 LLM API, 또는 사용자의 Worker)에 JSON
+스키마로 요청한다. Worker 생성은 generation_jobs 대기열을 거쳐 같은 응답 해석 규칙(graph_from_reply)을 쓴다.
 실패하면 원인(연결 실패, 응답 파싱 실패, 구성 검증 실패)을 GenerationError로 알린다.
 규칙 기반 기본 워크플로우는 사용자가 고른 경우에만 만든다.
 """
@@ -61,12 +62,13 @@ SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.
 
 @dataclass(frozen=True)
 class GeneratorChoice:
-    """워크플로우를 생성할 LLM. location: local(서버 Ollama) | cloud(등록된 외부 LLM API)."""
+    """워크플로우를 생성할 LLM. location: local(서버 Ollama) | cloud(등록된 외부 LLM API) | worker(사용자 Worker)."""
 
     location: str = "local"
     provider: str = "ollama"
     model: str = ""
     api_key: str = field(default="", repr=False)
+    device_name: str = ""
 
     @property
     def resolved_model(self) -> str:
@@ -243,9 +245,17 @@ async def _chat(choice: GeneratorChoice, system: str, user: str, temperature: fl
 
 async def _generate_once(prompt: str, choice: GeneratorChoice, temperature: float) -> tuple[dict, dict]:
     """LLM을 1회 호출해 그래프를 만들고 DAG 검증까지 통과시킨다. 실패 시 예외."""
+    content, usage = await _chat(choice, SYSTEM_PROMPT, prompt, temperature)
+    return graph_from_reply(content, prompt), usage
+
+
+def graph_from_reply(content: str, prompt: str) -> dict:
+    """LLM 응답 텍스트를 실행 가능한 워크플로우 그래프로 바꾼다.
+
+    해석하지 못하면 ValueError/KeyError/TypeError, 실행할 수 없는 구성이면 dag.DagError.
+    """
     from . import dag
 
-    content, usage = await _chat(choice, SYSTEM_PROMPT, prompt, temperature)
     data = _extract_json(content)
     raw_nodes = data.get("nodes") or []
     if not raw_nodes:
@@ -265,7 +275,20 @@ async def _generate_once(prompt: str, choice: GeneratorChoice, temperature: floa
     # 최종 블록은 정확히 하나로, 파일 필요는 생성기 제안대로 맞춘 뒤 슬롯을 만든다
     graph = dag.apply_auto_flags(graph)
     graph["input_slots"] = _input_slots(raw_nodes, graph["nodes"])
-    return graph, usage
+    return graph
+
+
+def reply_error(exc: Exception, choice: GeneratorChoice) -> GenerationError:
+    """graph_from_reply의 실패를 사용자에게 보여줄 원인으로 바꾼다."""
+    from . import dag
+
+    if isinstance(exc, dag.DagError):
+        return GenerationError("validation", f"생성된 구성을 실행할 수 없습니다: {exc}", choice)
+    return GenerationError("parse", f"모델 응답을 워크플로우로 해석하지 못했습니다: {exc}", choice)
+
+
+# 1회차 온도와, 응답을 해석하지 못했을 때 다시 묻는 2회차 온도
+GENERATION_TEMPERATURES = (0.3, 0.1)
 
 
 def _connection_message(exc: httpx.HTTPError, choice: GeneratorChoice) -> str:
@@ -294,18 +317,15 @@ async def generate_workflow(prompt: str, choice: GeneratorChoice | None = None) 
 
     choice = choice or GeneratorChoice()
     last_error: GenerationError | None = None
-    for attempt, temperature in enumerate((0.3, 0.1), start=1):
+    for attempt, temperature in enumerate(GENERATION_TEMPERATURES, start=1):
         try:
             graph, usage = await _generate_once(prompt, choice, temperature)
         except httpx.HTTPError as exc:
             logger.warning("Workflow generation model unavailable: %s", exc)
             raise GenerationError("connection", _connection_message(exc, choice), choice) from exc
-        except dag.DagError as exc:
-            logger.warning("Generated workflow is not runnable (attempt %s): %s", attempt, exc)
-            last_error = GenerationError("validation", f"생성된 구성을 실행할 수 없습니다: {exc}", choice)
-        except (KeyError, TypeError, ValueError) as exc:
+        except (dag.DagError, KeyError, TypeError, ValueError) as exc:
             logger.warning("Invalid workflow response (attempt %s): %s", attempt, exc)
-            last_error = GenerationError("parse", f"모델 응답을 워크플로우로 해석하지 못했습니다: {exc}", choice)
+            last_error = reply_error(exc, choice)
         except Exception as exc:
             logger.exception("Unexpected workflow generation failure")
             raise GenerationError("connection", f"모델 호출 중 오류가 발생했습니다: {type(exc).__name__}", choice) from exc

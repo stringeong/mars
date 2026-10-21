@@ -219,6 +219,30 @@ class ServiceGenerate(BaseModel):
     fallback_reason: str = Field(default="", max_length=500)
 
 
+class GenerationJobCreate(BaseModel):
+    """서버 GPU 대신 사용자의 Worker(그 기기의 Ollama)로 워크플로우를 생성한다."""
+
+    prompt: str = Field(min_length=5, description="만들고자 하는 서비스를 설명하는 자연어")
+    device_id: int
+    # 비우면 그 Worker의 기본 모델
+    model: str = Field(default="", max_length=128)
+
+
+class GenerationJobOut(BaseModel):
+    id: int
+    status: Literal["pending", "running", "done", "failed", "canceled"]
+    attempt: int
+    device_id: int
+    device_name: str | None
+    model: str
+    created_at: UTCDateTime
+    claimed_at: UTCDateTime | None
+    finished_at: UTCDateTime | None
+    service_id: int | None
+    generation_error: dict | None
+    worker_busy: bool = False
+
+
 class ServiceRevise(BaseModel):
     instruction: str = Field(min_length=2, description="워크플로우를 어떻게 고칠지 설명하는 자연어")
 
