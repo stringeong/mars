@@ -49,84 +49,33 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ### 2. Worker Agent (작업을 실행할 기기마다)
 
+작업을 실행할 기기마다 Worker를 설치해 서버에 등록한다. 서버로 연결을 여는 pull 방식이라 포트를 열 필요가 없다.
+
+**등록 순서**
+
+1. Ollama를 설치하고 모델을 하나 받는다. 예: `ollama pull qwen3:4b`
+2. 운영체제에 맞게 Worker UI를 실행하고 http://127.0.0.1:8765 를 연다(아래 참고).
+3. Server address `https://marsflowlab.com/api`, Worker name, 웹 계정(https://marsflowlab.com 에서 가입)을 입력하고 **Connect worker**를 누른다.
+4. Status 화면에서 **시작**을 누른다. 웹 사이드바의 워커가 온라인으로 바뀌면 끝이다.
+
+**Windows**: `start-worker.cmd`를 더블클릭한다. Python 3.11 이상과 [Windows용 Ollama](https://ollama.com/download/windows)가 없으면 설치 방법을 안내한다. 등록 정보는 `%LOCALAPPDATA%\MarsFlowLab\Worker`에 저장된다.
+
+**macOS**: Docker는 Apple GPU를 쓰지 못하므로 Python으로 직접 실행한다. [맥용 Ollama 앱](https://ollama.com/download/mac)을 먼저 설치한다.
+
 ```bash
 cd worker
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-
-# 최초 1회: 기기 등록 (서버 주소, 계정, 기기명)
-python -m agent register --server http://localhost:8000
-
-# 상시 실행: 하트비트 전송 + 작업 폴링·실행
-python -m agent run
+python -m agent ui
 ```
 
-브라우저 관리 화면을 사용하려면 `python -m agent ui`를 실행하고
-http://127.0.0.1:8765 를 여세요. Setup, Models, Tools, Status 화면에서 등록,
-Ollama 모델 관리, 승인된 Tool 설치, 공유 디렉터리 및 Worker 실행 상태를 관리할 수 있습니다.
+**Linux**: `./start-worker.sh`로 Worker UI와 Ollama를 Docker로 실행한다(GPU 자동 감지, 실패 시 CPU). Docker 없이 쓰려면 macOS와 같은 명령으로 실행한다.
 
-Docker 기반 Worker UI와 Ollama를 함께 실행하면 OCR과 Office Tool이 이미지에 포함되므로
-호스트 관리자 권한 없이 사용할 수 있습니다.
+UI 없이 등록하려면 `python -m agent register --server https://marsflowlab.com/api`로 한 번 등록한 뒤 `python -m agent run`을 켜 둔다.
 
-```bash
-./start-worker.sh
-```
-
-`start-worker.sh`는 기본적으로 GPU를 자동 감지한다. Windows/Linux NVIDIA는 Docker GPU 연결, Linux AMD는 ROCm과 `/dev/kfd`·`/dev/dri`, Windows AMD는 호스트에서 실행 중인 네이티브 Ollama를 사용한다. 선택한 GPU 구성이 실패하면 CPU 모드로 자동 재시도한다. 기본 `docker-compose.yml`에는 필수 GPU 장치가 없어 GPU가 없는 환경에서도 실행된다.
-
-```bash
-./start-worker.sh auto     # GPU 자동 감지, 실패 시 CPU
-./start-worker.sh cpu      # CPU 강제
-./start-worker.sh nvidia   # NVIDIA 강제
-./start-worker.sh amd      # Linux AMD ROCm 강제
-./start-worker.sh native   # Windows 네이티브 Ollama 강제
-./start-worker.sh detect   # 감지 결과만 확인
-./start-worker.sh stop
-```
-
-#### Windows에서 실행
-
-탐색기에서 `start-worker.cmd`를 더블클릭하면 Windows 네이티브 모드로 실행된다.
-BIOS 가상화, WSL 2, Docker Desktop은 필요하지 않다. 최초 실행에는 Python 3.11 이상과
-[Windows용 Ollama](https://ollama.com/download/windows)가 필요하며, 설치되지 않았다면
-스크립트가 공식 다운로드 페이지와 설치 방법을 안내한다. Python 패키지는
-`worker\.venv`에 격리해 설치하고 설정과 로그는 `%LOCALAPPDATA%\MarsFlowLab\Worker`에 저장한다.
-
-명령 프롬프트에서 실행 모드를 직접 지정할 수도 있다.
-
-```bat
-start-worker.cmd auto      rem Windows 네이티브 실행 (기본값)
-start-worker.cmd native    rem Windows 네이티브 실행
-start-worker.cmd setup     rem Python 가상환경과 패키지만 준비
-start-worker.cmd detect    rem Python/Ollama 준비 상태 확인
-start-worker.cmd status    rem 네이티브/Ollama/Docker 상태 확인
-start-worker.cmd stop      rem 네이티브 및 Docker Worker 중지
-start-worker.cmd docker    rem 기존 Docker GPU 자동 감지 모드
-start-worker.cmd cpu       rem 기존 Docker CPU 모드
-start-worker.cmd nvidia    rem 기존 Docker NVIDIA 모드
-```
-
-등록할 서버까지의 네트워크 연결을 시작 전에 확인하려면 서버 주소를 함께 지정한다.
-
-```bat
-start-worker.cmd auto -ServerUrl https://marsflowlab.com/api
-```
-
-Worker는 서버에 하트비트와 작업 요청을 보내는 pull 방식이므로 개인 PC의 인바운드
-포트를 열거나 공유기에서 포트포워딩할 필요가 없다. 위 옵션은 서버 호스트의 DNS와
-TCP 포트 연결을 검사하며, 연결할 수 없으면 VPN·서버 방화벽·Windows 아웃바운드
-정책 확인 방법을 안내한다. Worker UI `8765`와 Ollama `11434`는 보안을 위해 계속
-`127.0.0.1`에만 바인딩된다.
-
-- Windows Ollama가 사용 가능한 CPU/GPU를 자동으로 선택한다.
-- 기존 Docker 실행은 `start-worker.cmd docker`로 명시적으로 선택한다.
-- 실행 후 Worker UI는 http://127.0.0.1:8765 에서 열린다.
-- 스크립트 종료 시 창을 자동으로 닫아야 한다면 `set MARS_NO_PAUSE=1`을 먼저 실행한다.
-
-- 스캔 PDF OCR을 사용하려면 Tesseract가 필요합니다. Ubuntu/Debian은 `sudo apt install tesseract-ocr tesseract-ocr-kor`, macOS는 `brew install tesseract tesseract-lang`으로 설치합니다. Docker Worker 이미지에는 자동 설치됩니다.
-- Windows 네이티브 등록 정보는 `%LOCALAPPDATA%\MarsFlowLab\Worker\agent_config.json`에 저장됩니다. 기존 `worker/agent_config.json`은 최초 실행 때 자동 이전됩니다.
-- 워크플로우에 연결한 공유 디렉터리만 Worker의 파일 접근 허용 목록에 들어갑니다.
-- 하나의 디렉터리를 여러 Worker가 처리할 때는, 기기 관리에서 같은 디렉터리 별명을 각 Worker에 등록하고 각 Worker의 실제 로컬 경로를 입력합니다. 예: Linux `/shared/project`, Windows `D:\team\project`.
+- Apple Silicon 맥에서 `Bad CPU type`이 나오면 arm64 Python(python.org 설치본 또는 `/opt/homebrew`)을 쓴다.
+- 업로드 파일은 서버를 거쳐 전달되고, 공유 디렉터리 파일은 해당 기기 안에서만 읽힌다.
+- `agent_config.json`에는 Worker 인증 키가 들어 있으므로 Git에 올리거나 공유하지 않는다.
 
 ### 3. 웹 프론트엔드
 
