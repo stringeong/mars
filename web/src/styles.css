@@ -922,6 +922,27 @@ body.resizing-sidebar { cursor: col-resize; user-select: none; }
 .home-examples-link { display: block; width: fit-content; margin: 14px auto 0; color: #6b6b67; font-size: 13px; text-decoration: none; }
 .home-examples-link:hover { color: #1f1f1d; text-decoration: underline; }
 
+/* 내 워크플로우 폴더 */
+.folder-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.folder-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: #4a4a48; font: inherit; font-size: 12.5px; cursor: pointer; }
+.folder-chip span { color: var(--muted); font-size: 11px; }
+.folder-chip:hover { background: #f5f5f4; }
+.folder-chip.active { border-color: #1f1f1d; background: #1f1f1d; color: #fff; }
+.folder-chip.active span { color: #d6d6d3; }
+.folder-chip.drop { border-color: #6750c4; background: #f0edff; color: #3f2f8f; }
+.folder-chip.folder-add { border-style: dashed; color: var(--muted); }
+.folder-actions { display: inline-flex; gap: 10px; margin-left: auto; }
+.folder-actions button { border: 0; background: none; padding: 0; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
+.folder-actions button:hover { color: var(--text); }
+.folder-actions button.danger:hover { color: var(--danger); }
+.folder-hint { margin: 0 0 14px; color: var(--muted); font-size: 12px; }
+.dashboard-workflow-card { padding: 0; cursor: grab; }
+.dashboard-workflow-card .card-open { display: flex; flex: 1; flex-direction: column; align-items: flex-start; width: 100%; padding: 18px; border: 0; background: none; text-align: left; font: inherit; cursor: pointer; }
+.dashboard-workflow-card .card-open > strong { margin-top: 7px; color: #35405a; font-size: 13px; }
+.dashboard-workflow-card .card-open p { flex: 1; margin: 7px 0 12px; color: #7d8697; font-size: 11px; line-height: 1.5; }
+.dashboard-workflow-card .card-open small { color: #9ba3b1; font-size: 9px; }
+.dashboard-workflow-card .card-folder { margin: 0 18px 14px; width: auto; padding: 5px 8px; font-size: 12px; }
+
 /* 실행 이력: 표 하나 */
 .history-overview { grid-template-columns: minmax(0, 1fr); }
 .history-table-heading { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px; }

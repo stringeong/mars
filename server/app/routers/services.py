@@ -18,6 +18,7 @@ from ..services.generator import (
     list_local_models,
     revise_workflow,
 )
+from .folders import get_owned_folder
 from .settings import DEFAULT_MODELS, PROVIDER_MODELS
 
 
@@ -300,11 +301,28 @@ def duplicate_service(
         description=source.description,
         graph=copy.deepcopy(source.graph),
         generation_info=copy.deepcopy(source.generation_info),
+        folder_id=source.folder_id,
     )
     db.add(duplicate)
     db.commit()
     db.refresh(duplicate)
     return duplicate
+
+
+@router.put("/{service_id}/folder", response_model=schemas.ServiceOut)
+def move_service_to_folder(
+    service_id: int,
+    body: schemas.ServiceFolderMove,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    service = _get_owned(service_id, user, db)
+    if body.folder_id is not None:
+        get_owned_folder(body.folder_id, user, db)
+    service.folder_id = body.folder_id
+    db.commit()
+    db.refresh(service)
+    return service
 
 
 @router.delete("/{service_id}", status_code=204)

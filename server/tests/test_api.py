@@ -768,6 +768,37 @@ class TestWorkerGeneration:
         assert client.get("/services", headers=auth).json() == []
 
 
+class TestFolders:
+    """내 워크플로우 폴더. 남의 폴더로는 옮길 수 없고, 폴더를 지우면 워크플로우는 미분류로 남는다."""
+
+    def test_create_move_and_delete_folder(self, client):
+        auth = signup_and_login(client)
+        service = create_service(client, auth)
+        r = client.post("/folders", json={"name": " 업무 "}, headers=auth)
+        assert r.status_code == 201, r.text
+        folder = r.json()
+        assert folder["name"] == "업무"
+        assert client.post("/folders", json={"name": "업무"}, headers=auth).status_code == 409
+
+        moved = client.put(f"/services/{service['id']}/folder", json={"folder_id": folder["id"]}, headers=auth)
+        assert moved.status_code == 200 and moved.json()["folder_id"] == folder["id"]
+        copied = client.post(f"/services/{service['id']}/duplicate", headers=auth).json()
+        assert copied["folder_id"] == folder["id"]
+
+        assert client.put(f"/folders/{folder['id']}", json={"name": "회사 일"}, headers=auth).json()["name"] == "회사 일"
+        assert client.delete(f"/folders/{folder['id']}", headers=auth).status_code == 204
+        assert client.get("/folders", headers=auth).json() == []
+        assert {item["folder_id"] for item in client.get("/services", headers=auth).json()} == {None}
+
+    def test_cannot_use_other_users_folder(self, client):
+        auth = signup_and_login(client)
+        service = create_service(client, auth)
+        other = signup_and_login(client, username="user2", email="u2@example.com")
+        folder = client.post("/folders", json={"name": "남의 폴더"}, headers=other).json()
+        assert client.put(f"/services/{service['id']}/folder", json={"folder_id": folder["id"]}, headers=auth).status_code == 404
+        assert client.delete(f"/folders/{folder['id']}", headers=auth).status_code == 404
+
+
 class TestDeletion:
     """실행 이력·워크플로우 삭제. 실행 중인 것은 막고, 업로드 파일과 비용 집계는 남긴다."""
 

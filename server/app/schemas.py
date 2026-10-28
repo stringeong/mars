@@ -266,7 +266,26 @@ class ServiceOut(BaseModel):
     created_at: UTCDateTime
     updated_at: UTCDateTime
     generation_info: dict | None = None
+    folder_id: int | None = None
     validation: dict | None = None
+
+    model_config = {"from_attributes": True}
+
+
+class ServiceFolderMove(BaseModel):
+    # None이면 미분류로 뺀다
+    folder_id: int | None = None
+
+
+# ---------- Folder ----------
+class FolderIn(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+
+
+class FolderOut(BaseModel):
+    id: int
+    name: str
+    created_at: UTCDateTime
 
     model_config = {"from_attributes": True}
 

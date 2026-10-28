@@ -133,7 +133,14 @@ export interface Service {
   created_at: string
   updated_at: string
   generation_info?: GenerationInfo | null
+  folder_id?: number | null
   validation?: ValidationResult | null
+}
+
+export interface WorkflowFolder {
+  id: number
+  name: string
+  created_at: string
 }
 
 export interface DeviceModels {

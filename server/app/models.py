@@ -255,6 +255,17 @@ class UploadedFile(Base):
     
 
 
+class WorkflowFolder(Base):
+    """사용자가 내 워크플로우를 나눠 두는 폴더. 폴더를 지우면 안의 워크플로우는 미분류로 돌아간다."""
+
+    __tablename__ = "workflow_folders"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    name: Mapped[str] = mapped_column(String(60))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Service(Base):
     """사용자가 생성한 MAS 구성(워크플로우). graph 는 DAG JSON."""
 
@@ -269,6 +280,7 @@ class Service(Base):
     graph: Mapped[dict] = mapped_column(JSON, default=dict)
     # 어떤 모델로 생성했는지 {"source": "llm"|"fallback", "location", "provider", "model", ...}
     generation_info: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    folder_id: Mapped[int | None] = mapped_column(ForeignKey("workflow_folders.id"), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
