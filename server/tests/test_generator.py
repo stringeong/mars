@@ -39,6 +39,39 @@ class TestExtractJson:
             _extract_json("{name: 따옴표 없는 키}")
 
 
+class TestConnectLooseEnds:
+    """작은 모델이 연결 없이 늘어놓은 블록을 최종 블록에 이어 '병렬 → 종합'으로 만든다."""
+
+    def _graph(self, nodes, edges):
+        return generator.graph_from_reply(json.dumps({"name": "구성", "nodes": nodes, "edges": edges}, ensure_ascii=False), "요청")
+
+    def test_unconnected_blocks_join_the_hinted_final(self):
+        graph = self._graph([
+            {"id": "a", "name": "카드 분류", "role_prompt": "a"},
+            {"id": "b", "name": "계좌 분류", "role_prompt": "b"},
+            {"id": "c", "name": "리포트", "role_prompt": "c", "final": True},
+        ], [])
+        assert {(e["source"], e["target"]) for e in graph["edges"]} == {("a", "c"), ("b", "c")}
+        assert dag.stages(graph) == [["a", "b"], ["c"]]
+        assert [n["id"] for n in graph["nodes"] if n["final"]] == ["c"]
+        # 최종 블록은 앞 단계 결과를 받으므로 파일을 요구하지 않는다
+        assert not next(n for n in graph["nodes"] if n["id"] == "c")["needs_file"]
+
+    def test_dangling_branch_joins_the_last_stage_without_hint(self):
+        graph = self._graph([
+            {"id": "a", "name": "읽기", "role_prompt": "a"},
+            {"id": "b", "name": "요약", "role_prompt": "b"},
+            {"id": "x", "name": "따로 노는 블록", "role_prompt": "x"},
+        ], [{"source": "a", "target": "b"}])
+        assert ("x", "b") in {(e["source"], e["target"]) for e in graph["edges"]}
+        assert dag.stages(graph) == [["a", "x"], ["b"]]
+
+    def test_connected_graph_is_left_alone(self):
+        nodes = [{"id": "a", "name": "A", "role_prompt": "a"}, {"id": "b", "name": "B", "role_prompt": "b", "final": True}]
+        graph = self._graph(nodes, [{"source": "a", "target": "b"}])
+        assert [(e["source"], e["target"]) for e in graph["edges"]] == [("a", "b")]
+
+
 class TestWorkflowName:
     def _reply(self, name):
         return json.dumps({"name": name, "nodes": [

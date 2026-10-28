@@ -34,6 +34,8 @@ SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.
   보거나(예: 지출 분류와 이상 거래 탐지, 일정 짜기와 예산 계산), 여러 자료를 각각
   처리하는 경우가 그렇다. 나뉜 가지는 마지막 종합 에이전트에서 다시 합친다.
   앞 결과가 꼭 있어야 하는 단계만 일렬로 잇는다.
+- 병렬로 나눈 에이전트도 각각 종합 에이전트로 가는 연결을 edges에 반드시 적는다.
+  어디에도 연결되지 않은 에이전트를 두지 않으며, edges를 비워 두지 않는다.
 - 연결은 반드시 앞 단계에서 뒤 단계로 한 방향으로만 흐른다. 검토·첨삭·개선처럼
   앞 단계 결과를 다듬는 작업도 뒤에 새 에이전트를 두어 처리하고, 이전 에이전트로
   되돌아가는 연결(피드백 루프)은 절대 만들지 않는다.
@@ -281,6 +283,30 @@ def _workflow_name(name: object, prompt: str) -> str:
     return name_from_prompt(prompt) if not text or text in PLACEHOLDER_NAMES else text
 
 
+def connect_loose_ends(graph: dict) -> int:
+    """끝나는 블록이 여럿이면 최종 블록 하나만 남기고 나머지를 그 블록에 잇는다. 이은 연결 수를 돌려준다.
+
+    작은 모델은 병렬로 나눈 블록을 연결 없이 늘어놓곤 한다. 그대로 두면 결과가 최종 블록에 모이지 않고
+    블록마다 시작 블록이 되어 파일을 요구하므로, 생성 직후에만 '나뉜 가지 → 최종 블록'으로 이어 준다.
+    최종 블록은 dag.apply_auto_flags와 같은 규칙으로 고른다(생성기가 고른 끝 블록, 없으면 가장 뒤 단계).
+    끝나는 블록에서 최종 블록으로 가는 연결이라 순환은 생기지 않는다.
+    """
+    from . import dag
+
+    sinks = dag.terminal_nodes(graph)
+    if len(sinks) < 2:
+        return 0
+    agents = dag._agent_nodes(graph)
+    order = {node["id"]: index for index, node in enumerate(agents)}
+    levels = dag._levels(graph)
+    hinted = [node["id"] for node in agents if node.get("final_hint") and node["id"] in sinks]
+    final = max(hinted or sinks, key=lambda node_id: (levels.get(node_id, -1), order[node_id]))
+    loose = [node_id for node_id in sinks if node_id != final]
+    graph["edges"] += [_workflow_edge({"source": node_id, "target": final}) for node_id in loose]
+    logger.info("Connected %d loose generated block(s) to final block %s", len(loose), final)
+    return len(loose)
+
+
 def graph_from_reply(content: str, prompt: str) -> dict:
     """LLM 응답 텍스트를 실행 가능한 워크플로우 그래프로 바꾼다.
 
@@ -304,6 +330,7 @@ def graph_from_reply(content: str, prompt: str) -> dict:
     }
     # LLM이 순환 그래프 등 실행 불가능한 구성을 제안하면 여기서 예외 발생
     dag.validate_graph(graph)
+    connect_loose_ends(graph)
     # 최종 블록은 정확히 하나로, 들어오는 연결이 없는 블록은 파일 필요로 맞춘 뒤 슬롯을 만든다
     graph = dag.apply_auto_flags(graph)
     graph["input_slots"] = _input_slots(raw_nodes, graph["nodes"])
