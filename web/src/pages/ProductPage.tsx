@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { ExampleCard, PublicFooter, PublicHeader } from '../components/PublicChrome'
+import DemoEditPanel from '../components/DemoEditPanel'
+import RunPreview from '../components/RunPreview'
+import WorkflowPreview from '../components/WorkflowPreview'
+import { applyEdits, BlockEdit, blockId, DEMOS, initialEdit } from '../demos'
 import { EXAMPLES } from '../examples'
 
 const steps = [
-  { title: '하고 싶은 일을 적어요', text: '"카드 내역을 분류하고 이상 거래를 찾아 줘"처럼 평소 말하듯 한 문장이면 충분해요.' },
+  { title: '하고 싶은 일을 적어요', text: '"상담 기록에서 개인정보를 가리고 문의 유형을 분석해 줘"처럼 평소 말하듯 한 문장이면 충분해요.' },
   { title: '만들어진 흐름을 확인해요', text: '역할별 에이전트와 실행 순서가 블록으로 그려져요. 연결을 바꾸거나 블록을 더해 직접 다듬을 수 있어요.' },
   { title: '내 기기들이 나눠서 실행해요', text: '동시에 할 수 있는 단계는 등록한 PC·노트북에 나눠 맡기고, 끝나면 결과를 한곳에 모아 보여줘요.' },
 ]
@@ -26,53 +30,14 @@ const privacy = [
 ]
 
 
-// 첫 화면 예시 화면에서 번갈아 보여줄 요청과, 그 요청으로 만들어지는 흐름(단계별 에이전트와 맡은 기기)
-// 생성된 워크플로우의 블록: 역할 태그, 맡은 기기, 직접 받는 입력(파일·텍스트), 최종 블록 여부
-type DemoBlock = { tag: string; name: string; device: string; input?: string; final?: boolean }
-const DEMOS: { label: string; prompt: string; stages: DemoBlock[][] }[] = [
-  {
-    label: '가계부',
-    prompt: '카드·계좌 내역으로 이번 달 어디에 돈을 많이 썼는지 리포트로 정리해줘',
-    stages: [
-      [{ tag: '분류', name: '카드 내역 분류', device: '데스크톱', input: '카드내역.csv' }, { tag: '분류', name: '계좌 내역 분류', device: '노트북', input: '계좌내역.csv' }],
-      [{ tag: '분석', name: '지출 분석', device: '데스크톱' }],
-      [{ tag: '작성', name: '리포트 작성', device: '노트북', final: true }],
-    ],
-  },
-  {
-    label: '회의록',
-    prompt: '이번 주 회의록 세 개에서 결정 사항과 내가 할 일만 뽑아줘',
-    stages: [
-      [{ tag: '요약', name: '월요일 회의 요약', device: '데스크톱', input: '월요일.txt' }, { tag: '요약', name: '수요일 회의 요약', device: '노트북', input: '수요일.txt' }, { tag: '요약', name: '금요일 회의 요약', device: '데스크톱', input: '금요일.txt' }],
-      [{ tag: '정리', name: '할 일 정리', device: '노트북', final: true }],
-    ],
-  },
-  {
-    label: '여행',
-    prompt: '친구 4명이랑 부산 2박 3일, 맛집 위주로 일정이랑 1인당 예산 짜줘',
-    stages: [
-      [{ tag: '조사', name: '맛집 조사', device: '데스크톱', input: '텍스트 · 부산, 4명' }, { tag: '조사', name: '숙소 비교', device: '노트북', input: '텍스트 · 2박 3일' }],
-      [{ tag: '계획', name: '일정 짜기', device: '데스크톱' }],
-      [{ tag: '계산', name: '예산 계산', device: '노트북', final: true }],
-    ],
-  },
-  {
-    label: '리뷰',
-    prompt: '우리 가게 리뷰 500개에서 손님들이 가장 많이 아쉬워한 점 5개만 알려줘',
-    stages: [
-      [{ tag: '분류', name: '리뷰 1~250번', device: '데스크톱', input: '리뷰.csv' }, { tag: '분류', name: '리뷰 251~500번', device: '노트북', input: '리뷰.csv' }],
-      [{ tag: '분석', name: '불만 정리', device: '데스크톱' }],
-      [{ tag: '작성', name: '개선 제안', device: '노트북', final: true }],
-    ],
-  },
-]
+// 첫 화면 예시 화면에서 번갈아 보여줄 요청과 그 흐름·실행 결과는 demos.ts에 있다
 const DEMO_INTERVAL = 4500
 const FEATURED_EXAMPLES = EXAMPLES.filter((example) => example.featured).slice(0, 4)
 
 // 예시 화면의 생성 모델 선택. 실제 첫 화면처럼 내 워커·서버·외부 API 중에서 고른다 (서버 설정의 모델 목록 기준)
 type GenLocation = 'worker' | 'local' | 'cloud'
 type CloudProvider = 'openai' | 'anthropic' | 'gemini'
-const GEN_WORKERS = ['데스크톱', '노트북']
+const GEN_WORKERS = ['데스크톱', '노트북', '회사 PC']
 const GEN_LOCAL_MODELS = { worker: ['qwen3:4b', 'gemma3:4b'], local: ['gemma3:4b', 'qwen3:4b'] }
 const GEN_CLOUD: Record<CloudProvider, { name: string; models: string[] }> = {
   openai: { name: 'OpenAI', models: ['gpt-5-mini', 'gpt-5', 'gpt-4.1-mini'] },
@@ -91,7 +56,33 @@ export default function ProductPage() {
     const timer = window.setInterval(() => setDemoIndex((index) => (index + 1) % DEMOS.length), DEMO_INTERVAL)
     return () => window.clearInterval(timer)
   }, [demoPinned])
-  const demo = DEMOS[demoIndex]
+  // 편집 예시: 블록을 골라 실행 위치·워커·모델·첨부 파일을 바꾼다. 예시마다 따로 기억하고 실행 미리보기에도 쓴다
+  const [editing, setEditing] = useState(false)
+  const [selectedBlock, setSelectedBlock] = useState<string | null>(null)
+  const [edits, setEdits] = useState<Record<string, Record<string, BlockEdit>>>({})
+  const demo = useMemo(() => applyEdits(DEMOS[demoIndex], edits[DEMOS[demoIndex].label]), [demoIndex, edits])
+  // 실행 미리보기는 따로 고른 예시를 돌린다. 위에서 예시를 고르거나 '실행'을 누르면 그 예시로 맞춘다
+  const [runIndex, setRunIndex] = useState(0)
+  const [runKey, setRunKey] = useState(0)
+  const runDemoData = useMemo(() => applyEdits(DEMOS[runIndex], edits[DEMOS[runIndex].label]), [runIndex, edits])
+  function pickDemo(index: number) { setDemoIndex(index); setDemoPinned(true); setRunIndex(index); setSelectedBlock(editing ? blockId(0, 0) : null) }
+  function runDemo() {
+    setDemoPinned(true); setRunIndex(demoIndex); setRunKey((key) => key + 1); setEditing(false); setSelectedBlock(null)
+    document.getElementById('run')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+  function startEditing(id = blockId(0, 0)) { setDemoPinned(true); setEditing(true); setSelectedBlock(id) }
+  const selectedPosition = selectedBlock?.match(/^s(\d+)-(\d+)$/)
+  const originalBlock = selectedPosition ? DEMOS[demoIndex].stages[Number(selectedPosition[1])]?.[Number(selectedPosition[2])] : undefined
+  const selectedEdit = originalBlock && selectedBlock ? edits[DEMOS[demoIndex].label]?.[selectedBlock] ?? initialEdit(originalBlock) : undefined
+  function changeEdit(edit: BlockEdit) {
+    if (!selectedBlock) return
+    const label = DEMOS[demoIndex].label
+    setEdits((current) => ({ ...current, [label]: { ...current[label], [selectedBlock]: edit } }))
+  }
+  function resetEdits() {
+    const label = DEMOS[demoIndex].label
+    setEdits((current) => { const next = { ...current }; delete next[label]; return next })
+  }
   const [genLocation, setGenLocation] = useState<GenLocation>('worker')
   const [genWorker, setGenWorker] = useState(GEN_WORKERS[0])
   const [genProvider, setGenProvider] = useState<CloudProvider>('openai')
@@ -156,31 +147,38 @@ export default function ProductPage() {
                   role="tab"
                   aria-selected={index === demoIndex}
                   className={index === demoIndex ? 'active' : ''}
-                  onClick={() => { setDemoIndex(index); setDemoPinned(true) }}
+                  onClick={() => pickDemo(index)}
                 >{item.label}</button>)}
               </div>
             </div>
             <div className="mk-canvas">
               <div className="mk-canvas-head">
                 <span><b>생성된 워크플로우</b><small>블록 {demo.stages.flat().length}개 · {demo.stages.length}단계 · 구성 검사 통과</small></span>
-                <span className="mk-canvas-actions" aria-hidden="true"><i>편집</i><i className="run">실행</i></span>
+                <span className="mk-canvas-actions"><button type="button" className={`edit${editing ? ' active' : ''}`} aria-pressed={editing} onClick={() => (editing ? (setEditing(false), setSelectedBlock(null)) : startEditing())}>{editing ? '편집 완료' : '편집'}</button><button type="button" className="run" onClick={runDemo}>실행</button></span>
               </div>
-              <div key={demoIndex} className="mk-canvas-body mk-demo-flow">
-                {demo.stages.map((stage, index) => <div className="mk-canvas-step" key={index}>
-                  {index > 0 && <i className="mk-canvas-arrow" aria-hidden="true">→</i>}
-                  <div className="mk-canvas-col">
-                    {stage.map((block) => <div key={block.name} className={`mk-block${block.final ? ' final' : ''}`}>
-                      <span className="mk-block-tags"><em>{block.tag}</em>{block.final && <em className="final">최종</em>}</span>
-                      <b>{block.name}</b>
-                      <small>{block.device} · {genLocation === 'cloud' ? 'qwen3:4b' : model}</small>
-                      {block.input && <span className="mk-block-input">{block.input.startsWith('텍스트') ? block.input : `파일 · ${block.input}`}</span>}
-                    </div>)}
-                  </div>
-                </div>)}
+              {/* 실제 편집기와 같은 블록·연결선으로 그린다. 실행 모델은 내 워커·서버 모델을 따르고, 외부 API로 생성해도 실행은 로컬 모델 기준 */}
+              <div key={demoIndex} className="mk-demo-flow">
+                <WorkflowPreview demo={demo} model={genLocation === 'cloud' ? 'qwen3:4b' : model} selectedId={editing ? selectedBlock : null} onSelect={(id) => startEditing(id)} />
               </div>
+              {!editing && <p className="mk-edit-tip">블록을 누르거나 <b>편집</b>을 눌러 워커·모델·파일을 바꿔 보세요.</p>}
+              {editing && originalBlock && selectedEdit && <DemoEditPanel block={originalBlock} edit={selectedEdit} onChange={changeEdit} onReset={resetEdits} onRun={runDemo} />}
             </div>
           </div>
         </div>
+      </div>
+    </section>
+
+    <section className="mk-section mk-run-section" id="run">
+      <div className="mk-shell">
+        <div className="mk-heading">
+          <span className="mk-kicker">실행 미리보기</span>
+          <h2>실행하면 이렇게 진행돼요</h2>
+          <p>같은 단계의 블록은 여러 기기가 동시에 맡아요. 진행률과 기기별 타임라인이 실시간으로 바뀌고, 마지막 블록이 끝나면 최종 결과가 나와요.</p>
+        </div>
+        <div className="mk-demo-chips mk-run-chips" role="tablist" aria-label="실행해 볼 예시">
+          {DEMOS.map((item, index) => <button key={item.label} type="button" role="tab" aria-selected={index === runIndex} className={index === runIndex ? 'active' : ''} onClick={() => setRunIndex(index)}>{item.label}</button>)}
+        </div>
+        <RunPreview demo={runDemoData} runKey={runKey} />
       </div>
     </section>
 
