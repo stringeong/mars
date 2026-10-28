@@ -32,7 +32,8 @@ function StageLabelNode({ data }: { data: any }) {
 const nodeTypes = { task: TaskNode, stageLabel: StageLabelNode }
 
 /** DAG 깊이별 단계를 열로 배치하고 의존 관계를 선으로 그린다. 같은 열은 동시에 실행될 수 있다. */
-export default function ExecutionStageView({ execution, finalNodeIds, now }: { execution: Execution; finalNodeIds: Set<string>; now: number }) {
+/** fixed: 제품 소개 미리보기처럼 끌기·스크롤·확대를 막고, 모든 단계가 칸 안에 들어오게 줄여 보여준다 */
+export default function ExecutionStageView({ execution, finalNodeIds, now, fixed = false }: { execution: Execution; finalNodeIds: Set<string>; now: number; fixed?: boolean }) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   useEffect(() => {
@@ -93,7 +94,8 @@ export default function ExecutionStageView({ execution, finalNodeIds, now }: { e
   // 칸 너비에 맞춰 줄이되 글씨가 읽히지 않을 만큼(0.7배 미만) 줄이지 않고, 1단계부터 왼쪽 정렬한다.
   // 넘치는 단계는 가로로 끌거나 스크롤해서 본다.
   const contentWidth = (stages.length - 1) * COLUMN_WIDTH + CARD_WIDTH + 32
-  const zoom = width ? Math.min(1, Math.max(0.7, width / contentWidth)) : 1
+  const zoom = width ? Math.min(1, Math.max(fixed ? 0.4 : 0.7, width / contentWidth)) : 1
+  const overflow = width > 0 && contentWidth * zoom > width
   return <div ref={wrapRef} className="stage-view" style={{ height: Math.max(220, (tallest * ROW_HEIGHT + LABEL_OFFSET) * zoom + 36) }}>
     <ReactFlow
       key={Math.round(zoom * 100)}
@@ -107,9 +109,14 @@ export default function ExecutionStageView({ execution, finalNodeIds, now }: { e
       nodesConnectable={false}
       elementsSelectable={false}
       zoomOnScroll={false}
-      panOnScroll
+      panOnScroll={!fixed}
+      // 고정 모드라도 칸보다 넓으면(좁은 화면) 끌어서 다음 단계를 볼 수 있게 한다
+      panOnDrag={!fixed || overflow}
+      zoomOnPinch={!fixed}
+      zoomOnDoubleClick={!fixed}
+      preventScrolling={!fixed}
       proOptions={{ hideAttribution: true }}
     />
-    {width > 0 && contentWidth * zoom > width && <span className="stage-pan-hint">← 가로로 끌거나 스크롤해서 다음 단계를 볼 수 있습니다 →</span>}
+    {overflow && <span className="stage-pan-hint">← 가로로 끌거나 스크롤해서 다음 단계를 볼 수 있습니다 →</span>}
   </div>
 }

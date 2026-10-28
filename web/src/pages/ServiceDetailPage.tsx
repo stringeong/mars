@@ -304,12 +304,14 @@ export default function ServiceDetailPage() {
   }, [canvasHeight])
   useEffect(() => {
     // 크게 보기를 켜고 끌 때 블록이 화면 안에 들어오도록 다시 맞춘다
+    // 캔버스 크기가 한 프레임 늦게 반영되기도 해서 한 번 더 맞춘다
     const timer = window.setTimeout(() => flowRef.current?.fitView({ duration: 200 }), 150)
-    if (!canvasFull) return () => window.clearTimeout(timer)
+    const again = window.setTimeout(() => flowRef.current?.fitView({ duration: 200 }), 450)
+    if (!canvasFull) return () => { window.clearTimeout(timer); window.clearTimeout(again) }
     function onKeyDown(event: KeyboardEvent) { if (event.key === 'Escape') setCanvasFull(false) }
     window.addEventListener('keydown', onKeyDown)
     document.body.classList.add('canvas-fullscreen')
-    return () => { window.clearTimeout(timer); window.removeEventListener('keydown', onKeyDown); document.body.classList.remove('canvas-fullscreen') }
+    return () => { window.clearTimeout(timer); window.clearTimeout(again); window.removeEventListener('keydown', onKeyDown); document.body.classList.remove('canvas-fullscreen') }
   }, [canvasFull])
 
   // 지금 연결 기준으로 블록을 다시 늘어놓는다. 되돌리기로 이전 배치로 돌아갈 수 있다

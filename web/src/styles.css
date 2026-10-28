@@ -593,7 +593,11 @@ tr.clickable:hover { background: #f8fafc; }
 
 /* 첫 화면 */
 .mk-hero { padding: 72px 0 48px; }
-.mk-hero-inner { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: 56px; }
+/* 소개 문구를 위에, 예시 창을 아래 전체 폭으로 둔다. 생성된 워크플로우 블록이 실제 크기에 가깝게 보이도록 */
+.mk-hero-inner { display: grid; grid-template-columns: minmax(0, 1fr); gap: 40px; }
+.mk-hero-copy { max-width: 760px; margin: 0 auto; text-align: center; }
+.mk-hero-copy .mk-hero-actions { justify-content: center; }
+.mk-hero-visual { width: min(1000px, 100%); margin: 0 auto; }
 .mk-hero h1 { font-size: 42px; font-weight: 700; line-height: 1.25; letter-spacing: -.02em; }
 .mk-hero-copy > p { margin-top: 16px; color: var(--mk-sub); font-size: 16px; line-height: 1.7; }
 .mk-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; }

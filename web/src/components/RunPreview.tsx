@@ -169,7 +169,7 @@ export default function RunPreview({ demo, runKey }: { demo: Demo; runKey: numbe
         </div>
         <div className="task-status-summary">{Object.entries(TASK_STATUS).map(([status, meta]) => { const count = execution.tasks.filter((task) => task.status === status).length; return count ? <span key={status} className={`task-status ${status}`}><i aria-hidden="true">{meta.icon}</i>{meta.label} {count}</span> : null })}</div>
         {view === 'stages'
-          ? <ExecutionStageView execution={execution} finalNodeIds={new Set(execution.final_node_ids ?? [])} now={now} />
+          ? <ExecutionStageView execution={execution} finalNodeIds={new Set(execution.final_node_ids ?? [])} now={now} fixed />
           : <ExecutionGantt execution={execution} now={now} />}
       </section>
 

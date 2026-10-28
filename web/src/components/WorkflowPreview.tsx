@@ -1,5 +1,6 @@
-import { Background, Edge, MarkerType, Node, ReactFlow } from '@xyflow/react'
+import { Background, Edge, MarkerType, Node, ReactFlow, ReactFlowInstance } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { useEffect, useRef } from 'react'
 import { blockId, Demo } from '../demos'
 import { stagePositions } from '../flowLayout'
 import AgentBlockNode from './AgentBlockNode'
@@ -12,6 +13,16 @@ const CLOUD_NAMES = { openai: 'OpenAI', anthropic: 'Anthropic', gemini: 'Gemini'
 /** 제품 소개의 예시 캔버스. 편집기와 같은 블록·연결선·배치 규칙으로 그린다.
  *  블록을 끌 수는 없고, onSelect가 있으면 눌러서 고를 블록을 정한다(편집 예시). */
 export default function WorkflowPreview({ demo, model, selectedId, onSelect }: { demo: Demo; model: string; selectedId?: string | null; onSelect?: (id: string) => void }) {
+  const flowRef = useRef<ReactFlowInstance<Node, Edge> | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  // 칸 크기가 바뀌면(창 크기·예시 전환) 블록이 모두 보이도록 다시 맞춘다
+  useEffect(() => {
+    const element = wrapRef.current
+    if (!element) return
+    const observer = new ResizeObserver(() => flowRef.current?.fitView({ padding: 0.08 }))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [])
   const columns = demo.stages.map((stage, column) => stage.map((_, row) => blockId(column, row)))
   const positions = stagePositions(columns)
   const nodes: Node[] = demo.stages.flatMap((stage, column) => stage.map((block, row) => {
@@ -39,12 +50,13 @@ export default function WorkflowPreview({ demo, model, selectedId, onSelect }: {
   // 좁은 화면에서도 글씨가 읽히도록 단계 수만큼 최소 폭을 두고, 넘치면 가로로 스크롤한다
   // 병렬 블록이 많아 열이 높아지면 캔버스도 키워 블록이 너무 작아지지 않게 한다
   const tallest = Math.max(...demo.stages.map((stage) => stage.length))
-  return <div className="mk-flow-scroll"><div className={`mk-flow-preview${onSelect ? ' editable' : ''}`} style={{ minWidth: demo.stages.length * 210, height: Math.max(300, 100 + tallest * 120) }}>
+  return <div className="mk-flow-scroll"><div ref={wrapRef} className={`mk-flow-preview${onSelect ? ' editable' : ''}`} style={{ minWidth: demo.stages.length * 210, height: Math.max(300, 40 + tallest * 185) }}>
     <ReactFlow
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
       edgeTypes={edgeTypes}
+      onInit={(instance) => { flowRef.current = instance }}
       onNodeClick={onSelect ? (_, node) => onSelect(node.id) : undefined}
       fitView
       fitViewOptions={{ padding: 0.08 }}
