@@ -6,7 +6,8 @@ export const FITS: Fit[] = ['동시 처리', '민감한 자료', '반복 작업'
 export const EXAMPLE_GROUPS = ['전체', '생활', '업무', '공부', '개발'] as const
 export type ExampleGroup = typeof EXAMPLE_GROUPS[number]
 
-export type Example = { group: Exclude<ExampleGroup, '전체'>; title: string; prompt: string; fits: Fit[]; featured?: boolean }
+// keywords: 제목·문장에 없지만 검색에 걸려야 하는 말
+export type Example = { group: Exclude<ExampleGroup, '전체'>; title: string; prompt: string; fits: Fit[]; featured?: boolean; keywords?: string }
 
 // featured: 강점(여러 기기·기기 안 자료·교차 확인)이 잘 드러나 먼저 보여줄 예시
 export const EXAMPLES: Example[] = [
@@ -21,6 +22,7 @@ export const EXAMPLES: Example[] = [
   { group: '업무', title: '설문 주관식 분석', prompt: '설문 주관식 응답 1,000건을 주제별로 묶고 대표 의견을 뽑아줘', fits: ['동시 처리'], featured: true },
   { group: '업무', title: '과제 피드백 초안', prompt: '학생 과제 30개를 채점 기준표에 맞춰 1차 피드백 초안을 써줘', fits: ['동시 처리', '민감한 자료'], featured: true },
   { group: '업무', title: '문서 번역', prompt: '제품 설명서를 장별로 나눠 영어로 번역하고, 다른 모델로 용어와 어색한 문장을 확인해줘', fits: ['동시 처리', '교차 확인'], featured: true },
+  { group: '업무', title: '고객 정보 마스킹', prompt: '고객 상담 기록에서 이름·전화번호·주소·카드번호를 찾아 가리고, 가린 본문으로 문의 유형을 분류해줘', fits: ['민감한 자료', '반복 작업'], featured: true, keywords: '마스킹 개인정보 비식별' },
   { group: '업무', title: '매출 보고 요약', prompt: '매주 받는 매출 엑셀을 정리해 지난주와 비교한 보고용 요약을 만들어줘', fits: ['반복 작업', '민감한 자료'] },
   { group: '업무', title: '회의록 정리', prompt: '회의록을 읽고 결정 사항과 할 일을 담당자별로 정리해줘', fits: ['반복 작업'] },
   { group: '업무', title: '민원 분류', prompt: '접수된 민원 문장을 유형별로 나누고 핵심 키워드를 뽑아줘', fits: ['동시 처리', '민감한 자료'] },
@@ -28,6 +30,7 @@ export const EXAMPLES: Example[] = [
   { group: '업무', title: '고객 리뷰 분석', prompt: '상품 리뷰를 감정별로 나누고 자주 나오는 불만과 개선점을 정리해줘', fits: ['동시 처리', '반복 작업'] },
   { group: '업무', title: '주간 보고서', prompt: '이번 주 업무 메모들을 모아 팀 주간 보고서 형식으로 정리해줘', fits: ['반복 작업'] },
   { group: '업무', title: '견적서 비교', prompt: '업체 견적서 PDF 다섯 개를 항목별로 맞춰 비교표와 추천 의견을 써줘', fits: ['동시 처리', '교차 확인'] },
+  { group: '업무', title: '외부 공유 전 가리기', prompt: '외부에 보낼 보고서에서 사람 이름·연락처·내부 금액을 가리고, 다른 모델로 한 번 더 읽어 빠진 곳이 없는지 확인해줘', fits: ['민감한 자료', '교차 확인'], keywords: '마스킹 개인정보 비식별' },
   { group: '업무', title: '지원서 1차 검토', prompt: '지원서 40개를 채용 공고 요건에 맞춰 1차 검토 메모를 써줘', fits: ['동시 처리', '민감한 자료'] },
   { group: '업무', title: '회의 녹취 정리', prompt: '회의 녹취록을 화자별로 나눠 요약하고 후속 조치를 뽑아줘', fits: ['민감한 자료', '반복 작업'] },
   { group: '공부', title: '논문 비교 요약', prompt: '논문 PDF 다섯 편을 각각 요약하고 공통점과 차이를 표로 비교해줘', fits: ['동시 처리'], featured: true },
@@ -36,8 +39,10 @@ export const EXAMPLES: Example[] = [
   { group: '공부', title: '자기소개서 첨삭', prompt: '자기소개서를 문항별로 다듬고, 다른 모델로 한 번 더 읽어 어색한 곳을 짚어줘', fits: ['민감한 자료', '교차 확인'] },
   { group: '공부', title: '오답 노트', prompt: '채점한 시험지 내용에서 틀린 문제를 유형별로 묶어 오답 노트를 만들어줘', fits: ['반복 작업'] },
   { group: '공부', title: '발표 준비', prompt: '조사한 자료 파일들을 읽고 10분 발표용 슬라이드 개요와 대본을 써줘', fits: ['동시 처리', '교차 확인'] },
+  { group: '공부', title: '인터뷰 익명화', prompt: '연구 인터뷰 녹취록에서 참여자 이름·소속·지역을 가명으로 바꾸고, 익명화한 녹취록으로 주제를 정리해줘', fits: ['민감한 자료', '동시 처리'], keywords: '마스킹 개인정보 비식별' },
   { group: '개발', title: '장애 보고서 초안', prompt: '에러 로그와 최근 변경 내역을 함께 보고 장애 원인 보고서 초안을 써줘', fits: ['민감한 자료', '교차 확인'], featured: true },
   { group: '개발', title: '로그 이상 탐지', prompt: '서버 로그를 구간별로 나눠 오류 패턴을 찾고 원인 후보를 정리해줘', fits: ['동시 처리', '민감한 자료'] },
+  { group: '개발', title: '로그 민감정보 마스킹', prompt: '서버 로그 파일들을 나눠 이메일·IP·토큰 같은 민감 정보를 가리고, 공유해도 되는 로그로 만들어줘', fits: ['민감한 자료', '동시 처리'], keywords: '마스킹 개인정보 비식별' },
   { group: '개발', title: '테스트 실패 묶기', prompt: '테스트 실패 로그 수십 개를 원인별로 묶고 먼저 고칠 순서를 정해줘', fits: ['동시 처리'] },
   { group: '개발', title: '코드 리뷰', prompt: '변경된 파일들을 나눠 검토하고 공통으로 보이는 문제를 리뷰 의견으로 모아줘', fits: ['동시 처리', '교차 확인'] },
   { group: '개발', title: '문서·코드 불일치 찾기', prompt: 'API 문서와 코드 주석을 비교해 서로 맞지 않는 부분을 찾아줘', fits: ['교차 확인'] },

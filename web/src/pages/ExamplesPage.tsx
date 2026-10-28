@@ -18,7 +18,7 @@ export default function ExamplesPage() {
   const ordered = [...EXAMPLES.filter((example) => example.featured), ...EXAMPLES.filter((example) => !example.featured)]
   const shown = ordered.filter((example) => (group === '전체' || example.group === group)
     && (!fit || example.fits.includes(fit))
-    && (!keyword || `${example.title} ${example.prompt}`.toLowerCase().includes(keyword)))
+    && (!keyword || `${example.title} ${example.prompt} ${example.keywords ?? ''}`.toLowerCase().includes(keyword)))
   // 커뮤니티 공유는 분야·이유 태그가 없으니 검색어만 적용한다
   const sharedShown = community.filter((item) => !keyword
     || `${item.title} ${item.description} ${item.author} ${item.graph.nodes.map((node) => node.name).join(' ')}`.toLowerCase().includes(keyword))
@@ -37,7 +37,7 @@ export default function ExamplesPage() {
     <section className="mk-section">
       <div className="mk-shell">
         <div className="mk-example-tools">
-          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="예시 검색 (예: 계약서, 리뷰, 로그)" aria-label="예시 검색" />
+          <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="예시 검색 (예: 계약서, 마스킹, 로그)" aria-label="예시 검색" />
           <div className="mk-filter" role="tablist" aria-label="분야">
             {EXAMPLE_GROUPS.map((name) => <button key={name} type="button" role="tab" aria-selected={group === name} className={group === name ? 'active' : ''} onClick={() => setGroup(name)}>
               {name}<small>{name === '전체' ? EXAMPLES.length : EXAMPLES.filter((example) => example.group === name).length}</small>
