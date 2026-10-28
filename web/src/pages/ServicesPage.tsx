@@ -5,10 +5,14 @@ import { defaultWorker, GenerationFailed, generateOnWorker, workerProgressLabel 
 import { CloudProvider, Device, GenerationError, GenerationJob, GeneratorModels, Service } from '../types'
 import { GENERATION_STAGE_LABELS, PROVIDER_LABELS } from '../workflow'
 
+// 누르면 입력창에 채워지는 예시. 생활·업무·공부에서 바로 떠올릴 만한 일로 고른다
 const suggestions = [
-  { label: '자료 조사 보고서', text: '주제에 대한 믿을 만한 자료를 모으고 근거를 분석해서 간결한 조사 보고서로 정리해줘.' },
-  { label: '문서 검토', text: '올린 문서를 읽고 핵심 쟁점과 위험 요소를 찾아 구조화된 검토 의견을 작성해줘.' },
-  { label: '데이터 분석', text: '데이터를 분석해서 의미 있는 추세를 찾고 근거와 함께 의사결정 제안을 정리해줘.' },
+  { label: '이번 달 가계부 정리', text: '카드·계좌 내역 파일을 항목별로 분류하고, 지난달과 비교해 이번 달 지출 리포트를 만들어줘' },
+  { label: '회의록에서 할 일 뽑기', text: '회의록을 읽고 결정 사항과 담당자별 할 일을 표로 정리해줘' },
+  { label: '여행 일정 짜기', text: '친구 4명과 가는 부산 2박 3일 여행 일정과 1인당 예산을 짜줘' },
+  { label: '고객 리뷰 분석', text: '상품 리뷰를 긍정·부정으로 나누고 자주 나오는 불만과 개선 아이디어를 정리해줘' },
+  { label: '논문 비교 요약', text: '논문 PDF 세 편을 각각 요약하고 연구 방법과 결과를 표로 비교해줘' },
+  { label: '자기소개서 첨삭', text: '자기소개서를 문항별로 다듬고 어색한 표현과 근거가 약한 부분을 짚어줘' },
 ]
 
 /** 새 워크플로우: 대화형 앱처럼 입력창 하나로 시작한다. */

@@ -150,7 +150,7 @@ export default function DownloadPage() {
           <div className="mk-card mk-side-card">
             <b>계정이 아직 없나요?</b>
             <p>워커는 M.A.R.S 계정의 기기로 등록돼요.</p>
-            <Link className="mk-btn mk-btn-primary" to="/login?mode=register">계정 만들기</Link>
+            <Link className="mk-btn mk-btn-primary" to="/login?mode=register">회원가입</Link>
           </div>
           <div className="mk-card mk-side-card">
             <b>다른 운영체제</b>

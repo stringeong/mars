@@ -43,11 +43,45 @@ const examples: { group: typeof EXAMPLE_GROUPS[number]; title: string; prompt: s
   { group: '개발', title: '코드 리뷰', prompt: '변경된 파일들을 나눠 검토하고 공통으로 보이는 문제를 리뷰 의견으로 모아줘', fits: ['동시 처리', '교차 확인'] },
 ]
 
+// 첫 화면 예시 화면에서 번갈아 보여줄 요청과, 그 요청으로 만들어지는 흐름(단계별 에이전트와 맡은 기기)
+const DEMOS: { label: string; prompt: string; stages: { name: string; device: string }[][] }[] = [
+  {
+    label: '가계부',
+    prompt: '카드·계좌 내역으로 이번 달 어디에 돈을 많이 썼는지 리포트로 정리해줘',
+    stages: [[{ name: '카드 내역 분류', device: '데스크톱' }, { name: '계좌 내역 분류', device: '노트북' }], [{ name: '지출 분석', device: '데스크톱' }], [{ name: '리포트 작성', device: '노트북' }]],
+  },
+  {
+    label: '회의록',
+    prompt: '이번 주 회의록 세 개에서 결정 사항과 내가 할 일만 뽑아줘',
+    stages: [[{ name: '월요일 회의 요약', device: '데스크톱' }, { name: '수요일 회의 요약', device: '노트북' }, { name: '금요일 회의 요약', device: '데스크톱' }], [{ name: '할 일 정리', device: '노트북' }]],
+  },
+  {
+    label: '여행',
+    prompt: '친구 4명이랑 부산 2박 3일, 맛집 위주로 일정이랑 1인당 예산 짜줘',
+    stages: [[{ name: '맛집 조사', device: '데스크톱' }, { name: '숙소 비교', device: '노트북' }], [{ name: '일정 짜기', device: '데스크톱' }], [{ name: '예산 계산', device: '노트북' }]],
+  },
+  {
+    label: '리뷰',
+    prompt: '우리 가게 리뷰 500개에서 손님들이 가장 많이 아쉬워한 점 5개만 알려줘',
+    stages: [[{ name: '리뷰 1~250 분류', device: '데스크톱' }, { name: '리뷰 251~500 분류', device: '노트북' }], [{ name: '불만 정리', device: '데스크톱' }], [{ name: '개선 제안', device: '노트북' }]],
+  },
+]
+const DEMO_INTERVAL = 4500
+
 /** 제품 소개: 로그인하지 않은 사용자가 처음 보는 화면 */
 export default function ProductPage() {
   const { hash } = useLocation()
   const [group, setGroup] = useState<typeof EXAMPLE_GROUPS[number]>('전체')
   const shownExamples = examples.filter((example) => group === '전체' || example.group === group)
+  // 예시 화면은 저절로 넘어가다가, 사용자가 예시를 고르면 멈춘다. 움직임 줄이기 설정이면 넘기지 않는다
+  const [demoIndex, setDemoIndex] = useState(0)
+  const [demoPinned, setDemoPinned] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
+  useEffect(() => {
+    if (demoPinned) return
+    const timer = window.setInterval(() => setDemoIndex((index) => (index + 1) % DEMOS.length), DEMO_INTERVAL)
+    return () => window.clearInterval(timer)
+  }, [demoPinned])
+  const demo = DEMOS[demoIndex]
   useEffect(() => {
     if (hash) document.getElementById(hash.slice(1))?.scrollIntoView()
     else window.scrollTo(0, 0)
@@ -63,27 +97,38 @@ export default function ProductPage() {
           <h1>가진 컴퓨터들로 꾸리는<br />나만의 AI 팀</h1>
           <p>하고 싶은 일을 문장으로 적으면 역할별 AI 에이전트가 짜이고, 집과 사무실의 PC·노트북이 나눠서 실행해요. 민감한 자료는 내 기기 밖으로 나가지 않아요.</p>
           <div className="mk-hero-actions">
-            <Link className="mk-btn mk-btn-primary mk-btn-lg" to="/login?mode=register">시작하기</Link>
+            <Link className="mk-btn mk-btn-primary mk-btn-lg" to="/login?mode=register">회원가입</Link>
             <Link className="mk-btn mk-btn-light mk-btn-lg" to="/download">워커 다운로드</Link>
           </div>
           <small className="mk-hero-note">Windows · macOS · Linux · Ollama 로컬 모델</small>
         </div>
-        <div className="mk-hero-visual" aria-hidden="true">
-          <div className="mk-window">
-            <div className="mk-window-bar"><i /><i /><i /><span>marsflowlab.com</span></div>
+        <div className="mk-hero-visual">
+          <div className="mk-window" aria-label="예시: 요청 한 문장과 그 요청으로 만들어지는 워크플로우">
+            <div className="mk-window-bar" aria-hidden="true"><i /><i /><i /><span>marsflowlab.com</span></div>
             <div className="mk-composer">
               <strong>어떤 작업을 자동화할까요?</strong>
               <div className="mk-composer-box">
-                <p>카드 사용 내역을 분류하고 이상 거래를 찾아 월간 리포트로 정리해줘</p>
-                <div className="mk-composer-bar"><span>내 워커 · qwen3:4b</span><b>↑</b></div>
+                <p key={demoIndex} className="mk-demo-text">{demo.prompt}</p>
+                <div className="mk-composer-bar" aria-hidden="true"><span>내 워커 · qwen3:4b</span><b>↑</b></div>
+              </div>
+              <div className="mk-demo-chips" role="tablist" aria-label="예시 고르기">
+                {DEMOS.map((item, index) => <button
+                  key={item.label}
+                  type="button"
+                  role="tab"
+                  aria-selected={index === demoIndex}
+                  className={index === demoIndex ? 'active' : ''}
+                  onClick={() => { setDemoIndex(index); setDemoPinned(true) }}
+                >{item.label}</button>)}
               </div>
             </div>
-            <div className="mk-mini-flow">
-              <div className="mk-mini-col"><span className="mk-chip local">분류<small>데스크톱</small></span><span className="mk-chip local">분류<small>노트북</small></span></div>
-              <i>→</i>
-              <span className="mk-chip soft">이상 거래 탐지<small>데스크톱</small></span>
-              <i>→</i>
-              <span className="mk-chip soft">리포트 작성<small>노트북</small></span>
+            <div key={demoIndex} className="mk-mini-flow mk-demo-flow">
+              {demo.stages.map((stage, index) => <div className="mk-mini-step" key={index}>
+                {index > 0 && <i aria-hidden="true">→</i>}
+                <div className="mk-mini-col">
+                  {stage.map((agent) => <span key={agent.name} className={`mk-chip ${stage.length > 1 ? 'local' : 'soft'}`}>{agent.name}<small>{agent.device}</small></span>)}
+                </div>
+              </div>)}
             </div>
           </div>
         </div>
@@ -148,7 +193,7 @@ export default function ProductPage() {
         <div><h2>첫 워크플로우를 만들어 보세요</h2><p>워커를 설치해 기기를 연결하면 바로 시작할 수 있어요.</p></div>
         <div className="mk-hero-actions">
           <Link className="mk-btn mk-btn-light mk-btn-lg" to="/download">워커 다운로드</Link>
-          <Link className="mk-btn mk-btn-outline mk-btn-lg" to="/login?mode=register">계정 만들기</Link>
+          <Link className="mk-btn mk-btn-outline mk-btn-lg" to="/login?mode=register">회원가입</Link>
         </div>
       </div>
     </section>

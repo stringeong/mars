@@ -607,7 +607,17 @@ tr.clickable:hover { background: #f8fafc; }
 .mk-mini-flow { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 6px 18px 24px; }
 .mk-mini-flow > i { color: var(--mk-muted); font-style: normal; }
 .mk-mini-col { display: grid; gap: 6px; }
-.mk-chip { display: grid; padding: 6px 11px; border-radius: 10px; font-size: 12px; font-weight: 600; text-align: center; }
+.mk-mini-step { display: flex; align-items: center; gap: 8px; }
+.mk-mini-step > i { color: var(--mk-muted); font-style: normal; }
+.mk-composer-box p.mk-demo-text { min-height: 44px; }
+.mk-demo-chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 12px; }
+.mk-demo-chips button { padding: 4px 12px; border: 1px solid var(--mk-line); border-radius: 999px; background: #fff; color: var(--mk-sub); font: inherit; font-size: 12px; cursor: pointer; }
+.mk-demo-chips button:hover { background: var(--mk-soft); }
+.mk-demo-chips button.active { border-color: var(--mk-ink); background: var(--mk-ink); color: #fff; }
+.mk-demo-text, .mk-demo-flow { animation: mk-fade .35s ease-out; }
+@keyframes mk-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .mk-demo-text, .mk-demo-flow { animation: none; } }
+.mk-chip { display: grid; padding: 6px 11px; border-radius: 10px; font-size: 12px; font-weight: 600; text-align: center; white-space: nowrap; }
 .mk-chip small { font-size: 10px; font-weight: 500; opacity: .75; }
 .mk-chip.local { background: var(--mk-ink); color: #fff; }
 
@@ -735,6 +745,10 @@ tr.clickable:hover { background: #f8fafc; }
   .mk-dl-hero h1 { font-size: 28px; }
   .mk-features, .mk-steps, .mk-privacy, .mk-examples { grid-template-columns: 1fr; }
   .mk-footer-inner { grid-template-columns: 1fr; }
+  /* 좁은 화면에서는 예시 흐름을 세로로 쌓는다: 같은 단계 블록은 가로로, 단계 사이 화살표는 아래로 */
+  .mk-demo-flow, .mk-mini-step { flex-direction: column; }
+  .mk-mini-step > i { transform: rotate(90deg); }
+  .mk-demo-flow .mk-mini-col { display: flex; flex-wrap: wrap; justify-content: center; }
 }
 
 /* ==========================================================================

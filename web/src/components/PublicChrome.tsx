@@ -19,7 +19,7 @@ export function PublicHeader() {
           ? <Link className="mk-btn mk-btn-primary" to="/services">워크스페이스로 이동</Link>
           : <>
             <Link className="mk-btn mk-btn-ghost" to="/login">로그인</Link>
-            <Link className="mk-btn mk-btn-primary" to="/login?mode=register">시작하기</Link>
+            <Link className="mk-btn mk-btn-primary" to="/login?mode=register">회원가입</Link>
           </>}
       </div>
     </div>

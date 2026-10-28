@@ -4,7 +4,7 @@ import { api, setToken } from '../api'
 
 export default function LoginPage() {
   const [searchParams] = useSearchParams()
-  // 제품 소개·다운로드 페이지의 '시작하기'는 회원가입 화면으로 연다
+  // 제품 소개·다운로드 페이지의 '회원가입'은 회원가입 화면으로 바로 연다
   const [mode, setMode] = useState<'login' | 'register'>(searchParams.get('mode') === 'register' ? 'register' : 'login')
   const [username, setUsername] = useState('')
   const [email, setEmail] = useState('')
