@@ -517,6 +517,10 @@ tr.clickable:hover { background: #f8fafc; }
 .gantt-tip span { margin-top: 2px; color: #475569; }
 .gantt-bar:hover .gantt-tip, .gantt-bar:focus .gantt-tip { display: block; }
 .gantt-waiting { margin: 0; color: var(--muted); font-size: 12px; }
+/* 좁은 화면: 레인 이름 칸을 줄이고 눈금을 3개만 남겨 막대가 보이게 한다 */
+@media (max-width: 720px) {
+  .gantt-axis, .gantt-lane { grid-template-columns: 64px minmax(0, 1fr); gap: 6px; }
+  .gantt-tick:nth-child(2), .gantt-tick:nth-child(4) { display: none; }
 
 .stage-view { position: relative; }
 .stage-pan-hint { position: absolute; right: 10px; bottom: 8px; z-index: 4; padding: 2px 8px; border-radius: 999px; background: rgba(255, 255, 255, .92); color: var(--muted); font-size: 11px; pointer-events: none; }
