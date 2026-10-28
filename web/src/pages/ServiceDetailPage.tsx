@@ -263,11 +263,13 @@ export default function ServiceDetailPage() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || event.key.toLowerCase() !== 'z') return
+      const key = event.key.toLowerCase()
+      if (!(event.metaKey || event.ctrlKey) || event.shiftKey || (key !== 'z' && key !== 'd')) return
       // 입력 칸 안에서는 브라우저의 글자 되돌리기를 그대로 쓴다
       if ((event.target as HTMLElement | null)?.closest('input, textarea, select, [contenteditable="true"]')) return
       event.preventDefault()
-      undo()
+      if (key === 'z') undo()
+      else duplicateRef.current()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
@@ -332,6 +334,26 @@ export default function ServiceDetailPage() {
     pushHistory()
     setEdges((current) => addEdge(toFlowEdge(connection.source!, connection.target!), current))
   }, [edges, pushHistory, setEdges])
+
+  // 병렬 가지를 늘릴 때 쓴다. 설정은 그대로, 연결은 앞뒤 블록과 똑같이 이어서 형제 블록을 만든다.
+  function duplicateAgent() {
+    if (!selectedAgent) return
+    const copy: AgentNode = { ...selectedAgent, id: `agent_${Date.now()}`, name: `${selectedAgent.name} (복사)`, final: false, final_manual: false }
+    const original = nodes.find((node) => node.id === selectedAgent.id)
+    const origin = original?.position ?? { x: 80, y: 80 }
+    const below = (original?.measured?.height ?? 160) + 30
+    const copiedEdges = edges.flatMap((edge) =>
+      edge.target === selectedAgent.id ? [toFlowEdge(edge.source, copy.id)]
+        : edge.source === selectedAgent.id ? [toFlowEdge(copy.id, edge.target)] : [])
+    pushHistory()
+    setAgents((current) => ({ ...current, [copy.id]: copy }))
+    setNodes((current) => [...current, { id: copy.id, type: 'agent', position: { x: origin.x, y: origin.y + below }, data: nodeData(copy) }])
+    setEdges((current) => [...current, ...copiedEdges])
+    setSelected(copy.id)
+    setMessage(`'${selectedAgent.name}' 블록을 연결까지 복제했습니다. 저장하기 전까지 Ctrl/Cmd+Z로 되돌릴 수 있습니다.`)
+  }
+  const duplicateRef = useRef(duplicateAgent)
+  duplicateRef.current = duplicateAgent
 
   function deleteAgent() {
     if (!selected) return
@@ -474,7 +496,7 @@ export default function ServiceDetailPage() {
       </div>
       <aside className="node-panel">
         {selectedAgent ? <>
-          <div className="row spread"><h2 style={{ margin: 0 }}>에이전트 블록</h2><button className="btn sm danger" onClick={deleteAgent}>삭제</button></div>
+          <div className="row spread"><h2 style={{ margin: 0 }}>에이전트 블록</h2><div className="row"><button className="btn sm ghost" title="설정과 앞뒤 연결을 그대로 복사해 병렬 블록을 만듭니다 (Ctrl/Cmd+D)" onClick={duplicateAgent}>복제</button><button className="btn sm danger" onClick={deleteAgent}>삭제</button></div></div>
           {selectedIssues.length > 0 && <ul className="validation-list node-issues">{selectedIssues.map((issue, index) => <li key={`${issue.code}-${index}`} className={issue.severity}>{issue.message}</li>)}</ul>}
           <label>이름</label><input value={selectedAgent.name} onChange={(event) => updateAgent({ name: event.target.value })} />
           <FlagToggle label="최종 블록 (출력이 실행 결과가 됨)" checked={!!selectedAgent.final} explanation={flagReasons[selectedAgent.id]?.final} onChange={setFinal} onReset={() => changeFlags({ final_manual: false })} />
