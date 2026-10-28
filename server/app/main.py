@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import ALLOWED_HOSTS, ALLOWED_ORIGINS, IS_PRODUCTION
-from .routers import auth, devices, executions, files, folders, services, settings, worker
+from .routers import auth, community, devices, executions, files, folders, services, settings, worker
 
 app = FastAPI(
     title="M.A.R.S",
@@ -28,6 +28,7 @@ app.include_router(auth.router)
 app.include_router(devices.router)
 app.include_router(services.router)
 app.include_router(folders.router)
+app.include_router(community.router)
 app.include_router(executions.router)
 app.include_router(files.router)
 app.include_router(settings.router)

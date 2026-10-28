@@ -290,6 +290,24 @@ class FolderOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+# ---------- Community ----------
+class CommunityPublish(BaseModel):
+    title: str = Field(min_length=2, max_length=60)
+    description: str = Field(default="", max_length=500)
+
+
+class CommunityWorkflowOut(BaseModel):
+    id: int
+    service_id: int
+    title: str
+    description: str
+    author: str
+    graph: dict
+    import_count: int
+    created_at: UTCDateTime
+    updated_at: UTCDateTime
+
+
 # ---------- Execution ----------
 
 

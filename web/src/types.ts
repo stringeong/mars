@@ -57,7 +57,7 @@ export interface Graph {
 export type CloudProvider = 'openai' | 'anthropic' | 'gemini'
 
 export interface GenerationInfo {
-  source: 'llm' | 'fallback'
+  source: 'llm' | 'fallback' | 'community'
   location: 'local' | 'cloud' | 'worker' | null
   provider: string | null
   model: string | null
@@ -65,6 +65,8 @@ export interface GenerationInfo {
   device_name?: string
   generated_at?: string
   fallback_reason?: string
+  // 커뮤니티에서 가져온 경우 공유한 사람
+  author?: string
 }
 
 export interface GenerationError {
@@ -141,6 +143,19 @@ export interface WorkflowFolder {
   id: number
   name: string
   created_at: string
+}
+
+/** 커뮤니티에 공유된 워크플로우. 워커·파일·텍스트 입력은 빠져 있다 */
+export interface CommunityWorkflow {
+  id: number
+  service_id: number
+  title: string
+  description: string
+  author: string
+  graph: Graph
+  import_count: number
+  created_at: string
+  updated_at: string
 }
 
 export interface DeviceModels {

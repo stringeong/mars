@@ -132,6 +132,7 @@ export function generatorPlace(info: { location: string | null; provider: string
 export function generationLabel(info: GenerationInfo | null | undefined) {
   if (!info) return '기록 없음 (이전 버전에서 생성)'
   if (info.source === 'fallback') return '기본 워크플로우 (규칙 기반)'
+  if (info.source === 'community') return `커뮤니티에서 가져옴 · ${info.author ?? '알 수 없음'}`
   return `${generatorPlace(info)} · ${info.model}`
 }
 

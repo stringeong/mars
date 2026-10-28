@@ -781,6 +781,21 @@ a.mk-more { width: max-content; text-decoration: none; }
   .mk-canvas-col { display: flex; flex-wrap: wrap; justify-content: center; }
 }
 
+/* 활용 예시 — 커뮤니티 공유 */
+.mk-community-section { margin-top: 44px; }
+.mk-beta { padding: 1px 8px; border: 1px solid var(--mk-line); border-radius: 999px; color: var(--mk-muted); font-size: 11px; }
+.mk-community-head { display: flex; align-items: baseline; gap: 8px; margin: 0 0 12px; }
+.mk-community-head b { font-size: 16px; }
+.mk-community-head small { color: var(--mk-muted); font-size: 13px; }
+.mk-community { grid-template-rows: auto auto auto 1fr auto auto; background: #fff; border: 1px solid var(--mk-line); }
+.mk-community-flow { display: grid; gap: 4px; margin: 0; padding: 0; list-style: none; counter-reset: stage; }
+.mk-community-flow li { counter-increment: stage; color: var(--mk-sub); font-size: 12.5px; line-height: 1.5; }
+.mk-community-flow li::before { content: counter(stage) ". "; color: var(--mk-muted); }
+.mk-community-meta { color: var(--mk-muted); font-size: 12px; }
+.mk-community .mk-example-use { justify-self: start; padding: 0; border: 0; background: none; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.mk-community .mk-example-use:disabled { color: var(--mk-muted); cursor: default; }
+.mk-community-empty { padding: 18px 20px; border: 1px dashed var(--mk-line); border-radius: 16px; color: var(--mk-muted); font-size: 14px; }
+
 /* ==========================================================================
    단순한 화면 톤 — 대화형 앱(ChatGPT·Claude)처럼: 흰 바탕, 밝은 회색 사이드바,
    검은 강조 버튼 하나, 그라데이션·그림자 없음. 이 블록 아래만 지우면 이전 모습으로 돌아간다.
@@ -942,6 +957,14 @@ body.resizing-sidebar { cursor: col-resize; user-select: none; }
 .dashboard-workflow-card .card-open p { flex: 1; margin: 7px 0 12px; color: #7d8697; font-size: 11px; line-height: 1.5; }
 .dashboard-workflow-card .card-open small { color: #9ba3b1; font-size: 9px; }
 .dashboard-workflow-card .card-folder { margin: 0 18px 14px; width: auto; padding: 5px 8px; font-size: 12px; }
+
+/* 커뮤니티 공유 */
+.share-dialog .share-body { display: grid; gap: 6px; padding: 0 22px 14px; }
+.share-dialog .share-body label { margin: 6px 0 0; font-size: 12px; font-weight: 600; }
+.share-dialog .share-note { margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: #f7f7f5; color: #5d5d59; font-size: 12px; line-height: 1.7; }
+.share-dialog .share-note b { margin-right: 6px; color: #1f1f1d; }
+.share-dialog .share-meta { color: var(--muted); font-size: 11.5px; }
+.share-dialog .error { margin: 0; color: var(--danger); font-size: 12px; }
 
 /* 실행 이력: 표 하나 */
 .history-overview { grid-template-columns: minmax(0, 1fr); }

@@ -288,6 +288,28 @@ class Service(Base):
     executions: Mapped[list["Execution"]] = relationship(back_populates="service")
 
 
+class CommunityWorkflow(Base):
+    """다른 사용자도 볼 수 있게 공유한 워크플로우.
+
+    공유하는 순간의 구성을 따로 저장한다. 워커·디렉토리·파일·텍스트 입력은 빼고 저장하며,
+    원본을 고쳐도 다시 공유하기 전까지는 바뀌지 않는다.
+    """
+
+    __tablename__ = "community_workflows"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    service_id: Mapped[int] = mapped_column(ForeignKey("services.id"), unique=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(60))
+    description: Mapped[str] = mapped_column(Text, default="")
+    graph: Mapped[dict] = mapped_column(JSON, default=dict)
+    import_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+    author: Mapped[User] = relationship()
+
+
 class Execution(Base):
     """서비스 1회 실행."""
 

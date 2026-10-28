@@ -347,5 +347,7 @@ def delete_service(
     # 이 워크플로우에 묶인 외부 전송 동의는 지우고, 워커 생성 요청은 결과 연결만 끊는다
     db.query(models.ExternalTransferConsent).filter(models.ExternalTransferConsent.service_id == service.id).delete(synchronize_session=False)
     db.query(models.GenerationJob).filter(models.GenerationJob.service_id == service.id).update({"service_id": None}, synchronize_session=False)
+    # 커뮤니티에 공유한 사본도 함께 내린다
+    db.query(models.CommunityWorkflow).filter(models.CommunityWorkflow.service_id == service.id).delete(synchronize_session=False)
     db.delete(service)
     db.commit()

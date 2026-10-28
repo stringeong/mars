@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { api, getDeviceDirectories, getDeviceModels } from '../api'
 import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
 import DeletableEdge from '../components/DeletableEdge'
+import ShareDialog from '../components/ShareDialog'
 import ValidationPanel from '../components/ValidationPanel'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
 import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
@@ -71,6 +72,7 @@ export default function ServiceDetailPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const [service, setService] = useState<Service | null>(null)
+  const [shareOpen, setShareOpen] = useState(false)
   const [agents, setAgents] = useState<Record<string, AgentNode>>({})
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
@@ -457,7 +459,7 @@ export default function ServiceDetailPage() {
   return <div className="builder-page">
     <header className="builder-header">
       <div><div className="breadcrumb">M.A.R.S <span>/</span> Workflows <span>/</span> Builder</div><h1>{svcName}</h1><p>{svcDesc || 'Build and assign a distributed multi-agent workflow.'}</p><div className="generation-badge"><span>생성 모델</span><strong>{generationLabel(service.generation_info)}</strong></div></div>
-      <div className="builder-header-actions"><button className="btn ghost" disabled={!historySize} onClick={undo} title="Ctrl/Cmd+Z">↶ 되돌리기{historySize ? ` (${historySize})` : ''}</button><button className="btn ghost" onClick={async () => { if (await save()) navigate(`/services/${id}/setup`) }}>설정 확인 표</button><button className="btn ghost" disabled={syncing} onClick={() => { if (confirm('서버의 최신 워크플로우와 Worker 정보로 다시 불러올까요? 저장하지 않은 변경은 사라집니다.')) setSyncVersion((version) => version + 1) }}>{syncing ? '동기화 중…' : '↻ 서버와 재동기화'}</button><button className="btn ghost" onClick={() => navigate('/services')}>All workflows</button><button className="btn" onClick={save}>Save changes</button></div>
+      <div className="builder-header-actions"><button className="btn ghost" disabled={!historySize} onClick={undo} title="Ctrl/Cmd+Z">↶ 되돌리기{historySize ? ` (${historySize})` : ''}</button><button className="btn ghost" onClick={async () => { if (await save()) navigate(`/services/${id}/setup`) }}>설정 확인 표</button><button className="btn ghost" disabled={syncing} onClick={() => { if (confirm('서버의 최신 워크플로우와 Worker 정보로 다시 불러올까요? 저장하지 않은 변경은 사라집니다.')) setSyncVersion((version) => version + 1) }}>{syncing ? '동기화 중…' : '↻ 서버와 재동기화'}</button><button className="btn ghost" onClick={() => setShareOpen(true)}>커뮤니티에 공유</button><button className="btn ghost" onClick={() => navigate('/services')}>All workflows</button><button className="btn" onClick={save}>Save changes</button></div>
     </header>
     {message && <div style={{ color: 'var(--success)', marginBottom: 8 }}>{message}</div>}
     {error && <div className="error">{error}</div>}
@@ -551,6 +553,7 @@ export default function ServiceDetailPage() {
         </>}
       </aside>
     </div>
+    {shareOpen && service && <ShareDialog serviceId={service.id} defaultTitle={svcName} defaultDescription={svcDesc} save={save} onClose={() => setShareOpen(false)} />}
     {fileLibraryOpen && <div className="file-library-modal-backdrop" role="presentation" onMouseDown={() => setFileLibraryOpen(false)}>
       <section className="file-library-modal" role="dialog" aria-modal="true" aria-labelledby="file-library-title" onMouseDown={(event) => event.stopPropagation()}>
         <header><div><span className="eyebrow">FILE LIBRARY</span><h2 id="file-library-title">기존 파일 선택</h2></div><button type="button" className="modal-close" aria-label="닫기" onClick={() => setFileLibraryOpen(false)}>×</button></header>

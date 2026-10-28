@@ -799,6 +799,58 @@ class TestFolders:
         assert client.delete(f"/folders/{folder['id']}", headers=auth).status_code == 404
 
 
+class TestCommunity:
+    """공유한 구성은 로그인 없이 보이고, 내 기기·파일·텍스트 입력은 빠진 채로 공유된다."""
+
+    def _published(self, client, db):
+        auth = signup_and_login(client)
+        service = create_service(client, auth)
+        row = db.get(models.Service, service["id"])
+        graph = copy.deepcopy(row.graph)
+        graph["nodes"][0].update(worker_id=7, directory_ids=[3], uploaded_file_ids=[9], text_input="내 계좌 메모")
+        graph["input_slots"] = [{"id": "card", "description": "카드 내역", "format": "CSV", "file_ids": [9], "directory_ids": [3]}]
+        row.graph = graph
+        db.commit()
+        r = client.put(f"/services/{service['id']}/publication", json={"title": "카드 지출 정리", "description": "월말에 쓰는 구성"}, headers=auth)
+        assert r.status_code == 200, r.text
+        return auth, service, r.json()
+
+    def test_publish_strips_private_values_and_is_public(self, client, db):
+        _, _, entry = self._published(client, db)
+        node = entry["graph"]["nodes"][0]
+        assert (node["worker_id"], node["directory_ids"], node["uploaded_file_ids"], node["text_input"]) == (None, [], [], "")
+        assert entry["graph"]["input_slots"][0]["file_ids"] == [] and entry["graph"]["input_slots"][0]["description"] == "카드 내역"
+        listed = client.get("/community/workflows").json()
+        assert [(item["title"], item["author"]) for item in listed] == [("카드 지출 정리", "user1")]
+
+    def test_republish_updates_one_entry_and_unpublish_removes_it(self, client, db):
+        auth, service, entry = self._published(client, db)
+        again = client.put(f"/services/{service['id']}/publication", json={"title": "카드 지출 리포트"}, headers=auth).json()
+        assert again["id"] == entry["id"]
+        assert client.get(f"/services/{service['id']}/publication", headers=auth).json()["title"] == "카드 지출 리포트"
+        assert client.delete(f"/services/{service['id']}/publication", headers=auth).status_code == 204
+        assert client.get(f"/services/{service['id']}/publication", headers=auth).json() is None
+        assert client.get("/community/workflows").json() == []
+
+    def test_import_copies_to_my_workflows(self, client, db):
+        _, _, entry = self._published(client, db)
+        other = signup_and_login(client, username="user2", email="u2@example.com")
+        r = client.post(f"/community/workflows/{entry['id']}/import", headers=other)
+        assert r.status_code == 201, r.text
+        imported = r.json()
+        assert imported["name"] == "카드 지출 정리"
+        assert imported["generation_info"]["source"] == "community" and imported["generation_info"]["author"] == "user1"
+        assert [item["id"] for item in client.get("/services", headers=other).json()] == [imported["id"]]
+        assert client.get("/community/workflows").json()[0]["import_count"] == 1
+
+    def test_only_owner_can_publish_and_deleting_workflow_unpublishes(self, client, db):
+        auth, service, _ = self._published(client, db)
+        other = signup_and_login(client, username="user2", email="u2@example.com")
+        assert client.put(f"/services/{service['id']}/publication", json={"title": "가로채기"}, headers=other).status_code == 404
+        assert client.delete(f"/services/{service['id']}", headers=auth).status_code == 204
+        assert client.get("/community/workflows").json() == []
+
+
 class TestDeletion:
     """실행 이력·워크플로우 삭제. 실행 중인 것은 막고, 업로드 파일과 비용 집계는 남긴다."""
 
