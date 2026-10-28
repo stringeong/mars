@@ -6,15 +6,20 @@ import Sidebar, { loadSidebarLayout, saveSidebarLayout, SIDEBAR_COLLAPSED_WIDTH,
 import { onServiceRenamed } from './workflow'
 import DashboardPage from './pages/DashboardPage'
 import DevicesPage from './pages/DevicesPage'
+import DownloadPage from './pages/DownloadPage'
 import ExecutionPage from './pages/ExecutionPage'
 import FilesPage from './pages/FilesPage'
 import HistoryPage from './pages/HistoryPage'
 import LoginPage from './pages/LoginPage'
+import ProductPage from './pages/ProductPage'
 import SettingsPage from './pages/SettingsPage'
 import ServiceDetailPage from './pages/ServiceDetailPage'
 import ServicesPage from './pages/ServicesPage'
 import WorkflowRunPage from './pages/WorkflowRunPage'
 import WorkflowSetupPage from './pages/WorkflowSetupPage'
+
+// 로그인 없이 보는 화면: 사이드바 없이 전체 폭을 쓴다
+const PUBLIC_PATHS = ['/login', '/about', '/download']
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   if (!getToken()) return <Navigate to="/login" replace />
@@ -24,6 +29,7 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 export default function App() {
   const location = useLocation()
   const authed = !!getToken()
+  const withShell = authed && !PUBLIC_PATHS.includes(location.pathname)
   // 사이드바 폭·접힘 상태 (브라우저에 기억한다)
   const [sidebarLayout, setSidebarLayout] = useState<SidebarLayout>(loadSidebarLayout)
   function changeSidebarLayout(next: SidebarLayout) {
@@ -57,14 +63,17 @@ export default function App() {
   }), [])
 
   return (
-    <div className={authed && location.pathname !== '/login' ? 'layout authenticated-layout' : 'layout'} style={authed ? shellStyle : undefined}>
-      {authed && location.pathname !== '/login' && (
+    <div className={withShell ? 'layout authenticated-layout' : 'layout'} style={withShell ? shellStyle : undefined}>
+      {withShell && (
         <Sidebar services={services} devices={devices} layout={sidebarLayout} onLayoutChange={changeSidebarLayout} />
       )}
       <main className="content">
         <Routes>
           <Route path="/login" element={<LoginPage />} />
-          <Route path="/" element={<Navigate to="/services" replace />} />
+          <Route path="/about" element={<ProductPage />} />
+          <Route path="/download" element={<DownloadPage />} />
+          {/* 처음 들어오면: 로그인했으면 워크스페이스, 아니면 제품 소개 */}
+          <Route path="/" element={authed ? <Navigate to="/services" replace /> : <ProductPage />} />
           <Route path="/dashboard" element={<RequireAuth><DashboardPage /></RequireAuth>} />
           <Route path="/services" element={<RequireAuth><ServicesPage /></RequireAuth>} />
           <Route path="/services/:id/run" element={<RequireAuth><WorkflowRunPage /></RequireAuth>} />
