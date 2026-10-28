@@ -27,21 +27,33 @@ const privacy = [
 // 이 제품이 잘 맞는 이유: 나눠서 동시에 / 밖으로 보내기 싫은 자료 / 입력만 바뀌는 반복 / 다른 모델로 한 번 더 확인
 type Fit = '동시 처리' | '민감한 자료' | '반복 작업' | '교차 확인'
 const EXAMPLE_GROUPS = ['전체', '생활', '업무', '공부', '개발'] as const
-const examples: { group: typeof EXAMPLE_GROUPS[number]; title: string; prompt: string; fits: Fit[] }[] = [
-  { group: '생활', title: '월간 가계부 분석', prompt: '신용카드·체크카드·계좌 내역을 분류하고 이번 달 지출 리포트로 정리해줘', fits: ['민감한 자료', '반복 작업'] },
+// featured: '전체'에서 먼저 보여줄 예시 (여러 기기·기기 안 자료·교차 확인 같은 이 서비스의 강점이 잘 드러나는 것)
+const examples: { group: typeof EXAMPLE_GROUPS[number]; title: string; prompt: string; fits: Fit[]; featured?: boolean }[] = [
+  { group: '생활', title: '월간 가계부 분석', prompt: '신용카드·체크카드·계좌 내역을 분류하고 이번 달 지출 리포트로 정리해줘', fits: ['민감한 자료', '반복 작업'], featured: true },
+  { group: '생활', title: '단체 대화방 정리', prompt: '단체 대화방 내보내기 파일에서 정해진 일정과 준비물만 뽑아줘', fits: ['민감한 자료'], featured: true },
+  { group: '생활', title: '연말정산 의료비 정리', prompt: '병원·약국 영수증 파일에서 연말정산에 넣을 의료비 내역을 정리해줘', fits: ['민감한 자료', '반복 작업'] },
   { group: '생활', title: '여행 계획', prompt: '5명이 3박 4일로 다녀올 여행 일정과 예산을 짜줘', fits: ['동시 처리'] },
   { group: '생활', title: '건강 기록 돌아보기', prompt: '한 달 동안의 운동·수면 기록을 보고 패턴과 고칠 점을 알려줘', fits: ['민감한 자료', '반복 작업'] },
+  { group: '업무', title: '계약서 만료일 정리', prompt: '공유 폴더의 계약서 PDF들에서 만료일과 자동 갱신 조항을 표로 정리해줘', fits: ['동시 처리', '민감한 자료'], featured: true },
+  { group: '업무', title: '설문 주관식 분석', prompt: '설문 주관식 응답 1,000건을 주제별로 묶고 대표 의견을 뽑아줘', fits: ['동시 처리'], featured: true },
+  { group: '업무', title: '과제 피드백 초안', prompt: '학생 과제 30개를 채점 기준표에 맞춰 1차 피드백 초안을 써줘', fits: ['동시 처리', '민감한 자료'], featured: true },
+  { group: '업무', title: '문서 번역', prompt: '제품 설명서를 장별로 나눠 영어로 번역하고, 다른 모델로 용어와 어색한 문장을 확인해줘', fits: ['동시 처리', '교차 확인'], featured: true },
+  { group: '업무', title: '매출 보고 요약', prompt: '매주 받는 매출 엑셀을 정리해 지난주와 비교한 보고용 요약을 만들어줘', fits: ['반복 작업', '민감한 자료'] },
   { group: '업무', title: '회의록 정리', prompt: '회의록을 읽고 결정 사항과 할 일을 담당자별로 정리해줘', fits: ['반복 작업'] },
   { group: '업무', title: '민원 분류', prompt: '접수된 민원 문장을 유형별로 나누고 핵심 키워드를 뽑아줘', fits: ['동시 처리', '민감한 자료'] },
   { group: '업무', title: '계약서 검토', prompt: '계약서 초안에서 불리한 조항과 빠진 항목을 찾아 검토 의견을 써줘', fits: ['민감한 자료', '교차 확인'] },
   { group: '업무', title: '고객 리뷰 분석', prompt: '상품 리뷰를 감정별로 나누고 자주 나오는 불만과 개선점을 정리해줘', fits: ['동시 처리', '반복 작업'] },
   { group: '업무', title: '주간 보고서', prompt: '이번 주 업무 메모들을 모아 팀 주간 보고서 형식으로 정리해줘', fits: ['반복 작업'] },
-  { group: '공부', title: '논문 비교 요약', prompt: '논문 PDF 다섯 편을 각각 요약하고 공통점과 차이를 표로 비교해줘', fits: ['동시 처리'] },
+  { group: '공부', title: '논문 비교 요약', prompt: '논문 PDF 다섯 편을 각각 요약하고 공통점과 차이를 표로 비교해줘', fits: ['동시 처리'], featured: true },
+  { group: '공부', title: '강의 자막 노트', prompt: '강의 자막 파일 10개를 각각 요약해 시험 대비 노트로 묶어줘', fits: ['동시 처리', '반복 작업'] },
   { group: '공부', title: '복습 문제 만들기', prompt: '강의 노트에서 핵심 개념을 정리하고 복습용 문제와 해설을 만들어줘', fits: ['반복 작업', '교차 확인'] },
   { group: '공부', title: '자기소개서 첨삭', prompt: '자기소개서를 문항별로 다듬고, 다른 모델로 한 번 더 읽어 어색한 곳을 짚어줘', fits: ['민감한 자료', '교차 확인'] },
+  { group: '개발', title: '장애 보고서 초안', prompt: '에러 로그와 최근 변경 내역을 함께 보고 장애 원인 보고서 초안을 써줘', fits: ['민감한 자료', '교차 확인'], featured: true },
   { group: '개발', title: '로그 이상 탐지', prompt: '서버 로그를 구간별로 나눠 오류 패턴을 찾고 원인 후보를 정리해줘', fits: ['동시 처리', '민감한 자료'] },
+  { group: '개발', title: '테스트 실패 묶기', prompt: '테스트 실패 로그 수십 개를 원인별로 묶고 먼저 고칠 순서를 정해줘', fits: ['동시 처리'] },
   { group: '개발', title: '코드 리뷰', prompt: '변경된 파일들을 나눠 검토하고 공통으로 보이는 문제를 리뷰 의견으로 모아줘', fits: ['동시 처리', '교차 확인'] },
 ]
+const EXAMPLES_PREVIEW = 8
 
 // 첫 화면 예시 화면에서 번갈아 보여줄 요청과, 그 요청으로 만들어지는 흐름(단계별 에이전트와 맡은 기기)
 const DEMOS: { label: string; prompt: string; stages: { name: string; device: string }[][] }[] = [
@@ -68,11 +80,27 @@ const DEMOS: { label: string; prompt: string; stages: { name: string; device: st
 ]
 const DEMO_INTERVAL = 4500
 
+// 예시 화면의 생성 모델 선택. 실제 첫 화면처럼 내 워커·서버·외부 API 중에서 고른다 (서버 설정의 모델 목록 기준)
+type GenLocation = 'worker' | 'local' | 'cloud'
+type CloudProvider = 'openai' | 'anthropic' | 'gemini'
+const GEN_WORKERS = ['데스크톱', '노트북']
+const GEN_LOCAL_MODELS = { worker: ['qwen3:4b', 'gemma3:4b'], local: ['gemma3:4b', 'qwen3:4b'] }
+const GEN_CLOUD: Record<CloudProvider, { name: string; models: string[] }> = {
+  openai: { name: 'OpenAI', models: ['gpt-5-mini', 'gpt-5', 'gpt-4.1-mini'] },
+  anthropic: { name: 'Anthropic', models: ['claude-sonnet-4-5', 'claude-haiku-3-5'] },
+  gemini: { name: 'Gemini', models: ['gemini-3.8-flash', 'gemini-2.5-pro'] },
+}
+
 /** 제품 소개: 로그인하지 않은 사용자가 처음 보는 화면 */
 export default function ProductPage() {
   const { hash } = useLocation()
   const [group, setGroup] = useState<typeof EXAMPLE_GROUPS[number]>('전체')
-  const shownExamples = examples.filter((example) => group === '전체' || example.group === group)
+  const [showAllExamples, setShowAllExamples] = useState(false)
+  // '전체'는 강점이 잘 드러나는 예시부터 보여주고 나머지는 더 보기로 연다
+  const groupExamples = group === '전체'
+    ? [...examples.filter((example) => example.featured), ...examples.filter((example) => !example.featured)]
+    : examples.filter((example) => example.group === group)
+  const shownExamples = group === '전체' && !showAllExamples ? groupExamples.slice(0, EXAMPLES_PREVIEW) : groupExamples
   // 예시 화면은 저절로 넘어가다가, 사용자가 예시를 고르면 멈춘다. 움직임 줄이기 설정이면 넘기지 않는다
   const [demoIndex, setDemoIndex] = useState(0)
   const [demoPinned, setDemoPinned] = useState(() => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false)
@@ -82,6 +110,15 @@ export default function ProductPage() {
     return () => window.clearInterval(timer)
   }, [demoPinned])
   const demo = DEMOS[demoIndex]
+  const [genLocation, setGenLocation] = useState<GenLocation>('worker')
+  const [genWorker, setGenWorker] = useState(GEN_WORKERS[0])
+  const [genProvider, setGenProvider] = useState<CloudProvider>('openai')
+  const genModels = genLocation === 'cloud' ? GEN_CLOUD[genProvider].models : GEN_LOCAL_MODELS[genLocation]
+  const [genModel, setGenModel] = useState(GEN_LOCAL_MODELS.worker[0])
+  const model = genModels.includes(genModel) ? genModel : genModels[0]
+  const genHint = genLocation === 'worker' ? `${genWorker}의 Ollama가 만들어요. 요청은 내 기기에만 전달돼요.`
+    : genLocation === 'local' ? '서버의 Ollama가 만들어요.'
+      : `${GEN_CLOUD[genProvider].name} API가 만들어요. 요청이 외부로 전송된다는 안내를 확인한 뒤 진행해요.`
   useEffect(() => {
     if (hash) document.getElementById(hash.slice(1))?.scrollIntoView()
     else window.scrollTo(0, 0)
@@ -109,8 +146,27 @@ export default function ProductPage() {
               <strong>어떤 작업을 자동화할까요?</strong>
               <div className="mk-composer-box">
                 <p key={demoIndex} className="mk-demo-text">{demo.prompt}</p>
-                <div className="mk-composer-bar" aria-hidden="true"><span>내 워커 · qwen3:4b</span><b>↑</b></div>
+                <div className="mk-composer-bar">
+                  <div className="mk-gen" aria-label="생성 모델">
+                    <select value={genLocation} onChange={(event) => { setGenLocation(event.target.value as GenLocation); setGenModel('') }} aria-label="실행 위치">
+                      <option value="worker">내 워커</option>
+                      <option value="local">서버 로컬</option>
+                      <option value="cloud">외부 API</option>
+                    </select>
+                    {genLocation === 'worker' && <select value={genWorker} onChange={(event) => setGenWorker(event.target.value)} aria-label="워커">
+                      {GEN_WORKERS.map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>}
+                    {genLocation === 'cloud' && <select value={genProvider} onChange={(event) => { setGenProvider(event.target.value as CloudProvider); setGenModel('') }} aria-label="제공자">
+                      {(Object.keys(GEN_CLOUD) as CloudProvider[]).map((key) => <option key={key} value={key}>{GEN_CLOUD[key].name}</option>)}
+                    </select>}
+                    <select value={model} onChange={(event) => setGenModel(event.target.value)} aria-label="모델">
+                      {genModels.map((name) => <option key={name} value={name}>{name}</option>)}
+                    </select>
+                  </div>
+                  <b aria-hidden="true">↑</b>
+                </div>
               </div>
+              <small className="mk-gen-hint">{genHint}</small>
               <div className="mk-demo-chips" role="tablist" aria-label="예시 고르기">
                 {DEMOS.map((item, index) => <button
                   key={item.label}
@@ -174,7 +230,7 @@ export default function ProductPage() {
       <div className="mk-shell">
         <div className="mk-heading"><span className="mk-kicker">활용 예시</span><h2>이런 일을 맡겨 보세요</h2><p>입력만 바뀌는 반복 작업이나, 밖으로 보내기 싫은 자료를 다룰 때 특히 잘 맞아요.</p></div>
         <div className="mk-filter" role="tablist" aria-label="활용 분야">
-          {EXAMPLE_GROUPS.map((name) => <button key={name} type="button" role="tab" aria-selected={group === name} className={group === name ? 'active' : ''} onClick={() => setGroup(name)}>{name}</button>)}
+          {EXAMPLE_GROUPS.map((name) => <button key={name} type="button" role="tab" aria-selected={group === name} className={group === name ? 'active' : ''} onClick={() => setGroup(name)}>{name}<small>{name === '전체' ? examples.length : examples.filter((example) => example.group === name).length}</small></button>)}
         </div>
         <div className="mk-examples">
           {shownExamples.map((example) => <div key={example.title}>
@@ -184,6 +240,7 @@ export default function ProductPage() {
             <div className="mk-fits">{example.fits.map((fit) => <small key={fit}>{fit}</small>)}</div>
           </div>)}
         </div>
+        {shownExamples.length < groupExamples.length && <button type="button" className="mk-more" onClick={() => setShowAllExamples(true)}>예시 {groupExamples.length - shownExamples.length}개 더 보기</button>}
         <p className="mk-examples-note">질문 하나로 끝나는 일이나 최신 정보 검색은 일반 챗봇이 더 빨라요. 여러 단계로 나뉘는 일에서 차이가 커져요.</p>
       </div>
     </section>
