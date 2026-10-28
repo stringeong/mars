@@ -39,6 +39,28 @@ class TestExtractJson:
             _extract_json("{name: 따옴표 없는 키}")
 
 
+class TestWorkflowName:
+    def _reply(self, name):
+        return json.dumps({"name": name, "nodes": [
+            {"id": "a", "name": "A", "role_prompt": "a"},
+            {"id": "b", "name": "B", "role_prompt": "b", "final": True},
+        ], "edges": [{"source": "a", "target": "b"}]}, ensure_ascii=False)
+
+    def test_keeps_model_name(self):
+        assert generator.graph_from_reply(self._reply("회의록 할 일 정리"), "회의록 정리해줘")["name"] == "회의록 할 일 정리"
+
+    @pytest.mark.parametrize("name", ["", "새 서비스", "서비스 이름", "월간 카드 지출 리포트"])
+    def test_placeholder_name_comes_from_prompt(self, name):
+        graph = generator.graph_from_reply(self._reply(name), "회의록을 읽고 담당자별 할 일을 표로 정리해줘")
+        assert graph["name"] == "회의록을 읽고 담당자별 할 일을 표로…"
+
+    def test_short_prompt_is_used_as_is(self):
+        assert generator.name_from_prompt("  부산 여행  일정 ") == "부산 여행 일정"
+
+    def test_prompt_asks_for_parallel_branches(self):
+        assert "병렬로 나눈다" in generator.SYSTEM_PROMPT
+
+
 class TestFallbackGraph:
     def test_fallback_is_always_valid_dag(self):
         graph = _fallback_graph("여행 계획 서비스")

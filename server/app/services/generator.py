@@ -29,7 +29,11 @@ SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.
 
 규칙:
 - 에이전트는 2~6개. 각 에이전트는 한 가지 역할만 담당한다.
-- edges는 방향성 비순환 그래프(DAG)여야 한다. 병렬 분기가 자연스러우면 사용한다.
+- edges는 방향성 비순환 그래프(DAG)여야 한다.
+- 서로의 결과를 기다릴 필요가 없는 작업은 병렬로 나눈다. 같은 입력을 여러 관점에서
+  보거나(예: 지출 분류와 이상 거래 탐지, 일정 짜기와 예산 계산), 여러 자료를 각각
+  처리하는 경우가 그렇다. 나뉜 가지는 마지막 종합 에이전트에서 다시 합친다.
+  앞 결과가 꼭 있어야 하는 단계만 일렬로 잇는다.
 - 연결은 반드시 앞 단계에서 뒤 단계로 한 방향으로만 흐른다. 검토·첨삭·개선처럼
   앞 단계 결과를 다듬는 작업도 뒤에 새 에이전트를 두어 처리하고, 이전 에이전트로
   되돌아가는 연결(피드백 루프)은 절대 만들지 않는다.
@@ -41,23 +45,47 @@ SYSTEM_PROMPT = """당신은 Multi-Agent System(MAS) 설계 전문가입니다.
 - 같은 파일을 여러 에이전트가 함께 읽으면 같은 "file_key"를 쓴다.
   예: 거래 분류와 이상 거래 탐지가 같은 신용카드 내역을 읽으면 둘 다 "credit_card".
 - role_prompt는 해당 에이전트에게 줄 시스템 프롬프트로, 한국어로 구체적으로 작성한다.
+- "name"은 이 워크플로우가 하는 일을 6~20자 한국어로 요약한 이름이다.
+  예: "월간 카드 지출 리포트", "회의록 할 일 정리". "새 서비스", "서비스 이름"처럼
+  일반적인 말이나 아래 예시의 이름을 그대로 쓰지 않는다. 에이전트 이름도 맡은 일이
+  드러나게 짓는다(예: "이상 거래 탐지 에이전트").
 - 반드시 아래 JSON 형식만 출력한다. 다른 텍스트는 출력하지 않는다.
+  아래는 형식 예시일 뿐이므로 에이전트 수와 연결은 요청에 맞게 정한다.
 
 {
-  "name": "서비스 이름",
-  "description": "서비스 한 줄 설명",
+  "name": "월간 카드 지출 리포트",
+  "description": "카드 내역을 분류하고 이상 거래를 찾아 월간 리포트로 정리한다",
   "nodes": [
-    {"id": "agent1", "name": "에이전트 이름", "role_prompt": "...",
+    {"id": "agent1", "name": "지출 분류 에이전트", "role_prompt": "...",
      "needs_file": true, "file_key": "credit_card",
      "file_description": "신용카드 사용 내역",
      "file_format": "CSV, 열: 거래ID, 일시, 거래처, 금액"},
-    {"id": "agent2", "name": "에이전트 이름", "role_prompt": "...",
+    {"id": "agent2", "name": "이상 거래 탐지 에이전트", "role_prompt": "...",
+     "needs_file": true, "file_key": "credit_card",
+     "file_description": "신용카드 사용 내역",
+     "file_format": "CSV, 열: 거래ID, 일시, 거래처, 금액"},
+    {"id": "agent3", "name": "리포트 작성 에이전트", "role_prompt": "...",
      "needs_file": false, "final": true}
   ],
   "edges": [
-    {"source": "agent1", "target": "agent2"}
+    {"source": "agent1", "target": "agent3"},
+    {"source": "agent2", "target": "agent3"}
   ]
 }"""
+
+# 모델이 이름을 비우거나 예시 문구를 그대로 내면 요청 문장에서 이름을 만든다
+PLACEHOLDER_NAMES = {"새 서비스", "서비스 이름", "서비스", "워크플로우", "월간 카드 지출 리포트"}
+
+
+def name_from_prompt(prompt: str, limit: int = 24) -> str:
+    """요청 문장의 앞부분을 어절 단위로 잘라 워크플로우 이름으로 쓴다."""
+    text = re.sub(r"\s+", " ", prompt.strip())
+    if not text:
+        return "새 워크플로우"
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0] if " " in text[:limit] else text[:limit]
+    return cut.rstrip(",. ") + "…"
 
 
 @dataclass(frozen=True)
@@ -109,9 +137,8 @@ def _fallback_graph(prompt: str) -> dict:
 
     생성 프롬프트는 역할 프롬프트에 붙이지 않고 goal로 두어 시작 블록 컨텍스트로만 전달한다.
     """
-    topic = prompt.strip()[:40]
     return {
-        "name": f"{topic} 서비스",
+        "name": name_from_prompt(prompt),
         "description": prompt.strip(),
         "goal": prompt.strip(),
         "nodes": [
@@ -249,6 +276,11 @@ async def _generate_once(prompt: str, choice: GeneratorChoice, temperature: floa
     return graph_from_reply(content, prompt), usage
 
 
+def _workflow_name(name: object, prompt: str) -> str:
+    text = str(name or "").strip()
+    return name_from_prompt(prompt) if not text or text in PLACEHOLDER_NAMES else text
+
+
 def graph_from_reply(content: str, prompt: str) -> dict:
     """LLM 응답 텍스트를 실행 가능한 워크플로우 그래프로 바꾼다.
 
@@ -261,7 +293,7 @@ def graph_from_reply(content: str, prompt: str) -> dict:
     if not raw_nodes:
         raise ValueError("에이전트가 비어 있음")
     graph = {
-        "name": data.get("name") or "새 서비스",
+        "name": _workflow_name(data.get("name"), prompt),
         "description": data.get("description") or prompt,
         "nodes": [_agent_node(n, i) for i, n in enumerate(raw_nodes)],
         "edges": [
