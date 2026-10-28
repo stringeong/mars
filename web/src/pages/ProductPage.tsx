@@ -56,26 +56,43 @@ const examples: { group: typeof EXAMPLE_GROUPS[number]; title: string; prompt: s
 const EXAMPLES_PREVIEW = 8
 
 // 첫 화면 예시 화면에서 번갈아 보여줄 요청과, 그 요청으로 만들어지는 흐름(단계별 에이전트와 맡은 기기)
-const DEMOS: { label: string; prompt: string; stages: { name: string; device: string }[][] }[] = [
+// 생성된 워크플로우의 블록: 역할 태그, 맡은 기기, 직접 받는 입력(파일·텍스트), 최종 블록 여부
+type DemoBlock = { tag: string; name: string; device: string; input?: string; final?: boolean }
+const DEMOS: { label: string; prompt: string; stages: DemoBlock[][] }[] = [
   {
     label: '가계부',
     prompt: '카드·계좌 내역으로 이번 달 어디에 돈을 많이 썼는지 리포트로 정리해줘',
-    stages: [[{ name: '카드 내역 분류', device: '데스크톱' }, { name: '계좌 내역 분류', device: '노트북' }], [{ name: '지출 분석', device: '데스크톱' }], [{ name: '리포트 작성', device: '노트북' }]],
+    stages: [
+      [{ tag: '분류', name: '카드 내역 분류', device: '데스크톱', input: '카드내역.csv' }, { tag: '분류', name: '계좌 내역 분류', device: '노트북', input: '계좌내역.csv' }],
+      [{ tag: '분석', name: '지출 분석', device: '데스크톱' }],
+      [{ tag: '작성', name: '리포트 작성', device: '노트북', final: true }],
+    ],
   },
   {
     label: '회의록',
     prompt: '이번 주 회의록 세 개에서 결정 사항과 내가 할 일만 뽑아줘',
-    stages: [[{ name: '월요일 회의 요약', device: '데스크톱' }, { name: '수요일 회의 요약', device: '노트북' }, { name: '금요일 회의 요약', device: '데스크톱' }], [{ name: '할 일 정리', device: '노트북' }]],
+    stages: [
+      [{ tag: '요약', name: '월요일 회의 요약', device: '데스크톱', input: '월요일.txt' }, { tag: '요약', name: '수요일 회의 요약', device: '노트북', input: '수요일.txt' }, { tag: '요약', name: '금요일 회의 요약', device: '데스크톱', input: '금요일.txt' }],
+      [{ tag: '정리', name: '할 일 정리', device: '노트북', final: true }],
+    ],
   },
   {
     label: '여행',
     prompt: '친구 4명이랑 부산 2박 3일, 맛집 위주로 일정이랑 1인당 예산 짜줘',
-    stages: [[{ name: '맛집 조사', device: '데스크톱' }, { name: '숙소 비교', device: '노트북' }], [{ name: '일정 짜기', device: '데스크톱' }], [{ name: '예산 계산', device: '노트북' }]],
+    stages: [
+      [{ tag: '조사', name: '맛집 조사', device: '데스크톱', input: '텍스트 · 부산, 4명' }, { tag: '조사', name: '숙소 비교', device: '노트북', input: '텍스트 · 2박 3일' }],
+      [{ tag: '계획', name: '일정 짜기', device: '데스크톱' }],
+      [{ tag: '계산', name: '예산 계산', device: '노트북', final: true }],
+    ],
   },
   {
     label: '리뷰',
     prompt: '우리 가게 리뷰 500개에서 손님들이 가장 많이 아쉬워한 점 5개만 알려줘',
-    stages: [[{ name: '리뷰 1~250 분류', device: '데스크톱' }, { name: '리뷰 251~500 분류', device: '노트북' }], [{ name: '불만 정리', device: '데스크톱' }], [{ name: '개선 제안', device: '노트북' }]],
+    stages: [
+      [{ tag: '분류', name: '리뷰 1~250번', device: '데스크톱', input: '리뷰.csv' }, { tag: '분류', name: '리뷰 251~500번', device: '노트북', input: '리뷰.csv' }],
+      [{ tag: '분석', name: '불만 정리', device: '데스크톱' }],
+      [{ tag: '작성', name: '개선 제안', device: '노트북', final: true }],
+    ],
   },
 ]
 const DEMO_INTERVAL = 4500
@@ -178,13 +195,24 @@ export default function ProductPage() {
                 >{item.label}</button>)}
               </div>
             </div>
-            <div key={demoIndex} className="mk-mini-flow mk-demo-flow">
-              {demo.stages.map((stage, index) => <div className="mk-mini-step" key={index}>
-                {index > 0 && <i aria-hidden="true">→</i>}
-                <div className="mk-mini-col">
-                  {stage.map((agent) => <span key={agent.name} className={`mk-chip ${stage.length > 1 ? 'local' : 'soft'}`}>{agent.name}<small>{agent.device}</small></span>)}
-                </div>
-              </div>)}
+            <div className="mk-canvas">
+              <div className="mk-canvas-head">
+                <span><b>생성된 워크플로우</b><small>블록 {demo.stages.flat().length}개 · {demo.stages.length}단계 · 구성 검사 통과</small></span>
+                <span className="mk-canvas-actions" aria-hidden="true"><i>편집</i><i className="run">실행</i></span>
+              </div>
+              <div key={demoIndex} className="mk-canvas-body mk-demo-flow">
+                {demo.stages.map((stage, index) => <div className="mk-canvas-step" key={index}>
+                  {index > 0 && <i className="mk-canvas-arrow" aria-hidden="true">→</i>}
+                  <div className="mk-canvas-col">
+                    {stage.map((block) => <div key={block.name} className={`mk-block${block.final ? ' final' : ''}`}>
+                      <span className="mk-block-tags"><em>{block.tag}</em>{block.final && <em className="final">최종</em>}</span>
+                      <b>{block.name}</b>
+                      <small>{block.device} · {genLocation === 'cloud' ? 'qwen3:4b' : model}</small>
+                      {block.input && <span className="mk-block-input">{block.input.startsWith('텍스트') ? block.input : `파일 · ${block.input}`}</span>}
+                    </div>)}
+                  </div>
+                </div>)}
+              </div>
             </div>
           </div>
         </div>
