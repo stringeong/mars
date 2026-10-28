@@ -7,6 +7,7 @@ import { onServiceRenamed } from './workflow'
 import DashboardPage from './pages/DashboardPage'
 import DevicesPage from './pages/DevicesPage'
 import DownloadPage from './pages/DownloadPage'
+import ExamplesPage from './pages/ExamplesPage'
 import ExecutionPage from './pages/ExecutionPage'
 import FilesPage from './pages/FilesPage'
 import HistoryPage from './pages/HistoryPage'
@@ -19,7 +20,7 @@ import WorkflowRunPage from './pages/WorkflowRunPage'
 import WorkflowSetupPage from './pages/WorkflowSetupPage'
 
 // 로그인 없이 보는 화면: 사이드바 없이 전체 폭을 쓴다
-const PUBLIC_PATHS = ['/login', '/about', '/download']
+const PUBLIC_PATHS = ['/login', '/about', '/examples', '/download']
 
 function RequireAuth({ children }: { children: JSX.Element }) {
   if (!getToken()) return <Navigate to="/login" replace />
@@ -71,6 +72,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/about" element={<ProductPage />} />
+          <Route path="/examples" element={<ExamplesPage />} />
           <Route path="/download" element={<DownloadPage />} />
           {/* 처음 들어오면: 로그인했으면 워크스페이스, 아니면 제품 소개 */}
           <Route path="/" element={authed ? <Navigate to="/services" replace /> : <ProductPage />} />

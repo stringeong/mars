@@ -1,5 +1,5 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import { defaultWorker, GenerationFailed, generateOnWorker, workerProgressLabel } from '../generation'
 import { CloudProvider, Device, GenerationError, GenerationJob, GeneratorModels, Service } from '../types'
@@ -18,7 +18,9 @@ const suggestions = [
 /** 새 워크플로우: 대화형 앱처럼 입력창 하나로 시작한다. */
 export default function ServicesPage() {
   const [devices, setDevices] = useState<Device[]>([])
-  const [prompt, setPrompt] = useState('')
+  const [searchParams] = useSearchParams()
+  // 활용 예시의 '이 예시로 만들기'로 들어오면 그 문장을 채워 둔다
+  const [prompt, setPrompt] = useState(() => searchParams.get('prompt') ?? '')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [generatorModels, setGeneratorModels] = useState<GeneratorModels | null>(null)

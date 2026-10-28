@@ -669,7 +669,7 @@ tr.clickable:hover { background: #f8fafc; }
 .mk-privacy h3 { font-size: 15px; font-weight: 700; }
 .mk-privacy p { margin-top: 6px !important; color: var(--mk-sub); font-size: 14px; }
 .mk-examples { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
-.mk-examples > div { display: grid; grid-template-rows: auto auto 1fr auto; gap: 8px; padding: 20px; border-radius: 16px; background: var(--mk-soft); }
+.mk-example { display: grid; grid-template-rows: auto auto 1fr auto auto; gap: 8px; padding: 20px; border-radius: 16px; background: var(--mk-soft); }
 .mk-examples b { font-size: 15px; }
 .mk-examples p { color: var(--mk-sub); font-size: 14px; }
 .mk-example-group { color: var(--mk-muted); font-size: 12px; font-weight: 600; }
@@ -683,6 +683,16 @@ tr.clickable:hover { background: #f8fafc; }
 .mk-more { display: block; margin: 16px auto 0; padding: 9px 18px; border: 1px solid #dcdcd8; border-radius: 999px; background: #fff; color: var(--mk-ink); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
 .mk-more:hover { background: var(--mk-soft); }
 .mk-examples-note { margin-top: 16px !important; color: var(--mk-muted); font-size: 14px; }
+.mk-example-use { margin-top: 2px; color: var(--mk-ink); font-size: 13px; font-weight: 600; text-decoration: none; }
+.mk-example-use:hover { text-decoration: underline; }
+a.mk-more { width: max-content; text-decoration: none; }
+.mk-example-tools { display: grid; gap: 12px; margin-bottom: 20px; }
+.mk-example-tools input { width: min(420px, 100%); padding: 10px 16px; border: 1px solid #dcdcd8; border-radius: 999px; font: inherit; font-size: 14px; outline: 0; }
+.mk-example-tools input:focus { border-color: #b9b9b5; }
+.mk-example-tools .mk-filter { margin-bottom: 0; }
+.mk-filter-fits { align-items: center; }
+.mk-filter-fits > span { margin-right: 4px; color: var(--mk-muted); font-size: 13px; }
+.mk-examples-empty { padding: 40px 0; color: var(--mk-muted); text-align: center; }
 
 .mk-cta { padding: 52px 0; background: var(--mk-ink); color: #fff; }
 .mk-cta-inner { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 20px; }
