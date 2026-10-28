@@ -290,15 +290,6 @@ class ExecutionCreate(BaseModel):
     acknowledge_warnings: bool = False
 
 
-class ExecutionBulkDelete(BaseModel):
-    ids: list[int] = Field(min_length=1, max_length=200)
-
-
-class ExecutionBulkDeleteOut(BaseModel):
-    deleted: list[int]
-    # reason: not_found(없거나 다른 사용자의 이력) | active(대기·실행 중)
-    skipped: list[dict]
-
 
 class ExecutionPreview(BaseModel):
     run_prompt: str = ""

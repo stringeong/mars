@@ -815,18 +815,6 @@ class TestDeletion:
         intruder = signup_and_login(client, username="user2", email="u2@example.com")
         assert client.delete(f"/executions/{execution['id']}", headers=intruder).status_code == 404
 
-    def test_bulk_delete_reports_what_was_skipped(self, client):
-        auth, service = self._setup(client)
-        finished = self._finished(client, auth, service)
-        running = self._run(client, auth, service)
-        r = client.post("/executions/delete", json={"ids": [finished["id"], running["id"], 999999]}, headers=auth)
-        assert r.status_code == 200, r.text
-        assert r.json() == {
-            "deleted": [finished["id"]],
-            "skipped": [{"id": running["id"], "reason": "active"}, {"id": 999999, "reason": "not_found"}],
-        }
-        assert [e["id"] for e in client.get("/executions", headers=auth).json()] == [running["id"]]
-
     def test_workflow_with_history_needs_confirmation(self, client):
         auth, service = self._setup(client)
         self._finished(client, auth, service)
