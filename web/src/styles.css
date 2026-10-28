@@ -974,3 +974,23 @@ body.resizing-sidebar { cursor: col-resize; user-select: none; }
 .history-table-tools .history-filters { padding: 0; }
 .history-table-tools .execution-search { width: 220px; margin: 0; }
 .history-table-card td small.history-model { margin: 0; max-width: 200px; }
+
+/* 편집기 캔버스 크기: 아래 손잡이로 높이 조절, 크게 보기는 팔레트·설정 패널과 함께 화면 전체로 */
+.canvas-size-tools { position: absolute; z-index: 4; top: 12px; right: 12px; display: flex; gap: 6px; }
+.canvas-size-tools button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 8px; background: rgba(255, 255, 255, .95); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.canvas-size-tools button:hover { background: #f5f5f4; }
+.canvas-resize-handle { position: absolute; z-index: 4; left: 0; right: 0; bottom: 0; display: grid; place-items: center; height: 14px; cursor: ns-resize; touch-action: none; }
+.canvas-resize-handle i { width: 44px; height: 4px; border-radius: 999px; background: #d4d4d1; }
+.canvas-resize-handle:hover i, .canvas-resize-handle:focus-visible i { background: #8a8a86; }
+.canvas-resize-handle:focus-visible { outline: none; }
+body.resizing-canvas { cursor: ns-resize; user-select: none; }
+body.canvas-fullscreen { overflow: hidden; }
+/* 화면 전체를 쓰므로 폭과 상관없이 팔레트 | 캔버스 | 설정 패널을 한 줄에 둔다 */
+.builder-workspace.canvas-full { position: fixed; z-index: 90; inset: 0; height: 100vh; margin: 0; padding: 12px; overflow: auto; background: #fff; grid-template-columns: 170px minmax(0, 1fr) 320px; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+.builder-workspace.canvas-full .flow-wrap { height: 100% !important; min-height: 0 !important; }
+.builder-workspace.canvas-full .palette, .builder-workspace.canvas-full .node-panel { grid-column: auto; max-height: 100%; overflow-y: auto; }
+@media (max-width: 900px) {
+  .builder-workspace.canvas-full { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 72vh auto; }
+  .builder-workspace.canvas-full .palette { max-height: 130px; }
+  .builder-workspace.canvas-full .node-panel { max-height: none; }
+}

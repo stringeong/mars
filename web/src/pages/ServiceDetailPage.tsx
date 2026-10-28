@@ -1,12 +1,13 @@
-import { addEdge, Background, Connection, Controls, Edge, MarkerType, Node, ReactFlow, useEdgesState, useNodesState } from '@xyflow/react'
+import { addEdge, Background, Connection, Controls, Edge, MarkerType, Node, ReactFlow, ReactFlowInstance, useEdgesState, useNodesState } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { DragEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { DragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, getDeviceDirectories, getDeviceModels } from '../api'
 import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
 import DeletableEdge from '../components/DeletableEdge'
 import ShareDialog from '../components/ShareDialog'
 import ValidationPanel from '../components/ValidationPanel'
+import { stagePositions } from '../flowLayout'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
 import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
 import { announceServiceRenamed, applyAutoFlags, blockingErrors, FlagExplanation, generationLabel, issuesByNode, onServiceRenamed } from '../workflow'
@@ -22,6 +23,17 @@ function toFlowEdge(source: string, target: string): Edge {
 // 저장 전까지 되돌릴 수 있는 구조 변경 기록(연결·블록 추가/삭제, 체크박스)
 type BuilderSnapshot = { agents: Record<string, AgentNode>; nodes: Node[]; edges: Edge[] }
 const UNDO_LIMIT = 50
+// 캔버스 높이는 끌어서 바꾸고, 이 브라우저에 기억해 둔다
+const CANVAS_HEIGHT_KEY = 'mars.canvasHeight'
+const CANVAS_MIN = 360
+const CANVAS_MAX = 1600
+
+function savedCanvasHeight() {
+  try {
+    const value = Number(localStorage.getItem(CANVAS_HEIGHT_KEY))
+    return value >= CANVAS_MIN && value <= CANVAS_MAX ? value : null
+  } catch { return null }
+}
 
 
 const CLOUD_MODELS = {
@@ -49,8 +61,24 @@ function asAgents(graph: Graph): AgentNode[] {
     }))
 }
 
-function layout(agents: AgentNode[]): Record<string, { x: number; y: number }> {
-  return Object.fromEntries(agents.map((agent, index) => [agent.id, { x: 60 + (index % 3) * 280, y: 70 + Math.floor(index / 3) * 230 }]))
+/** 실행 순서대로 왼쪽에서 오른쪽으로 단계를 놓고, 같은 단계(동시에 실행되는 병렬 블록)는 세로로 쌓는다.
+ *  단계는 시작 블록에서 가장 긴 경로로 정한다. */
+function layout(agents: AgentNode[], edges: { source: string; target: string }[] = []): Record<string, { x: number; y: number }> {
+  const ids = new Set(agents.map((agent) => agent.id))
+  const links = edges.filter((edge) => ids.has(edge.source) && ids.has(edge.target) && edge.source !== edge.target)
+  const depth = new Map(agents.map((agent) => [agent.id, 0]))
+  // 순환이 섞여 있어도 블록 수만큼만 돌고 멈춘다
+  for (let pass = 0; pass < agents.length; pass += 1) {
+    let changed = false
+    for (const edge of links) {
+      const next = depth.get(edge.source)! + 1
+      if (next > depth.get(edge.target)!) { depth.set(edge.target, next); changed = true }
+    }
+    if (!changed) break
+  }
+  const columns: string[][] = []
+  for (const agent of agents) (columns[depth.get(agent.id)!] ??= []).push(agent.id)
+  return stagePositions(columns.filter(Boolean))
 }
 
 /** 자동으로 정해진 값을 보여주고, 바꾸면 '직접 지정'으로 남긴다. */
@@ -87,6 +115,10 @@ export default function ServiceDetailPage() {
   const [draftFileIds, setDraftFileIds] = useState<number[]>([])
   const uploadInputRef = useRef<HTMLInputElement>(null)
   const [selected, setSelected] = useState<string | null>(null)
+  const flowRef = useRef<ReactFlowInstance<Node, Edge> | null>(null)
+  const flowWrapRef = useRef<HTMLDivElement>(null)
+  const [canvasHeight, setCanvasHeight] = useState<number | null>(savedCanvasHeight)
+  const [canvasFull, setCanvasFull] = useState(false)
   const [svcName, setSvcName] = useState('')
   const [svcDesc, setSvcDesc] = useState('')
   const [aiInstruction, setAiInstruction] = useState('')
@@ -135,7 +167,7 @@ export default function ServiceDetailPage() {
   }, [deviceById, directoryById, inputSlots, issueMap, uploadedFileById])
 
   const applyAgents = useCallback((nextAgents: AgentNode[], graphEdges: Graph['edges'] = []) => {
-    const positions = layout(nextAgents)
+    const positions = layout(nextAgents, graphEdges.filter((edge) => !edge.relation || edge.relation === 'workflow'))
     setAgents(Object.fromEntries(nextAgents.map((agent) => [agent.id, agent])))
     setNodes(nextAgents.map((agent) => ({
       id: agent.id,
@@ -166,7 +198,7 @@ export default function ServiceDetailPage() {
         setUploadedFiles(files)
         setInputSlots(loadedService.graph.input_slots ?? [])
         const loadedAgents = asAgents(loadedService.graph)
-        const positions = layout(loadedAgents)
+        const positions = layout(loadedAgents, loadedService.graph.edges.filter((edge) => !edge.relation || edge.relation === 'workflow'))
         setAgents(Object.fromEntries(loadedAgents.map((agent) => [agent.id, agent])))
         setNodes(loadedAgents.map((agent) => ({ id: agent.id, type: 'agent', position: agent.position ?? positions[agent.id], data: {} })))
         setEdges(loadedService.graph.edges.filter((edge) => !edge.relation || edge.relation === 'workflow').map((edge) => toFlowEdge(edge.source, edge.target)))
@@ -262,6 +294,54 @@ export default function ServiceDetailPage() {
     setSelected((current) => (current && previous.agents[current] ? current : null))
     setMessage('마지막 변경을 되돌렸습니다.')
   }, [setEdges, setNodes])
+
+  // ---------- 캔버스 크기 ----------
+  useEffect(() => {
+    try {
+      if (canvasHeight) localStorage.setItem(CANVAS_HEIGHT_KEY, String(canvasHeight))
+      else localStorage.removeItem(CANVAS_HEIGHT_KEY)
+    } catch { /* 저장소를 못 쓰면 이번 화면에서만 유지한다 */ }
+  }, [canvasHeight])
+  useEffect(() => {
+    // 크게 보기를 켜고 끌 때 블록이 화면 안에 들어오도록 다시 맞춘다
+    const timer = window.setTimeout(() => flowRef.current?.fitView({ duration: 200 }), 150)
+    if (!canvasFull) return () => window.clearTimeout(timer)
+    function onKeyDown(event: KeyboardEvent) { if (event.key === 'Escape') setCanvasFull(false) }
+    window.addEventListener('keydown', onKeyDown)
+    document.body.classList.add('canvas-fullscreen')
+    return () => { window.clearTimeout(timer); window.removeEventListener('keydown', onKeyDown); document.body.classList.remove('canvas-fullscreen') }
+  }, [canvasFull])
+
+  // 지금 연결 기준으로 블록을 다시 늘어놓는다. 되돌리기로 이전 배치로 돌아갈 수 있다
+  function arrangeBlocks() {
+    const positions = layout(Object.values(agents), edges)
+    pushHistory()
+    setNodes((current) => current.map((node) => (positions[node.id] ? { ...node, position: positions[node.id] } : node)))
+    window.setTimeout(() => flowRef.current?.fitView({ duration: 200 }), 50)
+    setMessage('실행 순서대로 블록을 정렬했습니다. 같은 단계의 병렬 블록은 세로로 쌓입니다.')
+  }
+
+  function startCanvasResize(event: ReactPointerEvent<HTMLDivElement>) {
+    if (!flowWrapRef.current) return
+    event.preventDefault()
+    const startY = event.clientY
+    const startHeight = flowWrapRef.current.getBoundingClientRect().height
+    const move = (moveEvent: PointerEvent) => setCanvasHeight(Math.round(Math.min(CANVAS_MAX, Math.max(CANVAS_MIN, startHeight + moveEvent.clientY - startY))))
+    const stop = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+      document.body.classList.remove('resizing-canvas')
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', stop)
+    document.body.classList.add('resizing-canvas')
+  }
+  function resizeCanvasByKey(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return
+    event.preventDefault()
+    const current = canvasHeight ?? flowWrapRef.current?.getBoundingClientRect().height ?? 600
+    setCanvasHeight(Math.round(Math.min(CANVAS_MAX, Math.max(CANVAS_MIN, current + (event.key === 'ArrowDown' ? 40 : -40)))))
+  }
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -468,12 +548,12 @@ export default function ServiceDetailPage() {
       <input value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder="예: 검토 에이전트를 분석 뒤에 추가해줘" required minLength={2} />
       <button className="btn sm" disabled={aiLoading}>{aiLoading ? '수정 중...' : '적용'}</button>
     </form>
-    <div className="builder3 builder-workspace">
+    <div className={`builder3 builder-workspace${canvasFull ? ' canvas-full' : ''}`}>
       <aside className="palette">
         <div className="palette-title">에이전트 블록</div><div className="palette-hint">드래그하거나 클릭해 추가</div>
         {BLOCK_PRESETS.map((preset) => { const category = categoryOf(preset.name); return <div key={preset.name} className="palette-block" style={{ borderColor: category.color, background: category.bg }} draggable onDragStart={(event) => event.dataTransfer.setData('application/mars-agent', JSON.stringify(preset))} onClick={() => addAgent(preset)}><span className="palette-block-tag" style={{ background: category.color }}>{category.tag}</span><div className="palette-block-name">{preset.name}</div><div className="palette-block-hint">{preset.hint}</div></div> })}
       </aside>
-      <div className="flow-wrap" onDragOver={(event) => event.preventDefault()} onDrop={(event: DragEvent) => { event.preventDefault(); const raw = event.dataTransfer.getData('application/mars-agent'); if (raw) addAgent(JSON.parse(raw), { x: event.nativeEvent.offsetX - 100, y: event.nativeEvent.offsetY - 50 }) }}>
+      <div ref={flowWrapRef} className="flow-wrap" style={!canvasFull && canvasHeight ? { height: canvasHeight, minHeight: CANVAS_MIN } : undefined} onDragOver={(event) => event.preventDefault()} onDrop={(event: DragEvent) => { event.preventDefault(); const raw = event.dataTransfer.getData('application/mars-agent'); if (raw) addAgent(JSON.parse(raw), { x: event.nativeEvent.offsetX - 100, y: event.nativeEvent.offsetY - 50 }) }}>
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -482,6 +562,7 @@ export default function ServiceDetailPage() {
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
+          onInit={(instance) => { flowRef.current = instance }}
           onNodeClick={(_, node) => setSelected(node.id)}
           onPaneClick={() => setSelected(null)}
           deleteKeyCode={['Delete', 'Backspace']}
@@ -495,6 +576,25 @@ export default function ServiceDetailPage() {
           }}
           fitView
         ><Background /><Controls /></ReactFlow>
+        <div className="canvas-size-tools">
+          <button type="button" onClick={arrangeBlocks} title="실행 순서대로 왼쪽→오른쪽, 병렬 블록은 세로로 정렬합니다 (Ctrl/Cmd+Z로 되돌리기)">자동 정렬</button>
+          {!canvasFull && canvasHeight && <button type="button" onClick={() => setCanvasHeight(null)} title="캔버스 높이를 기본값으로 되돌립니다">기본 높이</button>}
+          <button type="button" onClick={() => setCanvasFull((full) => !full)} title={canvasFull ? '원래 크기로 (Esc)' : '팔레트·설정 패널과 함께 화면 전체로 넓힙니다'}>{canvasFull ? '⤡ 원래 크기' : '⤢ 크게 보기'}</button>
+        </div>
+        {!canvasFull && <div
+          className="canvas-resize-handle"
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label="캔버스 높이 조절"
+          aria-valuemin={CANVAS_MIN}
+          aria-valuemax={CANVAS_MAX}
+          aria-valuenow={canvasHeight ?? undefined}
+          tabIndex={0}
+          title="끌어서 캔버스 높이 조절 · 두 번 누르면 기본 높이"
+          onPointerDown={startCanvasResize}
+          onDoubleClick={() => setCanvasHeight(null)}
+          onKeyDown={resizeCanvasByKey}
+        ><i /></div>}
       </div>
       <aside className="node-panel">
         {selectedAgent ? <>
