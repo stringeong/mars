@@ -768,6 +768,86 @@ class TestWorkerGeneration:
         assert client.get("/services", headers=auth).json() == []
 
 
+class TestDeletion:
+    """실행 이력·워크플로우 삭제. 실행 중인 것은 막고, 업로드 파일과 비용 집계는 남긴다."""
+
+    def _setup(self, client):
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        return auth, create_service(client, auth)
+
+    def _run(self, client, auth, service):
+        r = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "이번 달 정리"}, headers=auth)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    def _finished(self, client, auth, service):
+        execution = self._run(client, auth, service)
+        assert client.post(f"/executions/{execution['id']}/cancel", headers=auth).status_code == 200
+        return execution
+
+    def test_finished_execution_is_deleted_with_tasks_but_files_and_usage_kept(self, client, db):
+        auth, service = self._setup(client)
+        uploaded = upload(client, auth, "카드.csv")
+        execution = self._finished(client, auth, service)
+        owner = db.get(models.Execution, execution["id"]).user_id
+        db.add(models.LLMUsage(user_id=owner, execution_id=execution["id"], provider="openai", model="gpt-5-mini"))
+        db.commit()
+
+        assert client.delete(f"/executions/{execution['id']}", headers=auth).status_code == 204
+        assert client.get(f"/executions/{execution['id']}", headers=auth).status_code == 404
+        assert client.get("/executions", headers=auth).json() == []
+        assert db.query(models.TaskRecord).filter_by(execution_id=execution["id"]).count() == 0
+        usage = db.query(models.LLMUsage).one()
+        assert (usage.execution_id, usage.task_id) == (None, None)
+        assert [f["id"] for f in client.get("/files", headers=auth).json()] == [uploaded["id"]]
+
+    def test_running_execution_cannot_be_deleted(self, client):
+        auth, service = self._setup(client)
+        execution = self._run(client, auth, service)
+        assert client.delete(f"/executions/{execution['id']}", headers=auth).status_code == 409
+        assert client.get(f"/executions/{execution['id']}", headers=auth).status_code == 200
+
+    def test_other_users_execution_is_not_found(self, client):
+        auth, service = self._setup(client)
+        execution = self._finished(client, auth, service)
+        intruder = signup_and_login(client, username="user2", email="u2@example.com")
+        assert client.delete(f"/executions/{execution['id']}", headers=intruder).status_code == 404
+
+    def test_bulk_delete_reports_what_was_skipped(self, client):
+        auth, service = self._setup(client)
+        finished = self._finished(client, auth, service)
+        running = self._run(client, auth, service)
+        r = client.post("/executions/delete", json={"ids": [finished["id"], running["id"], 999999]}, headers=auth)
+        assert r.status_code == 200, r.text
+        assert r.json() == {
+            "deleted": [finished["id"]],
+            "skipped": [{"id": running["id"], "reason": "active"}, {"id": 999999, "reason": "not_found"}],
+        }
+        assert [e["id"] for e in client.get("/executions", headers=auth).json()] == [running["id"]]
+
+    def test_workflow_with_history_needs_confirmation(self, client):
+        auth, service = self._setup(client)
+        self._finished(client, auth, service)
+        r = client.delete(f"/services/{service['id']}", headers=auth)
+        assert r.status_code == 409 and r.json()["detail"]["history_count"] == 1
+        assert client.delete(f"/services/{service['id']}?with_history=true", headers=auth).status_code == 204
+        assert client.get(f"/services/{service['id']}", headers=auth).status_code == 404
+        assert client.get("/executions", headers=auth).json() == []
+
+    def test_workflow_with_running_execution_cannot_be_deleted(self, client):
+        auth, service = self._setup(client)
+        self._run(client, auth, service)
+        r = client.delete(f"/services/{service['id']}?with_history=true", headers=auth)
+        assert r.status_code == 409 and r.json()["detail"]["active"] is True
+
+    def test_workflow_without_history_is_deleted(self, client):
+        auth, service = self._setup(client)
+        assert client.delete(f"/services/{service['id']}", headers=auth).status_code == 204
+        assert client.get("/services", headers=auth).json() == []
+
+
 class TestWorkerResultGuards:
     def _running_task(self, client, auth, key):
         service = create_service(client, auth)

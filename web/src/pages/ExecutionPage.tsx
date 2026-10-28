@@ -32,6 +32,11 @@ export default function ExecutionPage() {
     try { setExecution(await api.post<Execution>(`/executions/${id}/cancel`)) }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Unable to cancel execution.') }
   }
+  async function remove() {
+    if (!execution || !confirm(`실행 #${execution.id} 이력을 지울까요? 결과와 에이전트 출력도 함께 지워지고 되돌릴 수 없습니다.`)) return
+    try { await api.delete(`/executions/${execution.id}`); navigate('/history') }
+    catch (cause) { alert(cause instanceof Error ? cause.message : '실행 이력을 지우지 못했습니다.') }
+  }
   function downloadResult() {
     if (!execution?.result) return
     const blob = new Blob([execution.result], { type: 'text/markdown' })
@@ -47,7 +52,7 @@ export default function ExecutionPage() {
       <div className="compact-history">{history.slice(0, 8).map((item) => <button type="button" key={item.id} className={item.id === execution.id ? 'current' : ''} onClick={() => navigate(`/executions/${item.id}`)}><strong>{item.service_name}</strong><span><i className={`status-dot ${item.status === 'completed' ? '' : 'muted-dot'}`} /> {item.status} · #{item.id}</span></button>)}</div>
     </aside>
     <main className="result-main">
-      <header className="result-header"><div><div className="breadcrumb">M.A.R.S <span>/</span> Executions <span>/</span> #{execution.id}</div><div className="result-title-row"><h1>Workflow result</h1><span className={`status-pill large ${execution.status}`}>{statusLabel(execution.status)}</span></div><p>{execution.run_prompt || '실행 프롬프트 없이 입력 파일로 실행했습니다.'}</p></div><div className="result-actions"><button className="btn ghost" onClick={() => navigate(`/services/${execution.service_id}/run?from=${execution.id}`)}>같은 입력으로 다시 실행</button>{execution.result && <button className="btn ghost" onClick={downloadResult}>Export report</button>}{active && <button className="btn danger" onClick={cancel}>Cancel run</button>}</div></header>
+      <header className="result-header"><div><div className="breadcrumb">M.A.R.S <span>/</span> Executions <span>/</span> #{execution.id}</div><div className="result-title-row"><h1>Workflow result</h1><span className={`status-pill large ${execution.status}`}>{statusLabel(execution.status)}</span></div><p>{execution.run_prompt || '실행 프롬프트 없이 입력 파일로 실행했습니다.'}</p></div><div className="result-actions"><button className="btn ghost" onClick={() => navigate(`/services/${execution.service_id}/run?from=${execution.id}`)}>같은 입력으로 다시 실행</button>{execution.result && <button className="btn ghost" onClick={downloadResult}>Export report</button>}{active ? <button className="btn danger" onClick={cancel}>Cancel run</button> : <button className="btn ghost danger-text" onClick={remove}>이력 삭제</button>}</div></header>
       {error && <div className="error">{error}</div>}
       {!!execution.input_files?.length && <section className="result-section run-inputs-section"><div className="result-section-heading"><span className="eyebrow">INPUT FILES</span><h2>이번 실행의 입력 파일</h2></div><ul className="run-input-list">{execution.input_files.map((record) => <li key={`${record.kind}-${record.id}`}><strong>{record.label}</strong><span>{[...record.files.map((file) => file.name), ...record.directories.map((directory) => `디렉터리 ${directory.alias}`)].join(', ') || '없음'}</span></li>)}</ul></section>}
       <section className="run-progress-card"><div className="run-progress-heading"><span><i className={active ? 'pulse-dot' : 'check-dot'} /> {active ? 'Workflow is running' : 'Execution complete'}</span><strong>{execution.progress}%</strong></div><div className="progress-bar"><div style={{ width: `${execution.progress}%` }} /></div></section>

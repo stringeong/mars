@@ -233,6 +233,44 @@ def get_execution(
     return _to_out(db, execution)
 
 
+@router.delete("/executions/{execution_id}", status_code=204)
+def delete_execution(
+    execution_id: int,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """UC-207 실행 이력 삭제. 대기·실행 중인 실행은 먼저 취소해야 한다."""
+    execution = db.get(models.Execution, execution_id)
+    if execution is None or execution.user_id != user.id:
+        raise HTTPException(404, "실행 이력을 찾을 수 없습니다.")
+    if execution.status in orchestrator.ACTIVE_EXECUTION:
+        raise HTTPException(409, "실행 중인 이력은 지울 수 없습니다. 먼저 실행을 취소해 주세요.")
+    orchestrator.delete_execution(db, execution)
+    db.commit()
+
+
+@router.post("/executions/delete", response_model=schemas.ExecutionBulkDeleteOut)
+def delete_executions(
+    body: schemas.ExecutionBulkDelete,
+    user: models.User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """여러 실행 이력을 한 번에 지운다. 지울 수 없는 것(없음·실행 중)은 이유와 함께 돌려준다."""
+    deleted: list[int] = []
+    skipped: list[dict] = []
+    for execution_id in dict.fromkeys(body.ids):
+        execution = db.get(models.Execution, execution_id)
+        if execution is None or execution.user_id != user.id:
+            skipped.append({"id": execution_id, "reason": "not_found"})
+        elif execution.status in orchestrator.ACTIVE_EXECUTION:
+            skipped.append({"id": execution_id, "reason": "active"})
+        else:
+            orchestrator.delete_execution(db, execution)
+            deleted.append(execution_id)
+    db.commit()
+    return {"deleted": deleted, "skipped": skipped}
+
+
 @router.post("/executions/{execution_id}/cancel", response_model=schemas.ExecutionOut)
 def cancel_execution(
     execution_id: int,

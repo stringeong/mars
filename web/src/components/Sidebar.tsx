@@ -2,7 +2,7 @@ import { KeyboardEvent, PointerEvent, useRef, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { api, setToken } from '../api'
 import { Device, Service } from '../types'
-import { announceServiceRenamed } from '../workflow'
+import { announceServiceRenamed, deleteWorkflow } from '../workflow'
 import AppIcon from './AppIcon'
 
 const footerItems = [
@@ -117,6 +117,10 @@ export default function Sidebar({ services, devices, layout, onLayoutChange }: {
     if (event.key === 'Enter') { event.preventDefault(); onLayoutChange({ width: SIDEBAR_DEFAULT_WIDTH, collapsed: false }) }
   }
 
+  async function remove(service: Service) {
+    if (await deleteWorkflow(service) && service.id === activeId) navigate('/services')
+  }
+
   async function duplicate(serviceId: number) {
     try {
       const copy = await api.post<Service>(`/services/${serviceId}/duplicate`)
@@ -173,6 +177,7 @@ export default function Sidebar({ services, devices, layout, onLayoutChange }: {
           <Link to={`/services/${service.id}`} className={activeStep === 'builder' ? 'current' : ''}>편집</Link>
           <Link to={`/services/${service.id}/run`} className={activeStep === 'run' ? 'current' : ''}>실행</Link>
           <button type="button" onClick={() => duplicate(service.id)}>복제</button>
+          <button type="button" className="side-delete" onClick={() => remove(service)}>삭제</button>
         </div>}
       </div>)}
       {!services.length && <small className="side-empty">만든 워크플로우가 여기에 쌓여요.</small>}

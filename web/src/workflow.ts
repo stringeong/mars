@@ -1,3 +1,4 @@
+import { api, ApiError } from './api'
 import { AgentNode, GenerationInfo, RunInputRecord, Task, ValidationIssue, ValidationResult } from './types'
 
 export type FlagExplanation = { manual: boolean; reason: string }
@@ -146,6 +147,41 @@ export function onServiceRenamed(handler: (renamed: { id: number; name: string }
   const listener = (event: Event) => handler((event as CustomEvent<{ id: number; name: string }>).detail)
   window.addEventListener(SERVICE_RENAMED, listener)
   return () => window.removeEventListener(SERVICE_RENAMED, listener)
+}
+
+const SERVICE_DELETED = 'mars:service-deleted'
+
+/** 워크플로우가 지워졌을 때 사이드바 등 열려 있는 화면에 알린다 */
+export function onServiceDeleted(handler: (id: number) => void) {
+  const listener = (event: Event) => handler((event as CustomEvent<number>).detail)
+  window.addEventListener(SERVICE_DELETED, listener)
+  return () => window.removeEventListener(SERVICE_DELETED, listener)
+}
+
+/**
+ * 확인을 받고 워크플로우를 지운다. 실행 이력이 있으면 이력까지 지울지 한 번 더 묻는다.
+ * 실제로 지웠으면 true.
+ */
+export async function deleteWorkflow(service: { id: number; name: string }) {
+  if (!window.confirm(`'${service.name}' 워크플로우를 삭제할까요? 되돌릴 수 없어요.`)) return false
+  try {
+    await api.delete(`/services/${service.id}`)
+  } catch (cause) {
+    const detail = cause instanceof ApiError ? cause.detail as { history_count?: number } | undefined : undefined
+    if (!detail?.history_count) {
+      window.alert(cause instanceof Error ? cause.message : '워크플로우를 삭제하지 못했어요.')
+      return false
+    }
+    if (!window.confirm(`이 워크플로우의 실행 이력 ${detail.history_count}개도 함께 삭제돼요. 계속할까요? (업로드한 파일은 남아요)`)) return false
+    try {
+      await api.delete(`/services/${service.id}?with_history=true`)
+    } catch (again) {
+      window.alert(again instanceof Error ? again.message : '워크플로우를 삭제하지 못했어요.')
+      return false
+    }
+  }
+  window.dispatchEvent(new CustomEvent(SERVICE_DELETED, { detail: service.id }))
+  return true
 }
 
 /** 실행 이력의 입력 파일을 한 줄로: "card_A.csv 외 2개" */

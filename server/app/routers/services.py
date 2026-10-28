@@ -312,18 +312,22 @@ def delete_service(
     service_id: int,
     user: models.User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    with_history: bool = False,
 ):
+    """워크플로우 삭제. 실행 이력이 있으면 with_history=true로 확인해야 이력까지 함께 지운다."""
     service = _get_owned(service_id, user, db)
-    has_history = (
-        db.query(models.Execution.id)
-        .filter(models.Execution.service_id == service.id)
-        .first()
-        is not None
-    )
-    if has_history:
+    executions = db.query(models.Execution).filter(models.Execution.service_id == service.id).all()
+    if any(execution.status in orchestrator.ACTIVE_EXECUTION for execution in executions):
+        raise HTTPException(409, {"message": "실행 중인 작업이 있어 삭제할 수 없습니다. 먼저 실행을 취소해 주세요.", "active": True})
+    if executions and not with_history:
         raise HTTPException(
             409,
-            "실행 이력이 있는 서비스는 삭제할 수 없습니다. 실행 이력을 보존해 주세요.",
+            {"message": f"실행 이력 {len(executions)}개가 있습니다. 이력까지 함께 지우려면 다시 확인해 주세요.", "history_count": len(executions)},
         )
+    for execution in executions:
+        orchestrator.delete_execution(db, execution)
+    # 이 워크플로우에 묶인 외부 전송 동의는 지우고, 워커 생성 요청은 결과 연결만 끊는다
+    db.query(models.ExternalTransferConsent).filter(models.ExternalTransferConsent.service_id == service.id).delete(synchronize_session=False)
+    db.query(models.GenerationJob).filter(models.GenerationJob.service_id == service.id).update({"service_id": None}, synchronize_session=False)
     db.delete(service)
     db.commit()

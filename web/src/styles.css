@@ -829,6 +829,7 @@ body, .layout { background: #fff; color: var(--text); }
 .sidebar.side .side-sublinks a, .sidebar.side .side-sublinks button { display: inline; padding: 0; border: 0; border-radius: 0; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
 .sidebar.side .side-sublinks a:hover, .sidebar.side .side-sublinks button:hover { background: none; color: var(--text); }
 .sidebar.side .side-sublinks .current { color: var(--text); font-weight: 600; }
+.sidebar.side .side-sublinks .side-delete:hover { color: var(--danger); }
 .sidebar.side .side-empty { padding: 6px 10px; color: var(--muted); font-size: 12px; }
 .sidebar.side .side-footer { display: grid; gap: 1px; padding-top: 8px; border-top: 1px solid var(--border); }
 .sidebar.side .side-footer a { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: #4a4a48; font-size: 13.5px; font-weight: 400; text-decoration: none; }
@@ -916,3 +917,14 @@ body.resizing-sidebar { cursor: col-resize; user-select: none; }
   .authenticated-layout { --sidebar-width: 64px !important; }
   .sidebar.side .side-resizer, .sidebar.side .side-toggle { display: none; }
 }
+
+/* 실행 이력 선택 삭제 */
+.history-select-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; border-top: 1px solid #eff0f4; font-size: 12px; color: #6b7385; }
+.history-select-bar label { display: flex; align-items: center; gap: 6px; margin: 0; white-space: nowrap; cursor: pointer; }
+.history-select-bar input, .execution-row > input { width: 14px; height: 14px; flex: none; padding: 0; }
+.history-delete { border: 1px solid #e4e7ee; border-radius: 8px; background: #fff; padding: 5px 10px; font: inherit; font-size: 12px; color: var(--danger); cursor: pointer; }
+.history-delete:disabled { color: #b4bac6; cursor: default; }
+.execution-row { display: flex; align-items: center; border-bottom: 1px solid #f0f1f5; }
+.execution-row > input { margin: 0 0 0 16px; flex: none; }
+.execution-row .execution-list-item { flex: 1; border-bottom: 0; padding-left: 10px; min-width: 0; }
+.btn.danger-text { color: var(--danger); }

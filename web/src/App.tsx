@@ -3,7 +3,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { api, getToken } from './api'
 import { Device, Service } from './types'
 import Sidebar, { loadSidebarLayout, saveSidebarLayout, SIDEBAR_COLLAPSED_WIDTH, SidebarLayout } from './components/Sidebar'
-import { onServiceRenamed } from './workflow'
+import { onServiceDeleted, onServiceRenamed } from './workflow'
 import DashboardPage from './pages/DashboardPage'
 import DevicesPage from './pages/DevicesPage'
 import DownloadPage from './pages/DownloadPage'
@@ -59,6 +59,10 @@ export default function App() {
   }, [authed, location.pathname])
 
   // 어디서 이름을 바꾸든 사이드바 목록에 바로 반영한다
+  useEffect(() => onServiceDeleted((id) => {
+    setServices((current) => current.filter((service) => service.id !== id))
+  }), [])
+
   useEffect(() => onServiceRenamed(({ id, name }) => {
     setServices((current) => current.map((service) => (service.id === id ? { ...service, name } : service)))
   }), [])

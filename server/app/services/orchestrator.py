@@ -291,3 +291,20 @@ def execution_progress(execution: models.Execution) -> float:
         return 0.0
     done = sum(1 for t in execution.tasks if t.status in ("done", "failed"))
     return round(done / total * 100, 1)
+
+
+ACTIVE_EXECUTION = ("pending", "running")
+
+
+def delete_execution(db: Session, execution: models.Execution) -> None:
+    """실행 이력 하나를 지운다. 작업(TaskRecord)도 함께 지우고, 외부 LLM 사용량 기록은
+    비용 집계를 위해 남기되 실행·작업 연결만 끊는다. 업로드 파일은 다른 실행이 쓸 수 있으므로 지우지 않는다."""
+    task_ids = [task_id for (task_id,) in db.query(models.TaskRecord.id).filter(models.TaskRecord.execution_id == execution.id)]
+    usage = db.query(models.LLMUsage).filter(models.LLMUsage.execution_id == execution.id)
+    if task_ids:
+        usage = db.query(models.LLMUsage).filter(
+            (models.LLMUsage.execution_id == execution.id) | (models.LLMUsage.task_id.in_(task_ids))
+        )
+    usage.update({"execution_id": None, "task_id": None}, synchronize_session=False)
+    db.query(models.TaskRecord).filter(models.TaskRecord.execution_id == execution.id).delete(synchronize_session=False)
+    db.delete(execution)
