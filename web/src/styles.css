@@ -928,3 +928,5 @@ body.resizing-sidebar { cursor: col-resize; user-select: none; }
 .execution-row > input { margin: 0 0 0 16px; flex: none; }
 .execution-row .execution-list-item { flex: 1; border-bottom: 0; padding-left: 10px; min-width: 0; }
 .btn.danger-text { color: var(--danger); }
+.home-examples-link { display: block; width: fit-content; margin: 14px auto 0; color: #6b6b67; font-size: 13px; text-decoration: none; }
+.home-examples-link:hover { color: #1f1f1d; text-decoration: underline; }

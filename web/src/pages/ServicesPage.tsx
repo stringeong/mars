@@ -1,5 +1,5 @@
 import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import { defaultWorker, GenerationFailed, generateOnWorker, workerProgressLabel } from '../generation'
 import { CloudProvider, Device, GenerationError, GenerationJob, GeneratorModels, Service } from '../types'
@@ -197,6 +197,7 @@ export default function ServicesPage() {
       {!prompt && <div className="home-suggestions">
         {suggestions.map((item) => <button type="button" key={item.label} onClick={() => setPrompt(item.text)}>{item.label}</button>)}
       </div>}
+      <Link className="home-examples-link" to="/examples">활용 예시 더 보기 →</Link>
     </div>
   </div>
 }
