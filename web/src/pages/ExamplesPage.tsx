@@ -11,7 +11,7 @@ export default function ExamplesPage() {
   const [query, setQuery] = useState('')
   const [community, setCommunity] = useState<CommunityWorkflow[]>([])
   useEffect(() => { window.scrollTo(0, 0) }, [])
-  useEffect(() => { api.get<CommunityWorkflow[]>('/community/workflows').then(setCommunity).catch(() => {}) }, [])
+  useEffect(() => { api.get<CommunityWorkflow[]>('/community/workflows').then((list) => setCommunity(Array.isArray(list) ? list : [])).catch(() => {}) }, [])
 
   const keyword = query.trim().toLowerCase()
   // 강점이 잘 드러나는 예시를 먼저 보여준다
