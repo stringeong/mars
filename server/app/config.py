@@ -36,6 +36,22 @@ UPLOAD_DIR = Path(os.environ.get("MARS_UPLOAD_DIR", "./uploads")).resolve()
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("MARS_DEFAULT_MODEL", "gemma3:4b")
 
+
+def _positive_int_env(name: str, default: int) -> int:
+    """Read a positive integer setting without allowing an unusable token cap."""
+    try:
+        value = int(os.environ.get(name, str(default)))
+    except ValueError as exc:
+        raise ConfigurationError(f"{name} must be a positive integer.") from exc
+    if value < 1:
+        raise ConfigurationError(f"{name} must be a positive integer.")
+    return value
+
+
+# Provider defaults are often too short for reports and other deliverables.
+# Deployments may lower this to control cost or raise it for longer documents.
+MAX_OUTPUT_TOKENS = _positive_int_env("MARS_MAX_OUTPUT_TOKENS", 16384)
+
 # 이 시간(초) 동안 하트비트가 없으면 기기를 offline으로 간주하고
 # 해당 기기에 할당된 실행 중 작업을 다른 기기로 재할당한다.
 HEARTBEAT_TIMEOUT_SEC = int(os.environ.get("MARS_HEARTBEAT_TIMEOUT", "30"))

@@ -52,6 +52,7 @@ class TestChat:
         assert calls[0]["json"]["model"] == "qwen3:8b"
         assert calls[0]["json"]["messages"] == messages
         assert calls[0]["json"]["options"]["temperature"] == 0.2
+        assert calls[0]["json"]["options"]["num_predict"] == 16384
         assert calls[0]["json"]["stream"] is False
 
 

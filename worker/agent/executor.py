@@ -1,6 +1,7 @@
 """작업 실행기 — 로컬 Ollama로 에이전트 프롬프트를 실행한다."""
 
 import json
+import os
 import re
 
 import httpx
@@ -11,6 +12,14 @@ FILE_CONTEXT_LIMIT = 10  # 직접 첨부를 우선해 컨텍스트에 포함할 
 FILE_CONTEXT_CHARS = 30_000  # 파일별 최대 입력 길이
 FILE_CHUNK_CHARS = 4_000  # 긴 문서는 구간을 나눠 경계를 명확히 표시
 PREVIEW_CHARS = 500  # 파일 선별 시 LLM에게 보여줄 미리보기 길이
+
+
+def _max_output_tokens() -> int:
+    """Use a generous, overridable generation limit for task deliverables."""
+    try:
+        return max(1, int(os.getenv("MARS_MAX_OUTPUT_TOKENS", "16384")))
+    except ValueError:
+        return 16384
 
 
 def _directory_paths(task: dict) -> list[str]:
@@ -38,7 +47,7 @@ def _chat(config: dict, model: str, messages: list[dict], temperature: float, re
         "model": model,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": temperature},
+        "options": {"temperature": temperature, "num_predict": _max_output_tokens()},
     }
     if response_format:
         payload["format"] = response_format

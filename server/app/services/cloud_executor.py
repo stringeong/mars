@@ -4,6 +4,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from .. import models
+from ..config import MAX_OUTPUT_TOKENS
 from .credentials import decrypt_secret
 from .transfers import is_cloud_node, provider_for
 
@@ -17,7 +18,7 @@ def _node_for(execution: models.Execution, node_id: str) -> dict:
 def _call(provider: str, key: str, model: str, system: str, user: str, timeout: httpx.Timeout = TIMEOUT) -> tuple[str, dict]:
     with httpx.Client(timeout=timeout) as client:
         if provider == "openai":
-            response = client.post("https://api.openai.com/v1/responses", headers={"Authorization": f"Bearer {key}"}, json={"model": model, "instructions": system, "input": user})
+            response = client.post("https://api.openai.com/v1/responses", headers={"Authorization": f"Bearer {key}"}, json={"model": model, "instructions": system, "input": user, "max_output_tokens": MAX_OUTPUT_TOKENS})
             response.raise_for_status()
             data = response.json()
             text = data.get("output_text") or "".join(item.get("text", "") for output in data.get("output", []) for item in output.get("content", []) if item.get("type") == "output_text")
@@ -25,7 +26,7 @@ def _call(provider: str, key: str, model: str, system: str, user: str, timeout: 
             usage["cached_tokens"] = (usage.get("input_tokens_details") or {}).get("cached_tokens", 0)
             return text, usage
         if provider == "anthropic":
-            response = client.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": key, "anthropic-version": "2023-06-01"}, json={"model": model, "max_tokens": 4096, "system": system, "messages": [{"role": "user", "content": user}]})
+            response = client.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": key, "anthropic-version": "2023-06-01"}, json={"model": model, "max_tokens": MAX_OUTPUT_TOKENS, "system": system, "messages": [{"role": "user", "content": user}]})
             response.raise_for_status()
             data = response.json()
             text = "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text")
@@ -38,7 +39,7 @@ def _call(provider: str, key: str, model: str, system: str, user: str, timeout: 
             json={
                 "systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": [{"text": user}]}],
-                "generationConfig": {"maxOutputTokens": 4096},
+                "generationConfig": {"maxOutputTokens": MAX_OUTPUT_TOKENS},
             },
         )
         response.raise_for_status()
