@@ -132,7 +132,10 @@ export default function Sidebar({ services, devices, layout, onLayoutChange }: {
 
   return <aside className={`sidebar side${layout.collapsed ? ' collapsed' : ''}`}>
     <div className="side-head">
-      <Link to="/services" className="side-brand" title="M.A.R.S"><span className="brand-mark">M</span><strong>M.A.R.S</strong></Link>
+      <div className="side-brand">
+        <Link to="/about" className="side-brand-mark-link" aria-label="M.A.R.S 제품 소개" title="제품 소개"><span className="brand-mark">M</span></Link>
+        <Link to="/services" className="side-brand-name" title="워크스페이스"><strong>M.A.R.S</strong></Link>
+      </div>
       <button
         type="button"
         className="side-toggle"

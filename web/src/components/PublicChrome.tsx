@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Link, NavLink, useNavigate } from 'react-router-dom'
+import { useEffect, useState } from 'react'
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom'
 import { api, getToken } from '../api'
 import { Example } from '../examples'
 import { GITHUB_URL } from '../release'
@@ -8,14 +8,22 @@ import { CommunityWorkflow, Service } from '../types'
 /** 로그인 없이 보는 제품 소개·워커 다운로드 페이지의 머리글 */
 export function PublicHeader() {
   const authed = !!getToken()
+  const { hash, pathname } = useLocation()
+  const onProductPage = pathname === '/about' || pathname === '/'
+  const [productMenuOpen, setProductMenuOpen] = useState(onProductPage)
+  const activeProductSection = hash.replace('#', '')
+  useEffect(() => { if (onProductPage) setProductMenuOpen(true) }, [onProductPage])
+  function toggleProductMenu(event: React.MouseEvent<HTMLAnchorElement>) {
+    if (!onProductPage) return
+    event.preventDefault()
+    setProductMenuOpen((open) => !open)
+  }
   return <header className="mk-header">
     <div className="mk-shell mk-header-inner">
       <Link to="/about" className="mk-logo" aria-label="M.A.R.S 홈"><span>M</span>M.A.R.S</Link>
       <nav className="mk-nav" aria-label="제품">
-        <a href="/about#how">작동 방식</a>
-        <a href="/about#features">기능</a>
-        <a href="/about#privacy">데이터 보호</a>
-        <NavLink to="/examples">활용 예시</NavLink>
+        <NavLink className={`mk-nav-primary${onProductPage ? ' active' : ''}`} to="/about" end onClick={toggleProductMenu} aria-expanded={onProductPage ? productMenuOpen : undefined}>제품 소개</NavLink>
+        <NavLink to="/examples">커뮤니티</NavLink>
         <NavLink to="/download">워커 다운로드</NavLink>
       </nav>
       <div className="mk-header-actions">
@@ -25,6 +33,15 @@ export function PublicHeader() {
             <Link className="mk-btn mk-btn-ghost" to="/login">로그인</Link>
             <Link className="mk-btn mk-btn-primary" to="/login?mode=register">회원가입</Link>
           </>}
+      </div>
+    </div>
+    <div className={`mk-product-panel${onProductPage && productMenuOpen ? ' open' : ''}`} aria-hidden={!onProductPage || !productMenuOpen}>
+      <div className="mk-shell">
+        <div className="mk-product-panel-links" aria-label="제품 소개 항목">
+          <Link className={activeProductSection === 'how' ? 'active' : ''} to="/about#how" tabIndex={onProductPage && productMenuOpen ? undefined : -1}>작동 방식</Link>
+          <Link className={activeProductSection === 'features' ? 'active' : ''} to="/about#features" tabIndex={onProductPage && productMenuOpen ? undefined : -1}>기능</Link>
+          <Link className={activeProductSection === 'privacy' ? 'active' : ''} to="/about#privacy" tabIndex={onProductPage && productMenuOpen ? undefined : -1}>데이터 보호</Link>
+        </div>
       </div>
     </div>
   </header>
@@ -39,7 +56,7 @@ export function PublicFooter() {
       </div>
       <div className="mk-footer-links">
         <Link to="/about">제품 소개</Link>
-        <Link to="/examples">활용 예시</Link>
+        <Link to="/examples">커뮤니티</Link>
         <Link to="/download">워커 다운로드</Link>
         <a href={GITHUB_URL} target="_blank" rel="noreferrer">GitHub</a>
       </div>
