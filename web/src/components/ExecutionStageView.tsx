@@ -1,11 +1,12 @@
-import { Edge, Handle, MarkerType, Node, Position, ReactFlow } from '@xyflow/react'
+import { Edge, Handle, MarkerType, Node, Position, ReactFlow, ReactFlowInstance } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useEffect, useRef, useState } from 'react'
 import { Execution } from '../types'
 import { formatClock, taskDuration, taskStatus, taskWorkerLabel } from '../workflow'
 
 const COLUMN_WIDTH = 262
-const ROW_HEIGHT = 146
+// 카드 높이(약 101px) + 간격 12px
+const ROW_HEIGHT = 113
 const CARD_WIDTH = 220
 const LABEL_OFFSET = 56
 
@@ -49,7 +50,8 @@ export default function ExecutionStageView({ execution, finalNodeIds, now, fixed
   const tallest = Math.max(1, ...stages.map((ids) => ids.length))
 
   const nodes: Node[] = stages.flatMap((ids, column) => {
-    const offset = ((tallest - ids.length) * ROW_HEIGHT) / 2
+    // 블록이 적은 단계도 위에서부터 놓아, 스크롤하지 않아도 모든 단계의 첫 블록이 보이게 한다
+    const offset = 0
     const label: Node = {
       id: `stage-${column}`,
       type: 'stageLabel',
@@ -94,29 +96,64 @@ export default function ExecutionStageView({ execution, finalNodeIds, now, fixed
   // 칸 너비에 맞춰 줄이되 글씨가 읽히지 않을 만큼(0.7배 미만) 줄이지 않고, 1단계부터 왼쪽 정렬한다.
   // 넘치는 단계는 가로로 끌거나 스크롤해서 본다.
   const contentWidth = (stages.length - 1) * COLUMN_WIDTH + CARD_WIDTH + 32
+  const drawnWidth = contentWidth - 32
   const zoom = width ? Math.min(1, Math.max(fixed ? 0.4 : 0.7, width / contentWidth)) : 1
   const overflow = width > 0 && contentWidth * zoom > width
-  return <div ref={wrapRef} className="stage-view" style={{ height: Math.max(220, (tallest * ROW_HEIGHT + LABEL_OFFSET) * zoom + 36) }}>
+  const height = Math.max(220, (tallest * ROW_HEIGHT + LABEL_OFFSET) * zoom + 36)
+  // 다 들어가면 가운데에, 넘치면 1단계부터 왼쪽에 놓는다
+  const startX = overflow || !width ? 16 : Math.max(16, (width - drawnWidth * zoom) / 2)
+  // 넘칠 때 가로로 움직일 수 있는 범위 (화면 기준 x): 마지막 단계 오른쪽 끝이 16px 여백을 두고 보일 때까지
+  const minX = Math.min(16, width - drawnWidth * zoom - 16)
+  const clampX = (x: number) => Math.min(16, Math.max(minX, x))
+  // 위아래로는 움직이지 않게 막는다. 마우스 휠은 페이지 스크롤에 쓴다.
+  const top = -(LABEL_OFFSET * zoom + 14) / zoom
+  const extent: [[number, number], [number, number]] = [[-16 / zoom, top], [drawnWidth + 16 / zoom, top + height / zoom]]
+  const [flow, setFlow] = useState<ReactFlowInstance | null>(null)
+  const [viewX, setViewX] = useState(startX)
+  // 칸 너비·단계 수가 바뀔 때마다 실제 칸 너비로 다시 맞춘다 (가운데 정렬 / 넘치면 1단계부터)
+  useEffect(() => {
+    const element = wrapRef.current
+    if (!flow || !element) return
+    const box = element.clientWidth
+    const x = contentWidth * zoom > box ? 16 : Math.max(16, (box - drawnWidth * zoom) / 2)
+    setViewX(x)
+    void flow.setViewport({ x, y: LABEL_OFFSET * zoom + 14, zoom })
+  }, [flow, width, zoom, contentWidth, drawnWidth])
+  const step = (direction: 1 | -1) => {
+    if (!flow) return
+    const viewport = flow.getViewport()
+    const x = clampX(viewport.x - direction * COLUMN_WIDTH * zoom)
+    setViewX(x)
+    void flow.setViewport({ ...viewport, x }, { duration: 250 })
+  }
+  return <div ref={wrapRef} className="stage-view" style={{ height }}>
     <ReactFlow
-      key={Math.round(zoom * 100)}
       nodes={nodes}
       edges={edges}
       nodeTypes={nodeTypes}
-      defaultViewport={{ x: 16, y: LABEL_OFFSET * zoom + 14, zoom }}
-      minZoom={0.5}
+      defaultViewport={{ x: startX, y: LABEL_OFFSET * zoom + 14, zoom }}
+      onInit={setFlow}
+      onMove={(_, viewport) => setViewX(viewport.x)}
+      minZoom={0.3}
       maxZoom={1.5}
       nodesDraggable={false}
       nodesConnectable={false}
       elementsSelectable={false}
+      // 범위가 칸보다 좁으면 React Flow가 내용을 가운데로 옮겨 버리므로, 넘칠 때(끌기가 켜질 때)만 범위를 건다
+      translateExtent={overflow ? extent : undefined}
       zoomOnScroll={false}
-      panOnScroll={!fixed}
-      // 고정 모드라도 칸보다 넓으면(좁은 화면) 끌어서 다음 단계를 볼 수 있게 한다
-      panOnDrag={!fixed || overflow}
-      zoomOnPinch={!fixed}
-      zoomOnDoubleClick={!fixed}
-      preventScrolling={!fixed}
+      panOnScroll={false}
+      // 칸보다 넓을 때만 가로로 끌거나 양옆 화살표로 다음 단계를 볼 수 있게 한다
+      panOnDrag={overflow}
+      zoomOnPinch={false}
+      zoomOnDoubleClick={false}
+      preventScrolling={false}
       proOptions={{ hideAttribution: true }}
     />
-    {overflow && <span className="stage-pan-hint">← 가로로 끌거나 스크롤해서 다음 단계를 볼 수 있습니다 →</span>}
+    {overflow && <>
+      <button type="button" className="stage-nav prev" aria-label="이전 단계 보기" disabled={viewX >= 15.5} onClick={() => step(-1)}>‹</button>
+      <button type="button" className="stage-nav next" aria-label="다음 단계 보기" disabled={viewX <= minX + 0.5} onClick={() => step(1)}>›</button>
+      <span className="stage-pan-hint">← 끌거나 양옆 화살표로 다른 단계를 볼 수 있어요 →</span>
+    </>}
   </div>
 }

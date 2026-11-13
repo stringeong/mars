@@ -17,7 +17,7 @@ const REQUIREMENTS: Record<Platform, string[]> = {
 
 const FAQ = [
   { q: '포트를 열거나 공유기 설정을 해야 하나요?', a: '아니요. 워커가 서버에 먼저 연락해 작업을 가져가는 방식이라 인바운드 포트나 포트포워딩이 필요 없어요. Worker UI(8765)와 Ollama(11434)는 내 기기 안(127.0.0.1)에서만 열려요.' },
-  { q: '내 파일은 어디까지 전달되나요?', a: '업로드한 파일은 서버를 거쳐 워커에 전달되고, 공유 디렉터리 파일은 그 기기 안에서만 읽혀요. 워커는 워크플로우에 연결한 폴더만 읽을 수 있어요.' },
+  { q: '내 파일은 어디까지 전달되나요?', a: '업로드한 파일은 서버를 거쳐 워커에 전달되고, 등록한 폴더의 원본 파일은 그 PC에서만 읽혀요. 워커는 워크플로우에 연결한 폴더만 읽을 수 있어요.' },
   { q: '어떤 모델을 받아야 하나요?', a: '처음에는 qwen3:4b처럼 4B 크기 모델을 권장해요. Worker UI의 Models 화면에서 받거나 터미널에서 ollama pull qwen3:4b를 실행하세요.' },
   { q: '웹에서 워커가 오프라인으로 보여요.', a: 'Worker UI의 Status 화면에서 실행 중인지, 서버 주소가 /api로 끝나는지 확인하세요. 기기가 잠자기에 들어가면 연결이 끊겨요.' },
   { q: '워커로 워크플로우를 만들 수도 있나요?', a: '네. 첫 화면 생성 모델에서 "내 워커"를 고르면 서버 GPU 대신 이 기기의 Ollama가 워크플로우를 만들어요.' },
@@ -95,11 +95,12 @@ export default function DownloadPage() {
           </a>
           <span>{PLATFORMS[platform].system}{platform === detected ? ' · 지금 쓰는 기기' : ''} · <a href={DOWNLOADS.zip}>ZIP</a> · <a href={DOWNLOADS.tarball}>tar.gz</a></span>
         </div>
+        <p className="mk-dl-account">워커는 M.A.R.S 계정의 기기로 등록돼요. 계정이 없다면 <Link to="/login?mode=register">회원가입</Link>부터 해 주세요.</p>
       </div>
     </section>
 
     <section className="mk-section">
-      <div className="mk-shell mk-dl-layout">
+      <div className="mk-shell mk-dl-layout mk-dl-single">
         <div className="mk-dl-main">
           <div className="mk-tabs" role="tablist" aria-label="운영체제">
             {(Object.keys(PLATFORMS) as Platform[]).map((key) => <button
@@ -127,7 +128,7 @@ export default function DownloadPage() {
             <h2>서버에 등록하기</h2>
             <ol className="mk-register">
               <li><b>모델을 하나 받아요.</b><span>Worker UI의 Models 화면이나 터미널에서 받아요.</span><Command code="ollama pull qwen3:4b" /></li>
-              <li><b>Register this worker 화면에 입력해요.</b><span>Server address, 기기 이름(예: 홍길동-맥북), M.A.R.S 계정을 입력하고 <b>Connect worker</b>를 눌러요.</span></li>
+              <li><b>Register this worker 화면에 입력해요.</b><span>Server address에 아래 주소를 넣고, 기기 이름(예: 홍길동-맥북)과 M.A.R.S 계정을 입력한 뒤 <b>Connect worker</b>를 눌러요.</span><div className="mk-server-inline"><code>{server}</code><CopyButton text={server} label="주소 복사" /></div></li>
               <li><b>Status 화면에서 시작을 눌러요.</b><span>웹 사이드바의 워커가 온라인으로 바뀌면 끝이에요. 첫 화면 생성 모델에도 "내 워커"가 나타나요.</span></li>
             </ol>
           </div>
@@ -140,23 +141,6 @@ export default function DownloadPage() {
           </div>
         </div>
 
-        <aside className="mk-dl-side">
-          <div className="mk-card mk-server-card">
-            <span>서버 주소</span>
-            <code>{server}</code>
-            <CopyButton text={server} label="주소 복사" />
-            <small>Worker UI의 Server address에 이 주소를 넣으세요.</small>
-          </div>
-          <div className="mk-card mk-side-card">
-            <b>계정이 아직 없나요?</b>
-            <p>워커는 M.A.R.S 계정의 기기로 등록돼요.</p>
-            <Link className="mk-btn mk-btn-primary" to="/login?mode=register">회원가입</Link>
-          </div>
-          <div className="mk-card mk-side-card">
-            <b>다른 운영체제</b>
-            {(Object.keys(PLATFORMS) as Platform[]).filter((key) => key !== platform).map((key) => <button key={key} type="button" className="mk-link-button" onClick={() => choose(key)}>{PLATFORMS[key].name} 설치 방법 →</button>)}
-          </div>
-        </aside>
       </div>
     </section>
 

@@ -1,5 +1,5 @@
 import { api, ApiError } from './api'
-import { AgentNode, GenerationInfo, RunInputRecord, Task, ValidationIssue, ValidationResult } from './types'
+import { AgentNode, Device, GenerationInfo, RunInputRecord, Task, ValidationIssue, ValidationResult } from './types'
 
 export type FlagExplanation = { manual: boolean; reason: string }
 export type AutoFlagReasons = { needsFile: FlagExplanation; final: FlagExplanation }
@@ -77,6 +77,13 @@ export const TASK_STATUS: Record<string, { label: string; icon: string }> = {
   running: { label: '실행 중', icon: '▶' },
   done: { label: '완료', icon: '✓' },
   failed: { label: '실패', icon: '✕' },
+}
+
+/** 실행 상태 이름 */
+export const EXECUTION_STATUS: Record<string, string> = { pending: '대기', running: '실행 중', completed: '완료', failed: '실패', cancelled: '취소' }
+
+export function executionStatusLabel(status: string) {
+  return EXECUTION_STATUS[status] ?? status
 }
 
 export function taskStatus(status: string) {
@@ -220,4 +227,39 @@ export function issuesByNode(validation: ValidationResult | null | undefined) {
 /** 실행 프롬프트를 넣어도 풀리지 않는 오류 */
 export function blockingErrors(validation: ValidationResult | null | undefined) {
   return (validation?.errors ?? []).filter((issue) => !issue.resolvable_by_run_prompt)
+}
+
+/** 기기 아이콘 종류: macOS(Darwin)는 노트북, 나머지는 모니터 */
+export function deviceIcon(device: Device): 'laptop' | 'desktop' {
+  return /darwin|mac/i.test(`${JSON.stringify(device.specs ?? {})} ${device.name}`) ? 'laptop' : 'desktop'
+}
+
+/** 온라인 기기가 앞에 오도록 정렬 */
+export function sortDevices(devices: Device[]) {
+  return [...devices].sort((a, b) => Number(b.online) - Number(a.online))
+}
+
+/** '방금', '5분 전', '3시간 전', '어제', 그보다 오래되면 '26.11.10' */
+export function timeAgo(value: string) {
+  const minutes = Math.floor((Date.now() - new Date(value).getTime()) / 60000)
+  if (minutes < 1) return '방금'
+  if (minutes < 60) return `${minutes}분 전`
+  if (minutes < 60 * 24) return `${Math.floor(minutes / 60)}시간 전`
+  if (minutes < 60 * 48) return '어제'
+  return shortDate(value)
+}
+
+
+const pad2 = (value: number) => String(value).padStart(2, '0')
+
+/** 날짜를 '26.11.10' 모양으로 */
+export function shortDate(value: string) {
+  const date = new Date(value)
+  return `${pad2(date.getFullYear() % 100)}.${pad2(date.getMonth() + 1)}.${pad2(date.getDate())}`
+}
+
+/** 날짜와 시각을 '26.11.10 16:53' 모양으로 */
+export function shortDateTime(value: string) {
+  const date = new Date(value)
+  return `${shortDate(value)} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
 }

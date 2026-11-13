@@ -1,8 +1,24 @@
+import AppIcon from '../components/AppIcon'
 import { FormEvent, useEffect, useState } from 'react'
 import { api, getDeviceDirectories } from '../api'
 import { Device, DirectoryInspection, SharedDirectory } from '../types'
+import { sortDevices, timeAgo } from '../workflow'
 
 const emptyDirectory = { alias: '', local_path: '', permission: 'read' as const }
+
+/** 'Darwin 27.0.0'처럼 커널 이름으로 오는 맥은 macOS로 보여준다. */
+function osLabel(device: Device) {
+  const os = String(device.specs.os ?? '')
+  return /^darwin/i.test(os) ? 'macOS' : os || '-'
+}
+
+/** 온라인이면 지금 CPU 사용률, 오프라인이면 마지막 접속 시각 */
+function usageCell(device: Device) {
+  if (!device.online) return <span className="device-seen">{device.last_heartbeat ? `${timeAgo(device.last_heartbeat)} 접속` : '접속 기록 없음'}</span>
+  const percent = Number(device.specs.cpu_percent)
+  if (!Number.isFinite(percent)) return <span className="device-seen">-</span>
+  return <span className="device-usage"><i><b style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} /></i>{percent}%</span>
+}
 
 export default function DevicesPage() {
   const [devices, setDevices] = useState<Device[]>([])
@@ -16,6 +32,7 @@ export default function DevicesPage() {
   const [inspections, setInspections] = useState<Record<number, DirectoryInspection>>({})
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const [filter, setFilter] = useState<'all' | 'on' | 'off'>('all')
 
   const selected = devices.find((device) => device.id === selectedId) ?? null
 
@@ -39,7 +56,7 @@ export default function DevicesPage() {
     setEditingDirectoryId(null)
     setError('')
     try { setDirectories(await getDeviceDirectories(device.id)) }
-    catch (cause) { setError(cause instanceof Error ? cause.message : '디렉터리 조회 실패') }
+    catch (cause) { setError(cause instanceof Error ? cause.message : '폴더 조회 실패') }
   }
 
   async function saveDevice(event: FormEvent) {
@@ -54,7 +71,7 @@ export default function DevicesPage() {
         },
       })
       await load()
-      setMessage('Worker 설정을 저장했습니다.')
+      setMessage('워커 설정을 저장했습니다.')
     } catch (cause) { setError(cause instanceof Error ? cause.message : '저장 실패') }
   }
 
@@ -70,16 +87,16 @@ export default function DevicesPage() {
       setDirectories(await getDeviceDirectories(selected.id))
       setDirectoryForm(emptyDirectory)
       setEditingDirectoryId(null)
-      setMessage('공유 디렉터리를 저장했습니다.')
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '디렉터리 저장 실패') }
+      setMessage('등록한 폴더를 저장했어요.')
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '폴더 저장 실패') }
   }
 
   async function deactivateDirectory(directoryId: number) {
-    if (!selected || !confirm('이 디렉터리를 비활성화할까요?')) return
+    if (!selected || !confirm('이 폴더를 비활성화할까요?')) return
     try {
       await api.delete(`/devices/${selected.id}/directories/${directoryId}`)
       setDirectories(await getDeviceDirectories(selected.id))
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '디렉터리 변경 실패') }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '폴더 변경 실패') }
   }
 
   async function pollInspection(directoryId: number, remaining = 20): Promise<void> {
@@ -105,11 +122,11 @@ export default function DevicesPage() {
       )
       setInspections((current) => ({ ...current, [directoryId]: inspection }))
       void pollInspection(directoryId)
-    } catch (cause) { setError(cause instanceof Error ? cause.message : '디렉터리 검사 요청 실패') }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '폴더 검사 요청 실패') }
   }
 
   async function removeDevice(deviceId: number) {
-    if (!confirm('이 Worker를 삭제할까요?')) return
+    if (!confirm('이 워커를 삭제할까요?')) return
     await api.delete(`/devices/${deviceId}`)
     if (selectedId === deviceId) setSelectedId(null)
     load()
@@ -117,44 +134,48 @@ export default function DevicesPage() {
 
   return <div className="devices-page">
     <header className="page-topbar">
-      <div><div className="breadcrumb">M.A.R.S <span>/</span> Workers</div><h1>Worker management</h1><p>Monitor connected machines, set resource limits, and manage local directory access.</p></div>
-      <div className="page-stat"><strong>{devices.filter((device) => device.online).length}</strong><span>workers online</span></div>
+      <div><div className="breadcrumb">M.A.R.S <span>/</span> 워커</div><h1>워커 관리</h1><p>연결된 기기 상태를 보고, 자원 사용 한도와 접근할 폴더를 정해요.</p></div>
     </header>
     <h1>기기 관리</h1>
-    <p className="subtitle">Worker의 이름, 새 작업 수용 기준과 공유 디렉터리를 관리합니다.</p>
+    <p className="subtitle">워커의 이름, 새 작업 수용 기준과 등록한 폴더를 관리해요.</p>
     {error && <div className="error">{error}</div>}
     {message && <div style={{ color: 'var(--success)', marginBottom: 10 }}>{message}</div>}
-    <div className="card">
-      <table><thead><tr><th>이름</th><th>사양</th><th>상태</th><th></th></tr></thead><tbody>
-        {devices.map((device) => <tr key={device.id} className={selectedId === device.id ? 'selected-row' : ''}>
-          <td><strong>{device.name}</strong></td>
-          <td style={{ fontSize: 13, color: 'var(--muted)' }}>{String(device.specs.os ?? '')} · CPU {String(device.specs.cpu_count ?? '?')}코어 · RAM {String(device.specs.ram_gb ?? '?')}GB {device.specs.cpu_percent != null && ` · 사용률 ${device.specs.cpu_percent}%`}</td>
-          <td><span className={`badge ${device.online ? 'online' : 'offline'}`}>{device.online ? '온라인' : '오프라인'}</span></td>
-          <td className="row"><button className="btn sm ghost" onClick={() => selectDevice(device)}>설정</button><button className="btn sm danger" onClick={() => removeDevice(device.id)}>삭제</button></td>
+    <div className="card device-table-card">
+      <div className="device-filter" role="tablist" aria-label="상태별 보기">
+        {([['all', '전체', devices.length], ['on', '온라인', devices.filter((device) => device.online).length], ['off', '오프라인', devices.filter((device) => !device.online).length]] as const).map(([key, label, count]) => <button key={key} type="button" role="tab" aria-selected={filter === key} className={filter === key ? 'active' : ''} onClick={() => setFilter(key)}>{label} <b>{count}</b></button>)}
+      </div>
+      <table className="device-table"><colgroup><col className="c-name" /><col className="c-os" /><col className="c-cpu" /><col className="c-ram" /><col className="c-use" /><col className="c-act" /></colgroup><thead><tr><th>이름</th><th>운영체제</th><th>CPU</th><th>RAM</th><th>사용률 · 접속</th><th aria-label="관리" /></tr></thead><tbody>
+        {sortDevices(devices).filter((device) => filter === 'all' || (filter === 'on') === device.online).map((device) => <tr key={device.id} className={[device.online ? 'on' : 'off', selectedId === device.id ? 'selected-row' : ''].filter(Boolean).join(' ')} onClick={() => selectDevice(device)} title={`${device.name} 설정 열기`}>
+          <td><span className="device-name"><AppIcon name="workers" /><strong>{device.name}</strong><span className="sr-only">{device.online ? '온라인' : '오프라인'}</span></span></td>
+          <td>{osLabel(device)}</td>
+          <td>{device.specs.cpu_count != null ? `${String(device.specs.cpu_count)}코어` : '-'}</td>
+          <td>{device.specs.ram_gb != null ? `${String(device.specs.ram_gb)}GB` : '-'}</td>
+          <td>{usageCell(device)}</td>
+          <td className="device-actions-cell"><div className="row device-actions"><button type="button" className="icon-btn" title="워커 설정" aria-label={`${device.name} 설정`} onClick={(event) => { event.stopPropagation(); selectDevice(device) }}><AppIcon name="settings" /></button><button type="button" className="icon-btn danger" title="워커 삭제" aria-label={`${device.name} 삭제`} onClick={(event) => { event.stopPropagation(); removeDevice(device.id) }}><AppIcon name="trash" /></button></div></td>
         </tr>)}
-        {!devices.length && <tr><td colSpan={4} style={{ color: 'var(--muted)' }}>등록된 Worker가 없습니다.</td></tr>}
+        {!devices.length && <tr><td colSpan={6} className="device-empty">등록된 워커가 없어요. 워커 프로그램을 설치하면 여기에 나타나요.</td></tr>}
       </tbody></table>
     </div>
 
     {selected && <div className="device-editor">
       <section className="card"><h2>{selected.name} 설정</h2>
         <form onSubmit={saveDevice}>
-          <label>Worker 이름</label><input value={name} onChange={(event) => setName(event.target.value)} required />
+          <label>워커 이름</label><input value={name} onChange={(event) => setName(event.target.value)} required />
           <div className="resource-limit-grid">
             <div><label>CPU 수용 상한 (%)</label><input type="number" min="1" max="100" placeholder="제한 없음" value={maxCpu} onChange={(event) => setMaxCpu(event.target.value)} /></div>
             <div><label>GPU 수용 상한 (%)</label><input type="number" min="1" max="100" placeholder="제한 없음" value={maxGpu} onChange={(event) => setMaxGpu(event.target.value)} /></div>
           </div>
-          <p className="muted">현재 사용률이 상한 이상이면 이 Worker에는 새 작업을 배정하지 않습니다. 실행 중인 Ollama 프로세스를 강제로 제한하는 값은 아닙니다.</p>
-          <button className="btn">Worker 설정 저장</button>
+          <p className="muted">현재 사용률이 상한 이상이면 이 워커에는 새 작업을 배정하지 않습니다. 실행 중인 Ollama 프로세스를 강제로 제한하는 값은 아닙니다.</p>
+          <button className="btn">워커 설정 저장</button>
         </form>
       </section>
-      <section className="card"><h2>공유 디렉터리</h2>
-        <p className="muted">같은 별명을 각 Worker에 등록하면, Worker별 서로 다른 로컬 경로를 하나의 공유 디렉터리로 연결합니다.</p>
+      <section className="card"><h2>등록한 폴더</h2>
+        <p className="muted">같은 별명으로 여러 워커에 등록하면, 워커마다 다른 로컬 경로를 하나의 폴더처럼 묶어서 써요.</p>
         <form onSubmit={saveDirectory} className="directory-form">
           <input placeholder="별명 (예: 프로젝트 자료)" value={directoryForm.alias} onChange={(event) => setDirectoryForm({ ...directoryForm, alias: event.target.value })} required />
-          <input placeholder="이 Worker의 로컬 경로" value={directoryForm.local_path} onChange={(event) => setDirectoryForm({ ...directoryForm, local_path: event.target.value })} required />
+          <input placeholder="이 워커의 로컬 경로" value={directoryForm.local_path} onChange={(event) => setDirectoryForm({ ...directoryForm, local_path: event.target.value })} required />
           <span className="directory-permission">읽기 전용</span>
-          <button className="btn">{editingDirectoryId ? '수정 저장' : '디렉터리 추가'}</button>
+          <button className="btn">{editingDirectoryId ? '수정 저장' : '폴더 추가'}</button>
           {editingDirectoryId && <button type="button" className="btn ghost" onClick={() => { setEditingDirectoryId(null); setDirectoryForm(emptyDirectory) }}>취소</button>}
         </form>
         <div className="directory-list">
@@ -163,7 +184,7 @@ export default function DevicesPage() {
             const checking = inspection?.status === 'pending' || inspection?.status === 'running'
             return <div key={directory.id} className="directory-inspection"><div className="directory-row"><div><strong>{directory.alias}</strong><small>{directory.local_path} · 읽기 전용 · {directory.is_active ? '활성' : '비활성'}</small></div><div className="row"><button className="btn sm ghost" disabled={checking || !directory.is_active} onClick={() => inspectDirectory(directory.id)}>{checking ? '검사 중…' : '검사'}</button><button className="btn sm ghost" onClick={() => { setEditingDirectoryId(directory.id); setDirectoryForm({ alias: directory.alias, local_path: directory.local_path, permission: 'read' }) }}>수정</button>{directory.is_active && <button className="btn sm danger" onClick={() => deactivateDirectory(directory.id)}>비활성화</button>}</div></div>{inspection?.status === 'done' && <div className="inspection-files"><strong>파일 {inspection.files.length}개</strong>{inspection.files.length ? <ul>{inspection.files.map((file) => <li key={file}>{file}</li>)}</ul> : <span className="muted">표시 가능한 파일이 없습니다.</span>}</div>}{inspection?.status === 'failed' && <div className="inspection-error">검사 실패: {inspection.error}</div>}</div>
           })}
-          {!directories.length && <span className="muted">등록된 디렉터리가 없습니다.</span>}
+          {!directories.length && <span className="muted">등록한 폴더가 없어요.</span>}
         </div>
       </section>
     </div>}

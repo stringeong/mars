@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import { ExecutionListItem } from '../types'
-import { generationLabel, inputFilesSummary } from '../workflow'
+import { executionStatusLabel, generationLabel, inputFilesSummary, shortDateTime } from '../workflow'
 
 const statuses = ['all', 'completed', 'running', 'failed'] as const
 
@@ -19,29 +19,29 @@ export default function HistoryPage() {
 
   return <div className="history-page">
     <header className="page-topbar">
-      <div><div className="breadcrumb">M.A.R.S <span>/</span> Executions</div><h1>Execution history</h1><p>Review runs, inspect agent output, and retry workflows from one place.</p></div>
-      <div className="page-stat"><strong>{items.length}</strong><span>total executions</span></div>
+      <div><div className="breadcrumb">M.A.R.S <span>/</span> 실행 이력</div><h1>실행 이력</h1><p>실행 결과와 에이전트별 출력을 확인하고 다시 실행할 수 있어요.</p></div>
     </header>
     {/* 실행 목록은 표 하나로 보여준다. 검색·상태 필터도 이 표에 건다 */}
     <section className="history-overview">
-      <div className="overview-card accent-card"><span className="eyebrow">ORCHESTRATION ACTIVITY</span><h2>Every run leaves an auditable trail.</h2><p>Open an execution to see the sequence of agents, assigned workers, final response, and individual agent outputs.</p><div className="overview-metrics"><div><strong>{items.filter((item) => item.status === 'completed').length}</strong><span>Completed</span></div><div><strong>{items.filter((item) => item.status === 'running').length}</strong><span>Running</span></div><div><strong>{items.filter((item) => item.status === 'failed').length}</strong><span>Needs review</span></div></div></div>
-      <div className="history-table-card">
+      {/* 상태별 개수를 한눈에 (누르면 그 상태만 보기) */}
+      <div className="history-stats">{(['completed', 'running', 'failed'] as const).map((status) => <button type="button" key={status} className={`history-stat ${status}${filter === status ? ' active' : ''}`} onClick={() => setFilter(filter === status ? 'all' : status)}><strong>{items.filter((item) => item.status === status).length}</strong><span>{executionStatusLabel(status)}</span></button>)}</div>
+            <div className="history-table-card">
         <div className="section-heading history-table-heading">
-          <div><span className="eyebrow">ALL ACTIVITY</span><h2>Runs <small>{visibleItems.length}</small></h2></div>
+          <div><span className="eyebrow">전체 기록</span><h2>실행 <small>{visibleItems.length >= 100 ? '100+' : visibleItems.length}</small></h2></div>
           <div className="history-table-tools">
-            <div className="history-filters">{statuses.map((status) => <button type="button" className={filter === status ? 'active' : ''} key={status} onClick={() => setFilter(status)}>{status === 'all' ? 'All' : status}</button>)}</div>
-            <input className="execution-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search executions..." />
+            <div className="history-filters">{statuses.map((status) => <button type="button" className={filter === status ? 'active' : ''} key={status} onClick={() => setFilter(status)}>{status === 'all' ? '전체' : executionStatusLabel(status)}</button>)}</div>
+            <input className="execution-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="실행 검색" />
           </div>
         </div>
-        <div className="history-table-wrap"><table><thead><tr><th>Workflow</th><th>Status</th><th>생성 모델</th><th>Started</th><th /></tr></thead><tbody>
+        <div className="history-table-wrap"><table><thead><tr><th>워크플로우</th><th>상태</th><th>생성 모델</th><th>시작 시각</th><th /></tr></thead><tbody>
           {visibleItems.map((item) => <tr className="clickable" key={item.id} onClick={() => navigate(`/executions/${item.id}`)}>
             <td><strong>{item.service_name}</strong><small>#{item.id} · {item.run_prompt || '실행 프롬프트 없음'} · 입력: {inputFilesSummary(item.input_files)}</small></td>
-            <td><span className={`status-pill ${item.status}`}>{item.status}</span></td>
+            <td><span className={`status-pill ${item.status}`}>{executionStatusLabel(item.status)}</span></td>
             <td><small className="history-model">{generationLabel(item.generation_info)}</small></td>
-            <td>{new Date(item.created_at).toLocaleString()}</td>
+            <td>{shortDateTime(item.created_at)}</td>
             <td>→</td>
           </tr>)}
-          {!visibleItems.length && <tr><td colSpan={5} className="empty-cell">{items.length ? 'No matching executions.' : 'Your execution history will appear here.'}</td></tr>}
+          {!visibleItems.length && <tr><td colSpan={5} className="empty-cell">{items.length ? '검색 결과가 없어요.' : '실행하면 여기에 기록이 쌓여요.'}</td></tr>}
         </tbody></table></div>
       </div>
     </section>

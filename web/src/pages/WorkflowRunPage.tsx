@@ -78,7 +78,7 @@ export default function WorkflowRunPage() {
         // 다시 실행할 때는 그 실행의 프롬프트도 가져온다
         if (fromExecution && previous?.run_prompt) setPrompt(previous.run_prompt)
       } catch (cause) {
-        setError(cause instanceof Error ? cause.message : 'Unable to load workflow.')
+        setError(cause instanceof Error ? cause.message : '워크플로우를 불러오지 못했어요.')
       }
     }
     load()
@@ -121,7 +121,7 @@ export default function WorkflowRunPage() {
     } catch (cause) {
       setPreview(null)
       showValidationFrom(cause)
-      setError(cause instanceof Error ? cause.message : 'Unable to start workflow.')
+      setError(cause instanceof Error ? cause.message : '실행을 시작하지 못했어요.')
     } finally {
       setLoading(false)
     }
@@ -139,7 +139,7 @@ export default function WorkflowRunPage() {
       if (result.requires_consent) setPreview(result)
       else await start()
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to inspect workflow.')
+      setError(cause instanceof Error ? cause.message : '워크플로우를 확인하지 못했어요.')
     } finally {
       setLoading(false)
     }
@@ -182,29 +182,29 @@ export default function WorkflowRunPage() {
     }
   }
 
-  if (!service) return <div className="page-loading">{error || 'Loading workflow...'}</div>
+  if (!service) return <div className="page-loading">{error || '워크플로우를 불러오는 중…'}</div>
   const fileName = (fileId: number) => files.find((file) => file.id === fileId)?.original_name || `File #${fileId}`
 
   return <div className="workflow-run-page">
-    <header className="page-topbar"><div><div className="breadcrumb">M.A.R.S <span>/</span> Workflows <span>/</span> {service.name} <span>/</span> Run</div><h1>Configure execution</h1><p>이번 실행에 쓸 입력 파일을 확인하고, 필요하면 바꾼 뒤 저장된 워크플로우를 실행합니다.</p></div><div className="builder-header-actions"><Link className="btn ghost" to={`/services/${service.id}/setup`}>설정 확인</Link><Link className="btn ghost" to={`/services/${service.id}`}>Back to builder</Link></div></header>
+    <header className="page-topbar"><div><div className="breadcrumb">M.A.R.S <span>/</span> 워크플로우 <span>/</span> {service.name} <span>/</span> 실행</div><h1>실행 설정</h1><p>이번 실행에 쓸 입력 파일을 확인하고 실행해요.</p></div></header>
     <div className="run-input-layout">
       <form className="run-input-card" onSubmit={run}>
-        <span className="eyebrow">EXECUTION INPUT</span>
+        <span className="eyebrow">실행 입력</span>
         <h2>이번 실행의 입력 파일</h2>
-        <p className="run-prefill-note">{prefillSource}으로 미리 채웠습니다. 바꿀 파일만 바꾸세요. 여기서 고른 파일은 이번 실행에만 쓰이고 워크플로우 기본값은 그대로입니다.{droppedFiles > 0 && ` 이전 실행 파일 중 삭제된 ${droppedFiles}개는 제외했습니다.`}</p>
+        <p className="run-prefill-note">{prefillSource}으로 미리 채웠어요. 여기서 바꾼 파일은 이번 실행에만 쓰여요.{droppedFiles > 0 && ` 이전 실행 파일 중 삭제된 ${droppedFiles}개는 뺐어요.`}</p>
         <div className="run-entries">
           {entries.map((entry) => {
             const current = selected(entry)
             const changed = !sameIds(current, entry.defaults)
             return <div className={`run-entry ${current.length || entry.directories.length ? '' : 'empty'}`} key={`${entry.kind}-${entry.id}`}>
               <div className="run-entry-head">
-                <div><strong>{entry.label}</strong>{entry.format && <small>예상 형식: {entry.format}</small>}<small>{entry.kind === 'slot' ? `읽는 블록: ${entry.blocks.join(', ') || '없음'}` : '블록에 직접 연결된 파일'}</small></div>
+                <div><strong>{entry.label}</strong>{entry.format && <small>예상 형식: {entry.format}</small>}{entry.kind === 'slot' && <small>읽는 블록: {entry.blocks.join(', ') || '없음'}</small>}</div>
                 {changed && <span className="run-entry-changed">이번 실행에서 변경됨</span>}
               </div>
               <div className="slot-sources">
                 {current.map((fileId) => <span className="source-chip upload" key={fileId}><span>{fileName(fileId)}</span><small>업로드 · 서버를 거쳐 전달</small><button type="button" aria-label="이번 실행에서 빼기" onClick={() => setSelected(entry, current.filter((value) => value !== fileId))}>×</button></span>)}
-                {entry.directories.map((directoryId) => <span className="source-chip directory" key={`d${directoryId}`}><span>공유 디렉터리 #{directoryId}</span><small>해당 기기 안에서만 읽음</small></span>)}
-                {!current.length && !entry.directories.length && <span className="muted">파일이 없습니다.</span>}
+                {entry.directories.map((directoryId) => <span className="source-chip directory" key={`d${directoryId}`}><span>등록한 폴더 #{directoryId}</span><small>그 PC에서만 읽음</small></span>)}
+                {!current.length && !entry.directories.length && <span className="muted">파일 없음</span>}
               </div>
               <div className="slot-actions">
                 <button type="button" className="btn sm" disabled={loading} onClick={() => startUpload(entry)}>파일 올리기</button>
@@ -216,23 +216,22 @@ export default function WorkflowRunPage() {
               </div>
             </div>
           })}
-          {!entries.length && <p className="muted">이 워크플로우에는 파일 입력이 없습니다. 실행 프롬프트로 지시를 전달하세요.</p>}
+          {!entries.length && <p className="muted">이 워크플로우는 입력 파일이 없어요. 필요한 지시는 실행 프롬프트에 적어 주세요.</p>}
         </div>
         <label className="run-prompt-label">실행 프롬프트 <small>(선택)</small></label>
-        <textarea className="run-prompt-input" value={prompt} onChange={(event) => { setPrompt(event.target.value); setValidation(null) }} placeholder="이번 실행에만 덧붙일 지시가 있으면 적어 주세요. 비워 두면 입력 파일과 워크플로우 설정만으로 실행합니다." />
+        <textarea className="run-prompt-input" value={prompt} onChange={(event) => { setPrompt(event.target.value); setValidation(null) }} placeholder="이번 실행에만 덧붙일 지시가 있으면 적어 주세요. 비워 두면 입력 파일과 설정만으로 실행해요." />
         {validation && (validation.errors.length > 0 || validation.warnings.length > 0) && <><ValidationPanel validation={validation} nodeNames={Object.fromEntries(service.graph.nodes.map((node) => [node.id, node.name]))} showStages={false} />{validation.errors.length > 0 && <Link className="btn sm ghost" to={`/services/${service.id}/setup`}>설정 확인 화면에서 고치기</Link>}{!validation.errors.length && <label className="ack-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />경고 내용을 확인했고 그대로 실행합니다.</label>}</>}
-        <div className="run-card-footer"><span>Workflow: <strong>{service.name}</strong></span><button className="generate-button" disabled={loading}>{loading ? 'Checking...' : 'Run workflow'} <b>→</b></button></div>
+        <div className="run-card-footer"><button className="generate-button" disabled={loading}>{loading ? '확인 중…' : '실행하기'} <b>→</b></button></div>
         {error && <div className="error">{error}</div>}
       </form>
       <aside className="run-summary-panel">
-        <span className="eyebrow">WORKFLOW SUMMARY</span><h2>{service.name}</h2><p>{service.description || 'No workflow description provided.'}</p>
-        <div className="run-summary-stat"><strong>{service.graph.nodes?.length ?? 0}</strong><span>workflow blocks</span></div>
-        <p className="run-generation">생성 모델: {generationLabel(service.generation_info)}</p>
+        <span className="eyebrow">워크플로우 요약</span><h2>{service.name}</h2>{service.description && service.description.trim() !== service.name.trim() && <p>{service.description}</p>}
+        <p className="run-summary-meta">블록 {service.graph.nodes?.length ?? 0}개 · 생성 모델 {generationLabel(service.generation_info)}</p>
         <button type="button" className="btn ghost run-duplicate" onClick={duplicate}>워크플로우 복제</button>
-        <div className="run-files-note"><div><strong>Input file vault</strong><small>{files.length} uploaded file{files.length === 1 ? '' : 's'}</small></div><p>업로드 파일은 서버를 거쳐 전달되고, 공유 디렉터리 파일은 해당 기기 안에서만 읽힙니다. 외부 API 단계는 실행 전에 전송 내용을 확인합니다.</p><Link to="/files">Manage files →</Link></div>
+        <div className="run-files-note"><div><strong>입력 파일 보관함</strong><small>{files.length}개</small></div><Link to="/files">파일 관리 →</Link></div>
       </aside>
     </div>
     <input ref={uploadRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx" onChange={onUpload} />
-    {preview && <div className="file-library-modal-backdrop" role="presentation"><section className="file-library-modal transfer-consent-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title"><header><div><span className="eyebrow">EXTERNAL DATA TRANSFER</span><h2 id="transfer-title">클라우드 전송 내용을 확인해 주세요</h2></div><button className="modal-close" onClick={() => setPreview(null)}>×</button></header><p>API 키는 서버에만 보관되며 아래 입력과 결과만 외부 공급자에 전달됩니다.</p><div className="transfer-list">{preview.transfers.map((item, index) => <div className={`transfer-item ${item.type}`} key={`${item.node_id}-${item.type}-${index}`}><strong>{item.node_name} → {item.provider}</strong><span>{item.type === 'user_input' ? '사용자 실행 요청' : item.type === 'derived_text' ? `로컬 파일에서 파생된 텍스트: ${(item.sources || []).join(', ')}` : `첨부파일에서 추출한 텍스트: ${(item.file_ids || []).map(fileName).join(', ')}`}</span></div>)}</div><footer><span>이번 실행에만 적용됩니다.</span><div><button className="btn sm ghost" onClick={() => setPreview(null)}>취소</button><button className="btn sm" disabled={loading} onClick={() => start(preview.consent_token)}>동의하고 실행</button></div></footer></section></div>}
+    {preview && <div className="file-library-modal-backdrop" role="presentation"><section className="file-library-modal transfer-consent-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title"><header><div><span className="eyebrow">외부 전송</span><h2 id="transfer-title">클라우드 전송 내용을 확인해 주세요</h2></div><button className="modal-close" onClick={() => setPreview(null)}>×</button></header><p>API 키는 서버에만 보관되며 아래 입력과 결과만 외부 공급자에 전달됩니다.</p><div className="transfer-list">{preview.transfers.map((item, index) => <div className={`transfer-item ${item.type}`} key={`${item.node_id}-${item.type}-${index}`}><strong>{item.node_name} → {item.provider}</strong><span>{item.type === 'user_input' ? '사용자 실행 요청' : item.type === 'derived_text' ? `로컬 파일에서 파생된 텍스트: ${(item.sources || []).join(', ')}` : `첨부파일에서 추출한 텍스트: ${(item.file_ids || []).map(fileName).join(', ')}`}</span></div>)}</div><footer><span>이번 실행에만 적용됩니다.</span><div><button className="btn sm ghost" onClick={() => setPreview(null)}>취소</button><button className="btn sm" disabled={loading} onClick={() => start(preview.consent_token)}>동의하고 실행</button></div></footer></section></div>}
   </div>
 }

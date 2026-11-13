@@ -4,13 +4,14 @@ import { DragEvent, FormEvent, KeyboardEvent as ReactKeyboardEvent, PointerEvent
 import { useNavigate, useParams } from 'react-router-dom'
 import { api, getDeviceDirectories, getDeviceModels } from '../api'
 import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
+import AppIcon from '../components/AppIcon'
 import DeletableEdge from '../components/DeletableEdge'
 import ShareDialog from '../components/ShareDialog'
 import ValidationPanel from '../components/ValidationPanel'
 import { stagePositions } from '../flowLayout'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
 import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { announceServiceRenamed, applyAutoFlags, blockingErrors, FlagExplanation, generationLabel, issuesByNode, onServiceRenamed } from '../workflow'
+import { announceServiceRenamed, applyAutoFlags, blockingErrors, FlagExplanation, generationLabel, issuesByNode, onServiceRenamed, shortDate, shortDateTime } from '../workflow'
 
 const nodeTypes = { agent: AgentBlockNode }
 const edgeTypes = { deletable: DeletableEdge }
@@ -101,6 +102,13 @@ export default function ServiceDetailPage() {
   const navigate = useNavigate()
   const [service, setService] = useState<Service | null>(null)
   const [shareOpen, setShareOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  useEffect(() => {
+    if (!moreOpen) return
+    const close = (event: MouseEvent) => { if (!(event.target as Element).closest?.('.builder-more')) setMoreOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [moreOpen])
   const [agents, setAgents] = useState<Record<string, AgentNode>>({})
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([])
@@ -536,24 +544,36 @@ export default function ServiceDetailPage() {
     finally { setAiLoading(false) }
   }
 
-  if (!service) return <div className="page-loading">{error || 'Loading workflow...'}</div>
+  if (!service) return <div className="page-loading">{error || '워크플로우를 불러오는 중…'}</div>
 
   return <div className="builder-page">
-    <header className="builder-header">
-      <div><div className="breadcrumb">M.A.R.S <span>/</span> Workflows <span>/</span> Builder</div><h1>{svcName}</h1><p>{svcDesc || 'Build and assign a distributed multi-agent workflow.'}</p><div className="generation-badge"><span>생성 모델</span><strong>{generationLabel(service.generation_info)}</strong></div></div>
-      <div className="builder-header-actions"><button className="btn ghost" disabled={!historySize} onClick={undo} title="Ctrl/Cmd+Z">↶ 되돌리기{historySize ? ` (${historySize})` : ''}</button><button className="btn ghost" onClick={async () => { if (await save()) navigate(`/services/${id}/setup`) }}>설정 확인 표</button><button className="btn ghost" disabled={syncing} onClick={() => { if (confirm('서버의 최신 워크플로우와 Worker 정보로 다시 불러올까요? 저장하지 않은 변경은 사라집니다.')) setSyncVersion((version) => version + 1) }}>{syncing ? '동기화 중…' : '↻ 서버와 재동기화'}</button><button className="btn ghost" onClick={() => setShareOpen(true)}>커뮤니티에 공유</button><button className="btn ghost" onClick={() => navigate('/services')}>All workflows</button><button className="btn" onClick={save}>Save changes</button></div>
+    <header className="builder-header builder-header-clean">
+      <div>
+        <div className="breadcrumb">M.A.R.S <span>/</span> 워크플로우 <span>/</span> 편집</div>
+        <h1>{svcName}</h1>
+        {svcDesc && svcDesc.trim() !== svcName.trim() && <p>{svcDesc}</p>}
+        <p className="builder-meta">생성 모델 · {generationLabel(service.generation_info)}</p>
+      </div>
+      <div className="builder-header-actions">
+        <button type="button" className="icon-btn" disabled={!historySize} onClick={undo} title={`되돌리기 (Ctrl/Cmd+Z)${historySize ? ` · ${historySize}번` : ''}`} aria-label="되돌리기"><AppIcon name="undo" /></button>
+        <div className="builder-more">
+          <button type="button" className="icon-btn" aria-haspopup="menu" aria-expanded={moreOpen} title="더 보기" aria-label="더 보기" onClick={() => setMoreOpen((open) => !open)}><AppIcon name="more" /></button>
+          {moreOpen && <div className="builder-more-menu" role="menu">
+            <button type="button" role="menuitem" onClick={async () => { setMoreOpen(false); if (await save()) navigate(`/services/${id}/setup`) }}>설정 확인 표</button>
+            <button type="button" role="menuitem" disabled={syncing} onClick={() => { setMoreOpen(false); if (confirm('서버의 최신 워크플로우와 워커 정보로 다시 불러올까요? 저장하지 않은 변경은 사라집니다.')) setSyncVersion((version) => version + 1) }}>{syncing ? '동기화 중…' : '서버와 재동기화'}</button>
+            <button type="button" role="menuitem" onClick={() => { setMoreOpen(false); setShareOpen(true) }}>커뮤니티에 공유</button>
+          </div>}
+        </div>
+        <button className="btn ghost" onClick={save}>저장</button>
+        <button className="btn" onClick={configureAndRun}>실행 설정<AppIcon name="arrow-right" /></button>
+      </div>
     </header>
     {message && <div style={{ color: 'var(--success)', marginBottom: 8 }}>{message}</div>}
     {error && <div className="error">{error}</div>}
-    <form className="ai-bar" onSubmit={aiRevise}>
-      <span className="ai-bar-label">AI로 수정</span>
-      <input value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder="예: 검토 에이전트를 분석 뒤에 추가해줘" required minLength={2} />
-      <button className="btn sm" disabled={aiLoading}>{aiLoading ? '수정 중...' : '적용'}</button>
-    </form>
     <div className={`builder3 builder-workspace${canvasFull ? ' canvas-full' : ''}`}>
       <aside className="palette">
         <div className="palette-title">에이전트 블록</div><div className="palette-hint">드래그하거나 클릭해 추가</div>
-        {BLOCK_PRESETS.map((preset) => { const category = categoryOf(preset.name); return <div key={preset.name} className="palette-block" style={{ borderColor: category.color, background: category.bg }} draggable onDragStart={(event) => event.dataTransfer.setData('application/mars-agent', JSON.stringify(preset))} onClick={() => addAgent(preset)}><span className="palette-block-tag" style={{ background: category.color }}>{category.tag}</span><div className="palette-block-name">{preset.name}</div><div className="palette-block-hint">{preset.hint}</div></div> })}
+        {BLOCK_PRESETS.map((preset) => { const category = categoryOf(preset.name); return <div key={preset.name} className="palette-block palette-item" draggable onDragStart={(event) => event.dataTransfer.setData('application/mars-agent', JSON.stringify(preset))} onClick={() => addAgent(preset)} title={`${category.tag} · 클릭하거나 캔버스로 끌어 추가`}><i className="palette-dot" style={{ background: category.color }} /><span><span className="palette-block-name">{preset.name}</span><span className="palette-block-hint">{preset.hint}</span></span></div> })}
       </aside>
       <div ref={flowWrapRef} className="flow-wrap" style={!canvasFull && canvasHeight ? { height: canvasHeight, minHeight: CANVAS_MIN } : undefined} onDragOver={(event) => event.preventDefault()} onDrop={(event: DragEvent) => { event.preventDefault(); const raw = event.dataTransfer.getData('application/mars-agent'); if (raw) addAgent(JSON.parse(raw), { x: event.nativeEvent.offsetX - 100, y: event.nativeEvent.offsetY - 50 }) }}>
         <ReactFlow
@@ -578,10 +598,15 @@ export default function ServiceDetailPage() {
           }}
           fitView
         ><Background /><Controls /></ReactFlow>
+        <form className="ai-bar ai-bar-float" onSubmit={aiRevise}>
+          <span className="ai-bar-label">AI로 수정</span>
+          <input value={aiInstruction} onChange={(event) => setAiInstruction(event.target.value)} placeholder="예: 검토 에이전트를 분석 뒤에 추가해줘" required minLength={2} />
+          <button className="btn sm" disabled={aiLoading}>{aiLoading ? '수정 중...' : '적용'}</button>
+        </form>
         <div className="canvas-size-tools">
-          <button type="button" onClick={arrangeBlocks} title="실행 순서대로 왼쪽→오른쪽, 병렬 블록은 세로로 정렬합니다 (Ctrl/Cmd+Z로 되돌리기)">자동 정렬</button>
+          <button type="button" className="icon-btn" onClick={arrangeBlocks} aria-label="자동 정렬" title="자동 정렬: 실행 순서대로 왼쪽→오른쪽, 병렬 블록은 세로로 (Ctrl/Cmd+Z로 되돌리기)"><AppIcon name="arrange" /></button>
           {!canvasFull && canvasHeight && <button type="button" onClick={() => setCanvasHeight(null)} title="캔버스 높이를 기본값으로 되돌립니다">기본 높이</button>}
-          <button type="button" onClick={() => setCanvasFull((full) => !full)} title={canvasFull ? '원래 크기로 (Esc)' : '팔레트·설정 패널과 함께 화면 전체로 넓힙니다'}>{canvasFull ? '⤡ 원래 크기' : '⤢ 크게 보기'}</button>
+          <button type="button" className="icon-btn" onClick={() => setCanvasFull((full) => !full)} aria-label={canvasFull ? '원래 크기' : '크게 보기'} title={canvasFull ? '원래 크기로 (Esc)' : '크게 보기'}><AppIcon name={canvasFull ? 'shrink' : 'expand'} /></button>
         </div>
         {!canvasFull && <div
           className="canvas-resize-handle"
@@ -626,18 +651,18 @@ export default function ServiceDetailPage() {
           </div>
           {inputSlots.filter((slot) => (selectedAgent.input_slot_ids ?? []).includes(slot.id)).map((slot) => <div className="slot-inline node-slot" key={slot.id}><span title={slot.format}>파일 슬롯 · {slot.description}</span><small className={slot.file_ids.length + slot.directory_ids.length ? 'ok' : 'empty'}>{slot.file_ids.length + slot.directory_ids.length ? `${slot.file_ids.length + slot.directory_ids.length}개 연결` : '비어 있음'}</small></div>)}
           <label>역할 프롬프트</label><textarea rows={5} value={selectedAgent.role_prompt} onChange={(event) => updateAgent({ role_prompt: event.target.value })} />
-          <label>실행 위치</label><select value={selectedAgent.provider || 'ollama'} onChange={(event) => { const provider = event.target.value as 'ollama' | 'openai' | 'anthropic' | 'gemini'; updateAgent({ provider, executor: provider === 'ollama' ? 'local' : 'cloud', worker_id: provider === 'ollama' ? selectedAgent.worker_id : null, model: '' }) }}><option value="ollama">Local Worker · Ollama</option><option value="openai">Cloud · OpenAI</option><option value="anthropic">Cloud · Anthropic</option><option value="gemini">Cloud · Google Gemini</option></select>
-          <label>컴퓨팅 자원 (Worker)</label><select disabled={selectedProvider !== 'ollama'} value={selectedAgent.worker_id ?? ''} onChange={(event) => updateAgent({ worker_id: event.target.value ? Number(event.target.value) : null, model: '' })}><option value="">자동 배정</option>{devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.online ? ' · 온라인' : ' · 오프라인'}</option>)}</select>
+          <label>실행 위치</label><select value={selectedAgent.provider || 'ollama'} onChange={(event) => { const provider = event.target.value as 'ollama' | 'openai' | 'anthropic' | 'gemini'; updateAgent({ provider, executor: provider === 'ollama' ? 'local' : 'cloud', worker_id: provider === 'ollama' ? selectedAgent.worker_id : null, model: '' }) }}><option value="ollama">로컬 워커 · Ollama</option><option value="openai">클라우드 · OpenAI</option><option value="anthropic">클라우드 · Anthropic</option><option value="gemini">클라우드 · Google Gemini</option></select>
+          <label>컴퓨팅 자원 (워커)</label><select disabled={selectedProvider !== 'ollama'} value={selectedAgent.worker_id ?? ''} onChange={(event) => updateAgent({ worker_id: event.target.value ? Number(event.target.value) : null, model: '' })}><option value="">자동 배정</option>{devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.online ? ' · 온라인' : ' · 오프라인'}</option>)}</select>
           <label>모델</label><select value={selectedAgent.model} onChange={(event) => updateAgent({ model: event.target.value })}>
-            <option value="">{selectedProvider === 'ollama' ? selectedDeviceModelInfo?.default_model ? `Worker 기본 모델 · ${selectedDeviceModelInfo.default_model}` : 'Worker 기본 모델' : '공급자 기본 모델'}</option>
+            <option value="">{selectedProvider === 'ollama' ? selectedDeviceModelInfo?.default_model ? `워커 기본 모델 · ${selectedDeviceModelInfo.default_model}` : '워커 기본 모델' : '공급자 기본 모델'}</option>
             {visibleModelOptions.map((model) => <option value={model} key={model}>{model}</option>)}
           </select>
-          {selectedProvider === 'ollama' && !selectedAgent.worker_id && <small className="muted">Worker를 선택하면 해당 기기에 설치된 모델만 표시됩니다. 자동 배정은 온라인 Worker 모델의 합집합입니다.</small>}
-          {selectedProvider === 'ollama' && selectedAgent.worker_id && !modelOptions.length && <small className="muted">선택한 Worker가 설치된 Ollama 모델을 아직 서버에 보고하지 않았습니다. Worker 실행 상태를 확인한 뒤 재동기화하세요.</small>}
-          {selectedDeviceModelInfo?.synced_at && <small className="muted">모델 동기화: {new Date(selectedDeviceModelInfo.synced_at).toLocaleString()}</small>}
-          <label>공유 디렉터리</label>
+          {selectedProvider === 'ollama' && !selectedAgent.worker_id && <small className="muted">워커를 선택하면 해당 기기에 설치된 모델만 표시됩니다. 자동 배정은 온라인 워커 모델의 합집합입니다.</small>}
+          {selectedProvider === 'ollama' && selectedAgent.worker_id && !modelOptions.length && <small className="muted">선택한 워커가 설치된 Ollama 모델을 아직 서버에 보고하지 않았습니다. 워커 실행 상태를 확인한 뒤 재동기화하세요.</small>}
+          {selectedDeviceModelInfo?.synced_at && <small className="muted">모델 동기화: {shortDateTime(selectedDeviceModelInfo.synced_at)}</small>}
+          <label>등록한 폴더</label>
           <div className="resource-picker directory-resource-picker">
-            {directories.length ? directories.map((directory) => <label key={directory.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.directory_ids ?? []).includes(directory.id)} onChange={(event) => updateAgent({ directory_ids: event.target.checked ? [...(selectedAgent.directory_ids ?? []), directory.id] : (selectedAgent.directory_ids ?? []).filter((directoryId) => directoryId !== directory.id) })} /><span><strong>{directory.alias}</strong><small>{directory.local_path}</small></span></label>) : <span className="muted">등록된 공유 디렉터리가 없습니다.</span>}
+            {directories.length ? directories.map((directory) => <label key={directory.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.directory_ids ?? []).includes(directory.id)} onChange={(event) => updateAgent({ directory_ids: event.target.checked ? [...(selectedAgent.directory_ids ?? []), directory.id] : (selectedAgent.directory_ids ?? []).filter((directoryId) => directoryId !== directory.id) })} /><span><strong>{directory.alias}</strong><small>{directory.local_path}</small></span></label>) : <span className="muted">등록한 폴더가 없어요.</span>}
           </div>
           <div className="uploaded-file-picker">
             <div className="uploaded-file-heading"><strong>첨부 파일</strong><div className="file-picker-actions"><button type="button" className="btn sm ghost" disabled={fileUploading} onClick={() => uploadInputRef.current?.click()}>{fileUploading ? '업로드 중…' : '새 파일 업로드'}</button><button type="button" className="btn sm ghost" onClick={openFileLibrary}>기존 파일 선택</button></div><input ref={uploadInputRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx" onChange={(event) => uploadForSelectedAgent(event.target.files)} /></div>
@@ -651,17 +676,16 @@ export default function ServiceDetailPage() {
           <h2>서비스 정보</h2><label>이름</label><input value={svcName} onChange={(event) => setSvcName(event.target.value)} /><label>설명</label><textarea rows={3} value={svcDesc} onChange={(event) => setSvcDesc(event.target.value)} />
           <h2 style={{ marginTop: 20 }}>구성 검사</h2>
           <ValidationPanel validation={validation} nodeNames={nodeNames} onSelectNode={setSelected} />
-          <h2 style={{ marginTop: 20 }}>Workflow execution</h2><p className="muted">Enter the run-specific prompt on a separate execution input screen.</p><button className="btn" style={{ marginTop: 12, width: '100%' }} onClick={configureAndRun}>Configure and run</button>
         </>}
       </aside>
     </div>
     {shareOpen && service && <ShareDialog serviceId={service.id} defaultTitle={svcName} defaultDescription={svcDesc} save={save} onClose={() => setShareOpen(false)} />}
     {fileLibraryOpen && <div className="file-library-modal-backdrop" role="presentation" onMouseDown={() => setFileLibraryOpen(false)}>
       <section className="file-library-modal" role="dialog" aria-modal="true" aria-labelledby="file-library-title" onMouseDown={(event) => event.stopPropagation()}>
-        <header><div><span className="eyebrow">FILE LIBRARY</span><h2 id="file-library-title">기존 파일 선택</h2></div><button type="button" className="modal-close" aria-label="닫기" onClick={() => setFileLibraryOpen(false)}>×</button></header>
+        <header><div><span className="eyebrow">파일 보관함</span><h2 id="file-library-title">기존 파일 선택</h2></div><button type="button" className="modal-close" aria-label="닫기" onClick={() => setFileLibraryOpen(false)}>×</button></header>
         <p>이 에이전트가 실행할 때 읽을 파일을 선택하세요.</p>
         <div className="modal-file-list">
-          {uploadedFiles.map((file) => <label className="modal-file-item" key={file.id}><input type="checkbox" checked={draftFileIds.includes(file.id)} onChange={(event) => setDraftFileIds((current) => event.target.checked ? [...current, file.id] : current.filter((id) => id !== file.id))} /><span><strong>{file.original_name}</strong><small>{file.size_bytes.toLocaleString()} bytes · {new Date(file.created_at).toLocaleDateString()}</small></span></label>)}
+          {uploadedFiles.map((file) => <label className="modal-file-item" key={file.id}><input type="checkbox" checked={draftFileIds.includes(file.id)} onChange={(event) => setDraftFileIds((current) => event.target.checked ? [...current, file.id] : current.filter((id) => id !== file.id))} /><span><strong>{file.original_name}</strong><small>{file.size_bytes.toLocaleString()} bytes · {shortDate(file.created_at)}</small></span></label>)}
           {!uploadedFiles.length && <div className="modal-file-empty">업로드된 파일이 없습니다. 먼저 새 파일을 업로드해 주세요.</div>}
         </div>
         <footer><span>{draftFileIds.length}개 선택</span><div><button type="button" className="btn sm ghost" onClick={() => setFileLibraryOpen(false)}>취소</button><button type="button" className="btn sm" onClick={applyFileLibrarySelection}>선택 적용</button></div></footer>

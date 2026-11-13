@@ -13,7 +13,7 @@ export default function DirectoryBlockNode({
 }) {
   return (
     <div className={`directory-block${selected ? ' selected' : ''}`}>
-      <div className="directory-block-tag">Directory</div>
+      <div className="directory-block-tag">폴더</div>
       <div className="directory-block-name">{data.label}</div>
 
       {data.deviceName && (

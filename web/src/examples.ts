@@ -18,7 +18,7 @@ export const EXAMPLES: Example[] = [
   { group: '생활', title: '건강 기록 돌아보기', prompt: '한 달 동안의 운동·수면 기록을 보고 패턴과 고칠 점을 알려줘', fits: ['민감한 자료', '반복 작업'] },
   { group: '생활', title: '보험 약관 비교', prompt: '가입한 보험 약관 PDF 세 개를 비교해 보장 범위와 겹치는 항목을 표로 정리해줘', fits: ['동시 처리', '민감한 자료'] },
   { group: '생활', title: '관리비 고지서 분석', prompt: '1년치 관리비 고지서에서 많이 오른 항목과 그 이유 후보를 정리해줘', fits: ['민감한 자료', '반복 작업'] },
-  { group: '업무', title: '계약서 만료일 정리', prompt: '공유 폴더의 계약서 PDF들에서 만료일과 자동 갱신 조항을 표로 정리해줘', fits: ['동시 처리', '민감한 자료'], featured: true },
+  { group: '업무', title: '계약서 만료일 정리', prompt: '등록한 폴더의 계약서 PDF들에서 만료일과 자동 갱신 조항을 표로 정리해줘', fits: ['동시 처리', '민감한 자료'], featured: true },
   { group: '업무', title: '설문 주관식 분석', prompt: '설문 주관식 응답 1,000건을 주제별로 묶고 대표 의견을 뽑아줘', fits: ['동시 처리'], featured: true },
   { group: '업무', title: '과제 피드백 초안', prompt: '학생 과제 30개를 채점 기준표에 맞춰 1차 피드백 초안을 써줘', fits: ['동시 처리', '민감한 자료'], featured: true },
   { group: '업무', title: '문서 번역', prompt: '제품 설명서를 장별로 나눠 영어로 번역하고, 다른 모델로 용어와 어색한 문장을 확인해줘', fits: ['동시 처리', '교차 확인'], featured: true },

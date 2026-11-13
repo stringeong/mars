@@ -52,7 +52,7 @@ export function PublicFooter() {
     <div className="mk-shell mk-footer-inner">
       <div>
         <div className="mk-logo"><span>M</span>M.A.R.S</div>
-        <p>가진 컴퓨터들로 꾸리는 멀티 에이전트 AI 워크플로우</p>
+        <p>내 컴퓨터들이 함께 일하는 멀티 에이전트 AI 워크플로우</p>
       </div>
       <div className="mk-footer-links">
         <Link to="/about">제품 소개</Link>
@@ -67,11 +67,10 @@ export function PublicFooter() {
 /** 활용 예시 카드. 로그인했으면 이 문장을 채운 채 첫 화면으로, 아니면 회원가입으로 보낸다 */
 export function ExampleCard({ example }: { example: Example }) {
   const to = getToken() ? `/services?prompt=${encodeURIComponent(example.prompt)}` : '/login?mode=register'
-  return <div className="mk-example">
-    <span className="mk-example-group">{example.group}</span>
+  return <div className="mk-example mk-example-clean">
     <b>{example.title}</b>
     <p>“{example.prompt}”</p>
-    <div className="mk-fits">{example.fits.map((fit) => <small key={fit}>{fit}</small>)}</div>
+    <div className="mk-fits"><small>{example.group}</small>{example.fits.slice(0, 2).map((fit) => <small key={fit}>{fit}</small>)}</div>
     <Link className="mk-example-use" to={to}>이 예시로 만들기 →</Link>
   </div>
 }
@@ -101,16 +100,22 @@ export function CommunityCard({ item }: { item: CommunityWorkflow }) {
       const service = await api.post<Service>(`/community/workflows/${item.id}/import`)
       navigate(`/services/${service.id}`)
     } catch (cause) {
-      alert(cause instanceof Error ? cause.message : '가져오지 못했습니다.')
+      alert(cause instanceof Error ? cause.message : '가져오지 못했어요.')
       setBusy(false)
     }
   }
-  return <div className="mk-example mk-community">
-    <span className="mk-example-group">커뮤니티 · {item.author}</span>
+  // 같은 이름의 블록은 "거래 분류 ×3"처럼 묶어 한 줄 흐름으로 보여준다
+  const flow = stages.map((names) => {
+    const counts = new Map<string, { name: string; count: number }>()
+    for (const name of names) { const key = name.replace(/\s+/g, ''); const found = counts.get(key); if (found) found.count += 1; else counts.set(key, { name, count: 1 }) }
+    return [...counts.values()].map(({ name, count }) => count > 1 ? `${name} ×${count}` : name).join(' + ')
+  })
+  const description = item.description && item.description.trim() !== item.title.trim() ? item.description : ''
+  return <div className="mk-example mk-community mk-community-clean">
     <b>{item.title}</b>
-    <p>{item.description || '설명이 없어요.'}</p>
-    <ol className="mk-community-flow">{stages.map((names, index) => <li key={index}>{names.join(' + ')}</li>)}</ol>
-    <small className="mk-community-meta">블록 {item.graph.nodes.length}개{item.import_count ? ` · ${item.import_count}명이 가져감` : ''}</small>
+    {description && <p>{description}</p>}
+    <div className="mk-flow-line">{flow.map((step, index) => <span key={index}>{step}</span>)}</div>
+    <small className="mk-community-meta">{item.author}님 공유 · 블록 {item.graph.nodes.length}개{item.import_count ? ` · ${item.import_count}명이 가져감` : ''}</small>
     <button type="button" className="mk-example-use" disabled={busy} onClick={take}>{busy ? '가져오는 중…' : '내 워크플로우로 가져오기 →'}</button>
   </div>
 }

@@ -25,16 +25,16 @@ export default function AgentBlockNode({ data, selected }: { data: any; selected
 
       <div className="agent-resources">
         <div className="resource-slot worker-slot">
-          <span>⚙ Worker</span>
+          <span>⚙ 워커</span>
           <strong>{data.workerName || '자동 배정'}</strong>
         </div>
         <div className="resource-slot directory-slot">
-          <span>▣ Directory</span>
+          <span>▣ 폴더</span>
           <strong>{directories.length ? directories.join(', ') : '없음'}</strong>
         </div>
         <div className="resource-slot file-slot">
-          <span>Files</span>
-          <strong>{files.length ? files.join(', ') : 'None'}</strong>
+          <span>파일</span>
+          <strong>{files.length ? files.join(', ') : '없음'}</strong>
         </div>
       </div>
 

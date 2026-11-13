@@ -2,7 +2,7 @@ import { FormEvent, KeyboardEvent, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import { defaultWorker, GenerationFailed, generateOnWorker, workerProgressLabel } from '../generation'
-import { CloudProvider, Device, GenerationError, GenerationJob, GeneratorModels, Service } from '../types'
+import { CloudProvider, GenerationError, GenerationJob, GeneratorModels, Service } from '../types'
 import { GENERATION_STAGE_LABELS, PROVIDER_LABELS } from '../workflow'
 
 // 누르면 입력창에 채워지는 예시. 생활·업무·공부에서 바로 떠올릴 만한 일로 고른다
@@ -17,7 +17,6 @@ const suggestions = [
 
 /** 새 워크플로우: 대화형 앱처럼 입력창 하나로 시작한다. */
 export default function ServicesPage() {
-  const [devices, setDevices] = useState<Device[]>([])
   const [searchParams] = useSearchParams()
   // 활용 예시의 '이 예시로 만들기'로 들어오면 그 문장을 채워 둔다
   const [prompt, setPrompt] = useState(() => searchParams.get('prompt') ?? '')
@@ -28,6 +27,8 @@ export default function ServicesPage() {
   const [genProvider, setGenProvider] = useState<CloudProvider>('openai')
   const [genDeviceId, setGenDeviceId] = useState<number | null>(null)
   const [genModel, setGenModel] = useState('')
+  // 생성 모델 고르기는 평소엔 접어 두고, 칩을 누르면 펼친다
+  const [modelOpen, setModelOpen] = useState(false)
   const [transferAck, setTransferAck] = useState(false)
   const [genError, setGenError] = useState<GenerationError | null>(null)
   const [workerJob, setWorkerJob] = useState<{ job: GenerationJob; seconds: number } | null>(null)
@@ -37,7 +38,6 @@ export default function ServicesPage() {
   const navigate = useNavigate()
 
   useEffect(() => {
-    api.get<Device[]>('/devices').then(setDevices).catch(() => {})
     api.get<GeneratorModels>('/services/generator-models').then((models) => {
       setGeneratorModels(models)
       // 서버 GPU 대신 온라인 워커가 있으면 워커를 기본 생성 모델로
@@ -60,7 +60,6 @@ export default function ServicesPage() {
     : genLocation === 'worker' ? selectedWorker?.models ?? [] : generatorModels?.local.models ?? []
   const genDefaultModel = genLocation === 'cloud' ? selectedCloud?.default_model
     : genLocation === 'worker' ? selectedWorker?.default_model : generatorModels?.local.default_model
-  const online = devices.filter((device) => device.online).length
   const blockedByTransfer = genLocation === 'cloud' && (!transferAck || !selectedCloud)
   const blockedByWorker = genLocation === 'worker' && !selectedWorker?.online
 
@@ -131,10 +130,18 @@ export default function ServicesPage() {
     }
   }
 
+  // 칩 밖을 누르면 모델 고르기 창을 닫는다
+  useEffect(() => {
+    if (!modelOpen) return
+    const close = (event: MouseEvent) => { if (!(event.target as Element).closest?.('.home-model-panel, .home-model-chip')) setModelOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [modelOpen])
+
   return <div className="home">
     <div className="home-center">
       <h1 className="home-title">어떤 작업을 자동화할까요?</h1>
-      <p className="home-subtitle">하고 싶은 일을 적으면 에이전트 구성과 실행 순서를 만들어 드려요. 만든 뒤에도 자유롭게 고칠 수 있어요.</p>
+      <p className="home-subtitle">하고 싶은 일을 적으면 에이전트 구성을 만들어 드려요.</p>
 
       <form ref={formRef} className="home-composer" onSubmit={generate}>
         <textarea
@@ -148,24 +155,32 @@ export default function ServicesPage() {
           aria-label="만들고 싶은 워크플로우"
         />
         <div className="home-composer-bar">
-          <div className="home-model" aria-label="생성 모델">
-            <select value={genLocation} onChange={(event) => chooseLocation(event.target.value as 'local' | 'cloud' | 'worker')} aria-label="실행 위치">
+          <button type="button" className="home-model-chip" aria-expanded={modelOpen} onClick={() => setModelOpen((open) => !open)} title="워크플로우를 만들 모델">
+            <span className={`home-model-dot ${genLocation}`} aria-hidden="true" />
+            {genLocation === 'worker' ? (selectedWorker?.name ?? '내 워커') : genLocation === 'cloud' ? PROVIDER_LABELS[genProvider] : '서버'} · {genModel || genDefaultModel || '기본 모델'}
+            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d={modelOpen ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6'} /></svg>
+          </button>
+          {modelOpen && <div className="home-model-panel" aria-label="생성 모델">
+            <label>만들 곳<select value={genLocation} onChange={(event) => chooseLocation(event.target.value as 'local' | 'cloud' | 'worker')} aria-label="실행 위치">
               <option value="worker" disabled={!usableWorkers.length}>내 워커{usableWorkers.length ? '' : ' (온라인 없음)'}</option>
               <option value="local">서버 로컬</option>
               <option value="cloud" disabled={!configuredCloud.length}>외부 API{configuredCloud.length ? '' : ' (키 없음)'}</option>
-            </select>
-            {genLocation === 'worker' && <select value={genDeviceId ?? ''} onChange={(event) => { setGenDeviceId(Number(event.target.value)); setGenModel('') }} aria-label="워커">
+            </select></label>
+            {genLocation === 'worker' && <label>워커<select value={genDeviceId ?? ''} onChange={(event) => { setGenDeviceId(Number(event.target.value)); setGenModel('') }} aria-label="워커">
               {workers.map((worker) => <option key={worker.device_id} value={worker.device_id} disabled={!worker.online || !worker.models.length}>{worker.name}{!worker.online ? ' (오프라인)' : !worker.models.length ? ' (모델 없음)' : ''}</option>)}
-            </select>}
-            {genLocation === 'cloud' && <select value={genProvider} onChange={(event) => { setGenProvider(event.target.value as CloudProvider); setGenModel(''); setTransferAck(false) }} aria-label="제공자">
+            </select></label>}
+            {genLocation === 'cloud' && <label>제공자<select value={genProvider} onChange={(event) => { setGenProvider(event.target.value as CloudProvider); setGenModel(''); setTransferAck(false) }} aria-label="제공자">
               {configuredCloud.map((item) => <option key={item.provider} value={item.provider}>{PROVIDER_LABELS[item.provider]}</option>)}
-            </select>}
-            <select ref={modelSelectRef} value={genModel} onChange={(event) => setGenModel(event.target.value)} aria-label="모델">
+            </select></label>}
+            <label>모델<select ref={modelSelectRef} value={genModel} onChange={(event) => setGenModel(event.target.value)} aria-label="모델">
               <option value="">{genDefaultModel ?? '기본 모델'}</option>
               {genModelOptions.filter((model) => model !== genDefaultModel).map((model) => <option key={model} value={model}>{model}</option>)}
-            </select>
-          </div>
-          <span className={`home-workers${online ? ' online' : ''}`}>워커 {online}/{devices.length} 온라인</span>
+            </select></label>
+            {genLocation === 'worker' && selectedWorker && <p>서버 GPU 대신 {selectedWorker.name} 워커의 Ollama로 만들어요.<br />요청은 서버를 거쳐 내 워커에만 전달돼요.</p>}
+            {genLocation === 'local' && <p>서버에 설치된 모델로 만들어요.</p>}
+            {genLocation === 'cloud' && <p>요청 문장이 {PROVIDER_LABELS[genProvider]} API로 전송돼요.</p>}
+          </div>}
+          <span className="home-bar-spacer" />
           {workerJob
             ? <button type="button" className="home-send" aria-label="생성 취소" title="생성 취소" onClick={() => workerAbort.current?.abort()}><span className="home-stop" aria-hidden="true" /></button>
             : <button className="home-send" aria-label={loading ? '만드는 중' : '워크플로우 만들기'} disabled={loading || blockedByTransfer || blockedByWorker || prompt.trim().length < 5}>
@@ -176,7 +191,6 @@ export default function ServicesPage() {
 
       {workerJob && <p className="home-note" role="status">{workerProgressLabel(workerJob.job, workerJob.seconds)} 멈추려면 ■ 버튼을 누르세요.</p>}
       {loading && !workerJob && <p className="home-note">워크플로우를 만드는 중이에요. 모델에 따라 최대 30초쯤 걸려요.</p>}
-      {!loading && genLocation === 'worker' && selectedWorker && <p className="home-note">서버 GPU 대신 {selectedWorker.name} 워커의 Ollama로 만들어요. 생성 프롬프트는 서버를 거쳐 내 워커에만 전달돼요.</p>}
       {genLocation === 'local' && generatorModels && !generatorModels.local.available && <p className="home-note warn">{generatorModels.local.error} 이대로 만들면 연결 실패로 안내돼요.</p>}
       {genLocation === 'cloud' && <label className="home-note home-ack">
         <input type="checkbox" checked={transferAck} onChange={(event) => setTransferAck(event.target.checked)} />
@@ -187,17 +201,17 @@ export default function ServicesPage() {
         <strong>{GENERATION_STAGE_LABELS[genError.stage] ?? genError.stage} · {genError.location === 'cloud' ? PROVIDER_LABELS[genError.provider] : genError.location === 'worker' ? `워커 ${genError.device_name ?? ''}` : '서버 로컬'} {genError.model}</strong>
         <p>{genError.message}</p>
         <div className="home-failure-actions">
-          <button type="button" className="btn sm ghost" onClick={() => { setGenError(null); modelSelectRef.current?.focus() }}>다른 모델로 다시 시도</button>
+          <button type="button" className="btn sm ghost" onClick={() => { setGenError(null); setModelOpen(true); setTimeout(() => modelSelectRef.current?.focus(), 0) }}>다른 모델로 다시 시도</button>
           <button type="button" className="btn sm" disabled={loading} onClick={chooseDefaultWorkflow}>기본 워크플로우 사용</button>
         </div>
         <small>기본 워크플로우는 정보 수집 → 분석 → 정리 3단계이며, 생성 프롬프트는 서비스 목표로만 전달돼요.</small>
       </div>}
       {error && <p className="home-note error">{error}</p>}
 
-      {!prompt && <div className="home-suggestions">
-        {suggestions.map((item) => <button type="button" key={item.label} onClick={() => setPrompt(item.text)}>{item.label}</button>)}
-      </div>}
-      <Link className="home-examples-link" to="/examples">활용 예시 더 보기 →</Link>
+      <div className="home-suggestions">
+        {suggestions.slice(0, 4).map((item) => <button type="button" key={item.label} onClick={() => setPrompt(item.text)}>{item.label}</button>)}
+      </div>
+      <Link className="home-examples-link" to="/examples">예시 더 보기 →</Link>
     </div>
   </div>
 }

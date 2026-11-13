@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
-import { Device, ExecutionListItem, Service, WorkflowFolder } from '../types'
+import { Device, Execution, ExecutionListItem, Service, WorkflowFolder } from '../types'
+import { shortDate } from '../workflow'
 
 // 폴더 칩에서 고른 범위. all: 전체, none: 미분류, 숫자: 그 폴더
 type FolderFilter = 'all' | 'none' | number
+
+const ACTIVE = ['pending', 'running']
 
 export default function DashboardPage() {
   const [services, setServices] = useState<Service[]>([])
   const [devices, setDevices] = useState<Device[]>([])
   const [executions, setExecutions] = useState<ExecutionListItem[]>([])
+  const [live, setLive] = useState<Execution[]>([])
   const [query, setQuery] = useState('')
   const [folders, setFolders] = useState<WorkflowFolder[]>([])
   const [folderFilter, setFolderFilter] = useState<FolderFilter>('all')
@@ -24,6 +28,24 @@ export default function DashboardPage() {
       api.get<WorkflowFolder[]>('/folders').then(setFolders),
     ])
   }, [])
+
+  // 실행 중인 작업은 3초마다 진행 상황을 다시 불러온다 (최대 3개)
+  const activeIds = useMemo(() => executions.filter((execution) => ACTIVE.includes(execution.status)).slice(0, 3).map((execution) => execution.id).join(','), [executions])
+  useEffect(() => {
+    if (!activeIds) { setLive([]); return }
+    let stopped = false
+    const load = () => Promise.all(activeIds.split(',').map((id) => api.get<Execution>(`/executions/${id}`)))
+      .then((items) => {
+        if (stopped) return
+        setLive(items)
+        if (items.some((item) => !ACTIVE.includes(item.status))) api.get<ExecutionListItem[]>('/executions').then(setExecutions).catch(() => {})
+      })
+      .catch(() => {})
+    load()
+    const timer = setInterval(load, 3000)
+    return () => { stopped = true; clearInterval(timer) }
+  }, [activeIds])
+  const serviceName = (id: number) => executions.find((execution) => execution.service_id === id)?.service_name ?? services.find((service) => service.id === id)?.name ?? '워크플로우'
 
   function countIn(filter: FolderFilter) {
     return filter === 'all' ? services.length : services.filter((service) => (service.folder_id ?? 'none') === filter).length
@@ -83,15 +105,27 @@ export default function DashboardPage() {
   const running = executions.filter((execution) => execution.status === 'running').length
 
   return <div className="overview-page">
-    <header className="page-heading"><div><div className="breadcrumb">M.A.R.S <span>/</span> Dashboard</div><h1>Dashboard</h1><p>Your workflows, workers, and recent activity at a glance.</p></div><button className="generate-button" onClick={() => navigate('/services')}>+ New workflow</button></header>
+    <header className="page-heading"><div><div className="breadcrumb">M.A.R.S <span>/</span> 대시보드</div><h1>대시보드</h1><p>내 워크플로우와 워커, 최근 실행을 한눈에 봐요.</p></div></header>
     <section className="stat-grid">
-      <div className="stat-card"><span>Total workflows</span><strong>{services.length}</strong><small>saved services</small></div>
-      <div className="stat-card"><span>Online workers</span><strong>{online}/{devices.length}</strong><small>available devices</small></div>
-      <div className="stat-card"><span>Running now</span><strong className={running ? 'accent' : ''}>{running}</strong><small>active executions</small></div>
-      <div className="stat-card"><span>Recent runs</span><strong>{executions.length}</strong><small>execution records</small></div>
+      <div className="stat-card"><span>전체 워크플로우</span><strong>{services.length}</strong><small>저장된 워크플로우</small></div>
+      <div className="stat-card"><span>온라인 워커</span><strong>{online}/{devices.length}</strong><small>연결된 기기</small></div>
+      <div className="stat-card"><span>실행 중</span><strong className={running ? 'accent' : ''}>{running}</strong><small>진행 중인 실행</small></div>
+      <div className="stat-card"><span>최근 실행</span><strong>{executions.length >= 100 ? '100+' : executions.length}</strong><small>최근 기록 기준</small></div>
     </section>
+    {live.some((execution) => ACTIVE.includes(execution.status)) && <section className="dash-block live-runs">
+      <div className="dash-block-head"><h2><span className="pulse-dot" />지금 실행 중</h2></div>
+      {live.filter((execution) => ACTIVE.includes(execution.status)).map((execution) => {
+        const done = execution.tasks.filter((task) => task.status === 'done').length
+        const working = execution.tasks.filter((task) => task.status === 'running')
+        return <button type="button" key={execution.id} className="live-run" onClick={() => navigate(`/executions/${execution.id}`)}>
+          <span className="live-run-top"><strong>{serviceName(execution.service_id)}</strong><span>에이전트 {done}/{execution.tasks.length} 완료 · {execution.progress}%</span></span>
+          <span className="live-bar"><i style={{ width: `${execution.progress}%` }} /></span>
+          <small className="live-run-agents">{working.length ? working.map((task) => <span key={task.id}>{task.agent_name}{task.assigned_device_name ? ` · ${task.assigned_device_name}` : ''}</span>) : '다음 에이전트를 준비하고 있어요'}</small>
+        </button>
+      })}
+    </section>}
     <section className="dashboard-workflows">
-      <div className="section-heading dashboard-section-heading"><div><span className="eyebrow">YOUR WORKSPACE</span><h2>My workflows</h2></div><input className="compact-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search workflows" /></div>
+      <div className="section-heading dashboard-section-heading"><div><span className="eyebrow">내 워크스페이스</span><h2>내 워크플로우</h2></div><input className="compact-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="워크플로우 검색" /></div>
       <div className="folder-bar">
         {(['all', 'none'] as const).map((filter) => <button type="button" key={filter} className={`folder-chip${folderFilter === filter ? ' active' : ''}${dropTarget === filter ? ' drop' : ''}`} onClick={() => setFolderFilter(filter)} {...dropProps(filter)}>{filter === 'all' ? '전체' : '미분류'} <span>{countIn(filter)}</span></button>)}
         {folders.map((folder) => <button type="button" key={folder.id} className={`folder-chip${folderFilter === folder.id ? ' active' : ''}${dropTarget === folder.id ? ' drop' : ''}`} onClick={() => setFolderFilter(folder.id)} {...dropProps(folder.id)}>📁 {folder.name} <span>{countIn(folder.id)}</span></button>)}
@@ -100,16 +134,16 @@ export default function DashboardPage() {
       </div>
       {folders.length > 0 && <p className="folder-hint">카드를 폴더로 끌어다 놓거나, 카드 아래에서 폴더를 골라 옮길 수 있어요.</p>}
       <div className="dashboard-workflow-grid">
-        {folderFilter === 'all' && <button className="new-workflow-card" onClick={() => navigate('/services')}><b>+</b><strong>Create a new workflow</strong><small>Build an editable multi-agent workflow</small></button>}
+        {folderFilter === 'all' && <button className="new-workflow-card" onClick={() => navigate('/services')}><b>+</b><strong>새 워크플로우 만들기</strong><small>문장으로 요청하면 에이전트 구성을 만들어 드려요</small></button>}
         {filtered.map((service) => <div className="dashboard-workflow-card" key={service.id} draggable onDragStart={(event) => { event.dataTransfer.setData('text/mars-service', String(service.id)); event.dataTransfer.effectAllowed = 'move' }}>
-          <button type="button" className="card-open" onClick={() => navigate(`/services/${service.id}`)}><span className="workflow-avatar">{service.name.slice(0, 1).toUpperCase()}</span><strong>{service.name}</strong><p>{service.description || 'No description provided.'}</p><small>{service.graph.nodes.length} blocks · Updated {new Date(service.updated_at).toLocaleDateString()}</small></button>
+          <button type="button" className="card-open" onClick={() => navigate(`/services/${service.id}`)}><span className="workflow-avatar">{service.name.slice(0, 1).toUpperCase()}</span><strong>{service.name}</strong><p>{service.description || '설명이 없어요.'}</p><small>블록 {service.graph.nodes.length}개 · {shortDate(service.updated_at)} 수정</small></button>
           {folders.length > 0 && <select className="card-folder" aria-label={`${service.name} 폴더`} value={service.folder_id ?? ''} onChange={(event) => moveTo(service.id, event.target.value ? Number(event.target.value) : null)}>
             <option value="">미분류</option>
             {folders.map((folder) => <option key={folder.id} value={folder.id}>📁 {folder.name}</option>)}
           </select>}
         </div>)}
       </div>
-      {!filtered.length && services.length > 0 && <div className="empty-workflows">{query ? 'No workflows match your search.' : '이 폴더에는 아직 워크플로우가 없어요. 카드를 끌어다 놓아 보세요.'}</div>}
+      {!filtered.length && services.length > 0 && <div className="empty-workflows">{query ? '검색 결과가 없어요.' : '이 폴더에는 아직 워크플로우가 없어요. 카드를 끌어다 놓아 보세요.'}</div>}
     </section>
   </div>
 }
