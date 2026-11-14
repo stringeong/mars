@@ -210,6 +210,7 @@ BODY = r'''
 
 SCRIPT = r'''
 const $=s=>document.querySelector(s), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),api=async(p,o={})=>{let r=await fetch(p,{headers:{'Content-Type':'application/json'},...o}),d=r.status===204?{}:await r.json();if(!r.ok)throw Error(d.error||'요청 실패');return d};let S={};
+let serverEdited=false;$('#server').addEventListener('input',()=>{serverEdited=true});
 const post=(p,b={})=>api(p,{method:'POST',body:JSON.stringify(b)});
 const pct=v=>v==null?'-':Math.round(v)+'%';
 function ago(sec){if(sec==null)return '측정할 수 없음';if(sec<60)return Math.round(sec)+'초 전';if(sec<3600)return Math.floor(sec/60)+'분 전';return Math.floor(sec/3600)+'시간 전'}
@@ -219,7 +220,7 @@ async function status(){try{S=await api('/api/status');
   let b=S.badge||{key:'stopped',label:'확인 중',reason:''};
   for(const id of ['#badge','#sideBadge']){$(id).className='badge '+b.key;$(id).textContent=b.label}
   $('#reason').textContent=b.reason;$('#sideReason').textContent=b.reason;
-  $('#server').value=S.server_url||$('#server').value;let name=$('#name');if(!name.value)name.value=S.device_name||S.specs.hostname||'';
+  if(!serverEdited&&document.activeElement!==$('#server'))$('#server').value=S.server_url||$('#server').value;let name=$('#name');if(!name.value)name.value=S.device_name||S.specs.hostname||'';
   $('#homeDeviceName').textContent=S.device_name||'-';if(document.activeElement!==$('#settingsName'))$('#settingsName').value=S.device_name||'';
   $('#homeTask').textContent=S.current_task?'#'+S.current_task.task_id+' '+S.current_task.agent_name:'대기 중';
   $('#homeTaskDetail').textContent=S.current_task?(S.current_task.label||'실행 #'+S.current_task.execution_id)+' · '+(S.current_task.model||'기본 모델'):S.running?'새 작업을 기다리고 있어요.':'워커가 꺼져 있어요.';

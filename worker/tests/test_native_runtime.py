@@ -101,3 +101,9 @@ def test_status_returns_to_login_when_registration_was_removed(tmp_path, monkeyp
     assert payload["registered"] is False and payload["account"] is None
     assert "다시 로그인" in payload["notice"]
     assert config.load()["api_key"] == ""
+
+
+def test_register_form_keeps_the_address_the_user_typed():
+    # 2초마다 상태를 읽을 때 사용자가 입력 중인 서버 주소를 설정값으로 덮어쓰지 않는다
+    assert "serverEdited" in webui.HTML
+    assert "if(!serverEdited&&document.activeElement!==$('#server'))" in webui.HTML
