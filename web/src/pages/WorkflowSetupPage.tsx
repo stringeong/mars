@@ -352,6 +352,6 @@ export default function WorkflowSetupPage() {
         <ValidationPanel validation={validation} nodeNames={nodeNames} onSelectNode={(nodeId) => document.getElementById(`setup-row-${nodeId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })} />
       </aside>
     </div>
-    <input ref={uploadRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx" onChange={onUpload} />
+    <input ref={uploadRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.log,.jsonl,.xlsx,.pptx" onChange={onUpload} />
   </div>
 }

@@ -15,7 +15,8 @@ export default function ExecutionPage() {
   const [execution, setExecution] = useState<Execution | null>(null)
   const [history, setHistory] = useState<ExecutionListItem[]>([])
   const [error, setError] = useState('')
-  const [view, setView] = useState<'stages' | 'gantt'>('stages')
+  // 고르기 전에는 단계 보기. 파일을 나눠 한 단계에 블록이 많으면 워커별로 묶이는 간트 보기가 읽기 쉽다
+  const [chosenView, setView] = useState<'stages' | 'gantt' | null>(null)
   const [now, setNow] = useState(Date.now())
 
   async function load() {
@@ -51,6 +52,7 @@ export default function ExecutionPage() {
     ...record.files.map((file) => [`f${file.id}`, { name: file.name, label: record.label }] as const),
     ...record.directories.map((directory) => [`d${directory.alias}`, { name: `폴더 ${directory.alias}`, label: record.label }] as const),
   ])).values()]
+  const view = chosenView ?? (Math.max(0, ...(execution.stages ?? []).map((ids) => ids.length)) > 8 ? 'gantt' : 'stages')
 
   return <div className="result-viewer-page">
     <aside className="result-history-panel">
@@ -78,7 +80,7 @@ export default function ExecutionPage() {
         </div>
       </header>
       {error && <div className="error">{error}</div>}
-      {inputChips.length > 0 && <section className="result-section run-inputs-section"><div className="result-section-heading"><h2>입력 파일</h2></div><div className="run-input-chips">{inputChips.map((chip) => <span key={chip.name} title={chip.label}>{chip.name}</span>)}</div></section>}
+      {inputChips.length > 0 && <section className="result-section run-inputs-section"><div className="result-section-heading"><h2>입력 파일</h2></div><div className="run-input-chips">{inputChips.map((chip) => <span key={chip.name} title={chip.label}>{chip.name}</span>)}</div>{(execution.input_files ?? []).filter((record) => record.kind === 'split' && record.pieces).map((record) => <small className="run-input-pieces" key={record.id}>{record.label}: {record.pieces!.map((piece) => `#${piece.index} ${piece.label}`).join(' · ')}</small>)}</section>}
       {active && <section className="run-progress-card"><div className="run-progress-heading"><span><i className={active ? 'pulse-dot' : 'check-dot'} /> {active ? '실행 중이에요' : '실행이 끝났어요'}</span><strong>{execution.progress}%</strong></div><div className="progress-bar"><div style={{ width: `${execution.progress}%` }} /></div></section>}
       <section className="result-section">
         <div className="result-section-heading timeline-heading">

@@ -8,7 +8,7 @@ import { generationLabel, onServiceRenamed } from '../workflow'
 type Transfer = { node_id: string; node_name: string; provider: string; type: 'user_input' | 'derived_text' | 'file_text'; file_ids?: number[]; sources?: string[] }
 type Preview = { requires_consent: boolean; consent_token: string | null; transfers: Transfer[]; validation: ValidationResult }
 type RunInputs = { slots: Record<string, number[]>; nodes: Record<string, number[]> }
-type InputEntry = { kind: 'slot' | 'node'; id: string; label: string; format?: string; blocks: string[]; directories: number[]; defaults: number[] }
+type InputEntry = { kind: 'slot' | 'node'; id: string; label: string; format?: string; blocks: string[]; directories: number[]; defaults: number[]; split: boolean }
 
 const isAgent = (node: WorkflowNode): node is AgentNode => !node.type || node.type === 'agent'
 const sameIds = (a: number[], b: number[]) => a.length === b.length && a.every((value, index) => value === b[index])
@@ -44,11 +44,12 @@ export default function WorkflowRunPage() {
       blocks: agents.filter((agent) => (agent.input_slot_ids ?? []).includes(slot.id)).map((agent) => agent.name),
       directories: slot.directory_ids,
       defaults: slot.file_ids,
+      split: agents.some((agent) => agent.split?.enabled && (agent.input_slot_ids ?? []).includes(slot.id)),
     }))
     // 슬롯 없이 블록에 직접 파일을 붙인 이전 버전 워크플로우
     const nodeEntries = agents
       .filter((agent) => (agent.uploaded_file_ids ?? []).length || (agent.needs_file && !(agent.input_slot_ids ?? []).length))
-      .map((agent) => ({ kind: 'node' as const, id: agent.id, label: agent.name, blocks: [agent.name], directories: [], defaults: agent.uploaded_file_ids ?? [] }))
+      .map((agent) => ({ kind: 'node' as const, id: agent.id, label: agent.name, blocks: [agent.name], directories: [], defaults: agent.uploaded_file_ids ?? [], split: !!agent.split?.enabled }))
     return [...slotEntries, ...nodeEntries]
   }, [service])
 
@@ -66,6 +67,8 @@ export default function WorkflowRunPage() {
         const next: RunInputs = { slots: {}, nodes: {} }
         let dropped = 0
         for (const record of previous?.input_files ?? []) {
+          // 나눠 실행한 기록은 원본 파일이 슬롯·블록 기록에 이미 들어 있다
+          if (record.kind === 'split') continue
           const ids = record.files.map((file) => file.id)
           const kept = ids.filter((fileId) => existing.has(fileId))
           dropped += ids.length - kept.length
@@ -198,7 +201,7 @@ export default function WorkflowRunPage() {
             const changed = !sameIds(current, entry.defaults)
             return <div className={`run-entry ${current.length || entry.directories.length ? '' : 'empty'}`} key={`${entry.kind}-${entry.id}`}>
               <div className="run-entry-head">
-                <div><strong>{entry.label}</strong>{entry.format && <small>예상 형식: {entry.format}</small>}{entry.kind === 'slot' && <small>읽는 블록: {entry.blocks.join(', ') || '없음'}</small>}</div>
+                <div><strong>{entry.label}</strong>{entry.format && <small>예상 형식: {entry.format}</small>}{entry.kind === 'slot' && <small>읽는 블록: {entry.blocks.join(', ') || '없음'}</small>}{entry.split && <small className="run-entry-split">나눠서 병렬 실행 · 실행할 때 온라인 워커 수에 맞춰 파일을 나눠요</small>}</div>
                 {changed && <span className="run-entry-changed">이번 실행에서 변경됨</span>}
               </div>
               <div className="slot-sources">
@@ -231,7 +234,7 @@ export default function WorkflowRunPage() {
         <div className="run-files-note"><div><strong>입력 파일 보관함</strong><small>{files.length}개</small></div><Link to="/files">파일 관리 →</Link></div>
       </aside>
     </div>
-    <input ref={uploadRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx" onChange={onUpload} />
+    <input ref={uploadRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.log,.jsonl,.xlsx,.pptx" onChange={onUpload} />
     {preview && <div className="file-library-modal-backdrop" role="presentation"><section className="file-library-modal transfer-consent-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title"><header><div><span className="eyebrow">외부 전송</span><h2 id="transfer-title">클라우드 전송 내용을 확인해 주세요</h2></div><button className="modal-close" onClick={() => setPreview(null)}>×</button></header><p>API 키는 서버에만 보관되며 아래 입력과 결과만 외부 공급자에 전달됩니다.</p><div className="transfer-list">{preview.transfers.map((item, index) => <div className={`transfer-item ${item.type}`} key={`${item.node_id}-${item.type}-${index}`}><strong>{item.node_name} → {item.provider}</strong><span>{item.type === 'user_input' ? '사용자 실행 요청' : item.type === 'derived_text' ? `로컬 파일에서 파생된 텍스트: ${(item.sources || []).join(', ')}` : `첨부파일에서 추출한 텍스트: ${(item.file_ids || []).map(fileName).join(', ')}`}</span></div>)}</div><footer><span>이번 실행에만 적용됩니다.</span><div><button className="btn sm ghost" onClick={() => setPreview(null)}>취소</button><button className="btn sm" disabled={loading} onClick={() => start(preview.consent_token)}>동의하고 실행</button></div></footer></section></div>}
   </div>
 }
