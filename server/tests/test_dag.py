@@ -357,3 +357,86 @@ class TestApplyAutoFlags:
         graph = graph_of(["a", "b"], [("a", "b")])
         dag.apply_auto_flags(graph)
         assert "final" not in graph["nodes"][1] and "needs_file" not in graph["nodes"][0]
+
+
+class TestExpandSplitNodes:
+    """'파일 나눠서 병렬 실행' 블록을 조각 수만큼 펼친다."""
+
+    def _pieces(self, count):
+        return [{"uploaded_file_ids": [100 + i], "split_part": {"label": f"{i}번"}} for i in range(1, count + 1)]
+
+    def test_pieces_inherit_settings_and_connections(self):
+        # in -> a(분할) -> c
+        graph = graph_of(["in", "a", "c"], [("in", "a"), ("a", "c")])
+        graph["nodes"][1].update(name="분석", model="qwen3:4b", worker_id=None, split={"enabled": True}, input_slot_ids=["s1"])
+        expanded = dag.expand_split_nodes(graph, {"a": self._pieces(3)})
+
+        assert [n["id"] for n in expanded["nodes"]] == ["in", "a__p01", "a__p02", "a__p03", "c"]
+        second = expanded["nodes"][2]
+        assert (second["name"], second["model"], second["role_prompt"]) == ("분석 #2", "qwen3:4b", "a 역할")
+        assert second["uploaded_file_ids"] == [102] and second["input_slot_ids"] == [] and second["split"] is None
+        assert second["split_part"] == {"label": "2번", "index": 2, "total": 3, "origin_id": "a", "origin_name": "분석"}
+        # 다음 블록은 조각 결과를 번호 순서대로 받는다
+        assert dag.parents_of(expanded)["c"] == ["a__p01", "a__p02", "a__p03"]
+        assert all(dag.parents_of(expanded)[piece] == ["in"] for piece in ("a__p01", "a__p02", "a__p03"))
+        assert dag.stages(expanded) == [["in"], ["a__p01", "a__p02", "a__p03"], ["c"]]
+        # 원래 그래프는 그대로다
+        assert [n["id"] for n in graph["nodes"]] == ["in", "a", "c"]
+
+    def test_single_piece_is_not_expanded(self):
+        graph = graph_of(["a", "b"], [("a", "b")])
+        assert dag.expand_split_nodes(graph, {"a": self._pieces(1)}) == graph
+
+    def test_directory_connections_are_copied_to_every_piece(self):
+        graph = graph_of(["a", "b"], [("a", "b")])
+        graph["nodes"].append({"id": "d", "type": "directory", "directory_id": 7, "name": "자료", "device_id": 1})
+        graph["edges"].append({"source": "d", "target": "a", "relation": "directory"})
+        expanded = dag.expand_split_nodes(graph, {"a": self._pieces(2)})
+        assert dag.directory_ids_by_agent(expanded) == {"a__p01": [7], "a__p02": [7], "b": []}
+
+    def test_final_split_block_collects_every_piece_in_order(self):
+        graph = graph_of(["a"], [])
+        graph["nodes"][0]["final"] = True
+        expanded = dag.expand_split_nodes(graph, {"a": self._pieces(2)})
+        assert dag.result_node_ids(expanded) == ["a__p01", "a__p02"]
+
+
+class TestInspectSplit:
+    def _graph(self, **node):
+        graph = graph_of(["a", "b"], [("a", "b")])
+        graph["nodes"][0].update({"split": {"enabled": True}, "uploaded_file_ids": [1], **node})
+        graph["nodes"][1]["final"] = True
+        return graph
+
+    def test_split_block_with_file_and_next_block_is_fine(self):
+        result = dag.inspect_graph(self._graph(), split_problem=lambda node: None)
+        assert result["errors"] == [] and result["warnings"] == []
+
+    def test_no_file_is_an_error(self):
+        graph = self._graph(uploaded_file_ids=[], text_input_enabled=True)
+        assert ("split_no_file", ("a",)) in _codes(dag.inspect_graph(graph))
+
+    def test_empty_required_file_is_reported_once(self):
+        graph = self._graph(uploaded_file_ids=[], needs_file=True)
+        assert [code for code, _ in _codes(dag.inspect_graph(graph))] == ["missing_file"]
+
+    def test_cloud_block_is_an_error(self):
+        graph = self._graph(executor="cloud", provider="openai")
+        assert ("split_cloud", ("a",)) in _codes(dag.inspect_graph(graph))
+
+    def test_problem_from_files_or_workers_is_an_error(self):
+        result = dag.inspect_graph(self._graph(), split_problem=lambda node: ("split_no_worker", "Worker가 없습니다."))
+        assert ("split_no_worker", ("a",)) in _codes(result)
+        assert "'에이전트 a' 블록: Worker가 없습니다." in [e["message"] for e in result["errors"]]
+
+    def test_no_next_block_is_a_warning(self):
+        graph = graph_of(["a"], [])
+        graph["nodes"][0].update(split={"enabled": True}, uploaded_file_ids=[1], final=True)
+        result = dag.inspect_graph(graph)
+        assert result["valid"] is True
+        assert [w["code"] for w in result["warnings"]] == ["split_no_next"]
+
+    def test_disabled_split_is_ignored(self):
+        graph = self._graph()
+        graph["nodes"][0]["split"] = {"enabled": False}
+        assert dag.inspect_graph(graph, split_problem=lambda node: ("x", "y"))["errors"] == []

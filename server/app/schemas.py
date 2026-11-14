@@ -135,6 +135,19 @@ class UploadedFileOut(BaseModel):
 # ---------- Service / Workflow ----------
 
 
+class SplitSettings(BaseModel):
+    """파일 나눠서 병렬 실행. 실행할 때 연결된 파일을 나누고 블록을 조각 수만큼 펼친다."""
+
+    enabled: bool = False
+    # auto: 파일 하나면 형식에 따라 줄(.txt .log .md .jsonl)·행(.csv), 여러 개면 파일 단위
+    unit: Literal["auto", "line", "csv", "file"] = "auto"
+    # auto: max(사용 가능한 Worker 수, 전체 글자 수 / 조각 최대 글자 수)
+    parts: Literal["auto"] | Annotated[int, Field(ge=2, le=50)] = "auto"
+    # 순서가 있는 자료(로그·대화)에서 각 조각 앞에 붙일 직전 조각의 마지막 줄 수
+    overlap_lines: int = Field(default=0, ge=0, le=200)
+    max_chars: int = Field(default=12_000, ge=1_000, le=30_000)
+
+
 class AgentNode(BaseModel):
     id: str
     type: Literal["agent"] = "agent"
@@ -160,6 +173,7 @@ class AgentNode(BaseModel):
     needs_file_hint: bool = False
     final_manual: bool = False
     needs_file_manual: bool = False
+    split: SplitSettings | None = None
     position: dict | None = None
 
 

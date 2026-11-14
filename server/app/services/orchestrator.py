@@ -80,8 +80,13 @@ def device_has_model(device: models.Device, model: str) -> bool:
     return True if not isinstance(available, list) else model in available
 
 
-def inspect_graph_for_user(db: Session, user_id: int, graph: dict, run_prompt: str = "") -> dict:
-    """dag.inspect_graph에 사용자의 Worker 모델 정보를 더해 구성 검사를 한다."""
+def inspect_graph_for_user(db: Session, user_id: int, graph: dict, run_prompt: str = "", split_plans=None) -> dict:
+    """dag.inspect_graph에 사용자의 Worker 모델 정보와 파일 분할 계획을 더해 구성 검사를 한다.
+
+    결과의 splits는 분할 블록별 예상 조각(Worker 수, 조각 수, 조각별 줄 수)이다.
+    실행처럼 이미 계획을 세운 곳에서는 split_plans로 넘겨 파일을 두 번 읽지 않는다.
+    """
+    from . import split_inputs
     from .transfers import is_cloud_node
 
     # 저장 이후 자동 규칙이 바뀌었거나 이전 버전 그래프여도 실행할 때와 같은 기준으로 검사한다
@@ -98,7 +103,11 @@ def inspect_graph_for_user(db: Session, user_id: int, graph: dict, run_prompt: s
             return None
         return device_has_model(device, node.get("model") or "")
 
-    return dag.inspect_graph(graph, run_prompt=run_prompt, has_model=has_model)
+    if split_plans is None:
+        split_plans = split_inputs.plan_graph(db, user_id, graph)
+    result = dag.inspect_graph(graph, run_prompt=run_prompt, has_model=has_model, split_problem=split_plans.problem)
+    result["splits"] = split_plans.summaries()
+    return result
 
 
 def reclaim_stale_tasks(db: Session, user_id: int) -> None:
@@ -213,14 +222,36 @@ def populate_task_context(db: Session, task: models.TaskRecord) -> None:
         parts.append(f"[텍스트 데이터 입력]\n{text_input}")
     if execution.run_prompt:
         parts.append(f"[사용자 실행 요청]\n{execution.run_prompt}")
+    part_note = _split_part_note(node)
+    if part_note:
+        parts.append(part_note)
     if parents:
+        nodes = {item.get("id"): item for item in (execution.graph_snapshot or {}).get("nodes", [])}
         parent_tasks = {t.node_id: t for t in db.query(models.TaskRecord).filter(models.TaskRecord.execution_id == execution.id, models.TaskRecord.node_id.in_(parents)).all()}
         for parent_id in parents:
             parent = parent_tasks.get(parent_id)
             if parent and parent.output:
-                parts.append(f"[이전 단계: {parent.agent_name}의 결과]\n{parent.output}")
+                # 나눠서 실행한 조각의 결과에는 원본에서 맡은 범위를 함께 적는다
+                label = (nodes.get(parent_id, {}).get("split_part") or {}).get("label")
+                suffix = f" · {label}" if label else ""
+                parts.append(f"[이전 단계: {parent.agent_name}의 결과{suffix}]\n{parent.output}")
     task.input_context = "\n\n".join(parts)
     db.flush()
+
+
+def _split_part_note(node: dict) -> str:
+    """조각 블록에게 자신이 원본의 어느 부분을 맡았는지 알려준다."""
+    part = node.get("split_part")
+    if not isinstance(part, dict) or part.get("unit") not in ("line", "csv"):
+        return ""
+    note = (
+        f"[나눠 받은 자료]\n첨부 파일은 원본 '{part.get('source_name')}'의 {part.get('label')}입니다 "
+        f"(전체 {part.get('total')}조각 중 {part.get('index')}번째). 이 범위만 처리하세요. "
+        "나머지 범위는 다른 조각이 같은 방식으로 처리합니다."
+    )
+    if part.get("context_start"):
+        note += " 파일 앞의 '참고 문맥'은 직전 조각의 끝부분이므로 이해에만 쓰고 결과에는 넣지 마세요."
+    return note
 
 
 def complete_task(
@@ -307,4 +338,8 @@ def delete_execution(db: Session, execution: models.Execution) -> None:
         )
     usage.update({"execution_id": None, "task_id": None}, synchronize_session=False)
     db.query(models.TaskRecord).filter(models.TaskRecord.execution_id == execution.id).delete(synchronize_session=False)
+    # 파일을 나눠 실행하며 만든 조각 파일은 이 실행에서만 쓰므로 함께 지운다
+    from . import split_inputs
+
+    split_inputs.delete_piece_files(db, execution.graph_snapshot)
     db.delete(execution)
