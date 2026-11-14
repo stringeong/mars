@@ -8,70 +8,61 @@ import httpx
 from . import config as cfg
 from . import runtime_state
 from .main import collect_runtime_stats, collect_specs
+from .overload import worker_badge
+from .webui_page import HTML
 from .downloads import create_job, get_jobs, ollama_install_info, pull_model, search_library
 
 PROCESS = None
 LOGS = deque(maxlen=200)
-TOOLS = ({"id":"pdf-ocr","name":"PDF & OCR","packages":["pypdf","PyMuPDF","pytesseract","Pillow"],"modules":["pypdf","fitz","pytesseract","PIL"],"binary":"tesseract"},{"id":"office","name":"Office 문서","packages":["python-docx","openpyxl","python-pptx"],"modules":["docx","openpyxl","pptx"]})
-HTML = r'''<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>M.A.R.S Worker</title><style>
-*{box-sizing:border-box;margin:0;padding:0}:root{--primary:#6366f1;--primary-dark:#4f46e5;--bg:#f7f8fc;--card:#fff;--text:#1e293b;--muted:#64748b;--border:#e2e8f0;--danger:#ef4444;--success:#22c55e}body{min-height:100vh;background:var(--bg);color:var(--text);font:14px 'Pretendard',-apple-system,'Apple SD Gothic Neo','Noto Sans KR',system-ui,sans-serif}header,nav,main{width:min(1120px,calc(100% - 48px));margin:auto}header{display:flex;align-items:center;justify-content:space-between;padding:28px 0 22px}.brand{display:flex;align-items:center;gap:11px}.brand-mark{width:38px;height:38px;display:grid;place-items:center;border-radius:12px;color:#fff;background:linear-gradient(135deg,#7c3aed,#2563eb);box-shadow:0 7px 16px rgba(99,102,241,.25);font-size:18px;font-weight:850}.brand-copy{display:grid;line-height:1.15}.brand-copy h1{color:#1e1b4b;font-size:19px;letter-spacing:.02em}.brand-copy span{margin-top:4px;color:#98a1b2;font-size:10px;font-weight:650}.worker-state{display:flex;align-items:center;gap:7px;padding:8px 12px;border:1px solid #e7e9f2;border-radius:999px;background:#fff;color:#667085;font-size:12px;font-weight:700;box-shadow:0 4px 14px rgba(25,33,61,.035)}nav{display:flex;gap:5px;padding:6px;border:1px solid #e7e9f2;border-radius:12px;background:#fff;box-shadow:0 6px 22px rgba(25,33,61,.035)}nav button{flex:1;border:0;border-radius:8px;padding:10px 14px;background:transparent;color:#778095;font:inherit;font-weight:700;cursor:pointer;transition:background .15s,color .15s}nav button:hover{color:#5b35ce;background:#f8f6ff}nav button.active{color:#5b35ce;background:linear-gradient(100deg,#f0ebff,#edf3ff)}main{padding:24px 0 52px}.page{display:none}.page.active{display:block}.card{margin-bottom:16px;padding:22px;border:1px solid #e5e8f0;border-radius:15px;background:var(--card);box-shadow:0 6px 22px rgba(25,33,61,.035)}h2{margin:0 0 15px;color:#202944;font-size:18px;letter-spacing:-.02em}h3{margin:22px 0 10px;color:#35405a;font-size:14px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:15px}label{display:block;margin:12px 0 5px;color:var(--muted);font-size:12px;font-weight:700}input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;outline:0;background:#fff;color:var(--text);font:inherit}input:focus{border-color:#9074ea;box-shadow:0 0 0 3px rgba(124,58,237,.1)}button{border:0;border-radius:8px;padding:9px 15px;background:var(--primary);color:#fff;font:inherit;font-weight:700;cursor:pointer;transition:background .15s,transform .15s}button:hover{background:var(--primary-dark)}button:active{transform:translateY(1px)}button:disabled{opacity:.5;cursor:not-allowed}.row,.item{display:flex;gap:10px;align-items:center}.row input{flex:1}.item{justify-content:space-between;padding:12px 2px;border-bottom:1px solid #eef0f5}.item:last-child{border-bottom:0}.item span{min-width:0;line-height:1.55}.secondary{background:#64748b}.secondary:hover{background:#475569}.danger{background:var(--danger)}.task-metric{font-size:20px}.action-row{justify-content:flex-start}.action-row button{flex:0 0 auto}.danger:hover{background:#dc2626}.muted{color:var(--muted);font-size:12px}.metric{margin-top:8px;color:#302b63;font-size:28px;font-weight:800}pre{height:260px;overflow:auto;padding:15px;border:1px solid #e7e9f0;border-radius:10px;background:#f8fafc;color:#475569;font:12px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}.msg{min-height:22px;margin-top:12px;color:#5b41bd;font-size:12px;font-weight:650}.bad{color:var(--danger)}.dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#c6cbd5}.dot.on{background:var(--success);box-shadow:0 0 0 3px #dcfce7}a{color:#6650c8;text-decoration:none}progress{accent-color:var(--primary)}@media(max-width:640px){header,nav,main{width:min(100% - 28px,1120px)}header{padding-top:20px}.brand-copy span{display:none}.worker-state{padding:7px 9px}nav button{padding:9px 5px;font-size:12px}.card{padding:17px}.row{align-items:stretch;flex-direction:column}.row button{width:100%}.item{align-items:flex-start}.item button{flex:0 0 auto}}
-.shell-hidden{display:none}.worker-auth{min-height:100vh;display:grid;grid-template-columns:minmax(0,1.08fr) minmax(430px,.92fr);background:#f7f8fc}.worker-auth-intro{position:relative;overflow:hidden;padding:clamp(48px,9vw,128px) clamp(36px,10vw,150px);color:#fff;background:radial-gradient(circle at 75% 16%,rgba(142,116,255,.9),transparent 24%),radial-gradient(circle at 5% 92%,rgba(56,148,255,.42),transparent 29%),linear-gradient(135deg,#21164d,#44308b 58%,#3159b8)}.worker-auth-intro:after{position:absolute;right:-86px;bottom:-95px;width:280px;height:280px;border:1px solid rgba(255,255,255,.16);border-radius:50%;content:''}.auth-brand{display:flex;align-items:center;gap:8px;margin-bottom:76px;font-size:20px;font-weight:800;letter-spacing:.03em}.auth-brand span{width:27px;height:27px;display:grid;place-items:center;border-radius:8px;background:#fff;color:#5d42c0;font-size:13px}.worker-badge{display:inline-flex;align-items:center;gap:7px;padding:6px 9px;border:1px solid rgba(255,255,255,.25);border-radius:999px;color:#ded7ff;font-size:10px;font-weight:800;letter-spacing:.1em}.worker-badge i{width:6px;height:6px;border-radius:50%;background:#69e5ae;box-shadow:0 0 0 3px rgba(105,229,174,.15)}.worker-auth-intro h1{margin:16px 0 14px;color:#fff;font-size:clamp(30px,3.4vw,47px);letter-spacing:-.045em;line-height:1.1}.worker-auth-intro>p{max-width:490px;color:#d9d6ef;font-size:14px;line-height:1.7}.worker-points{display:grid;gap:15px;margin-top:42px}.worker-points div{display:flex;align-items:center;gap:11px}.worker-points i{width:25px;height:25px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.34);border-radius:8px;font-size:10px;font-style:normal;font-weight:800}.worker-points strong,.worker-points small{display:block}.worker-points strong{font-size:12px}.worker-points small{margin-top:3px;color:#cbc9e0;font-size:10px}.worker-auth-form{display:grid;place-items:center;padding:36px}.worker-auth-card{width:min(100%,385px)}.worker-auth-card h2{margin:8px 0;color:#25304a;font-size:25px}.worker-auth-card>p{color:#828b9d;font-size:12px;line-height:1.5}.worker-auth-card form{margin-top:27px}.worker-auth-card label{margin-top:16px}.worker-auth-card .auth-submit{width:100%;display:flex;justify-content:center;align-items:center;gap:7px;margin-top:23px;padding:12px;background:linear-gradient(100deg,#7147db,#4275e6);box-shadow:0 8px 18px rgba(85,68,205,.2)}.worker-specs{margin-top:12px;padding:10px;border-radius:8px;background:#f1efff;color:#6859a8;font-size:10px;line-height:1.5}.auth-kicker{color:#8a70d6;font-size:10px;font-weight:800;letter-spacing:.105em}@media(max-width:760px){.worker-auth{grid-template-columns:1fr}.worker-auth-intro{padding:36px 28px}.auth-brand{margin-bottom:43px}.worker-auth-intro h1{font-size:30px}.worker-points{display:none}.worker-auth-form{padding:44px 25px}}</style></head><body>
-<section id="workerLogin" class="worker-auth"><div class="worker-auth-intro"><div class="auth-brand"><span>M</span> M.A.R.S</div><div class="worker-badge"><i></i> WORKER CONSOLE</div><h1>Connect this machine<br>to your workspace.</h1><p>이 기기를 M.A.R.S Worker로 등록하고 로컬 연산 자원과 디렉터리를 안전하게 공유하세요.</p><div class="worker-points"><div><i>1</i><span><strong>Worker 전용 연결</strong><small>일반 웹 로그인이 아닌 로컬 기기 등록 화면입니다.</small></span></div><div><i>2</i><span><strong>Local resources</strong><small>CPU, GPU와 Ollama 모델을 이 기기에서 사용합니다.</small></span></div><div><i>3</i><span><strong>Scoped access</strong><small>직접 선택한 디렉터리만 워크스페이스에 공유합니다.</small></span></div></div></div><div class="worker-auth-form"><div class="worker-auth-card"><span class="auth-kicker">M.A.R.S WORKER</span><h2>Register this worker</h2><p>워크스페이스 계정으로 로그인하여 이 기기를 Worker로 연결합니다.</p><form id="workerLoginForm"><label>Server address</label><input id="server" value="https://marsflowlab.com/api" required><label>Worker name</label><input id="name" required><label>Username</label><input id="user" required autocomplete="username"><label>Password</label><input id="pass" type="password" required autocomplete="current-password"><div id="specs" class="worker-specs"></div><p id="setupMsg" class="msg"></p><button id="register" class="auth-submit" type="submit">Connect worker <span>→</span></button></form></div></div></section><div id="appShell"><header><div class="brand"><div class="brand-mark">M</div><div class="brand-copy"><h1>M.A.R.S Worker</h1><span>LOCAL CONTROL CENTER</span></div></div><div class="worker-state"><i id="dot" class="dot"></i><span id="state">확인 중</span></div></header><nav aria-label="Worker 관리 메뉴"><button data-p="setup" class="active">Setup</button><button data-p="models">Models</button><button data-p="tools">Tools</button><button data-p="status">Status</button></nav><main>
-<section id="setup" class="page active"><div class="card"><h2>Worker 연결 정보</h2><p class="muted">이 기기는 M.A.R.S 워크스페이스에 등록되어 있습니다.</p><div class="grid"><div><label>기기 이름</label><div id="homeDeviceName" class="metric">-</div></div><div><label>실행 중인 Task</label><div id="homeTask" class="metric task-metric">대기 중</div><p id="homeTaskDetail" class="muted"></p></div></div></div><div class="card"><h2>설정</h2><label for="settingsName">기기 이름 변경</label><div class="row"><input id="settingsName" maxlength="128" placeholder="새 기기 이름"><button id="rename">이름 저장</button></div><p id="settingsMsg" class="msg"></p><h3>연결 관리</h3><div class="row action-row"><button id="logout" class="secondary">로그아웃</button><button id="unregister" class="danger">기기 등록 해제</button></div><p class="muted">로그아웃은 이 앱의 인증정보만 지웁니다. 등록 해제는 워크스페이스에서도 이 기기를 삭제합니다.</p></div><div class="card"><h2>공유 디렉터리</h2><div class="row"><input id="folder" placeholder="로컬 디렉터리 절대 경로"><button id="add">추가</button></div><div id="folders"></div></div></section>
-<section id="models" class="page"><div class="card"><h2>Ollama</h2><div id="ollamaInstall"></div><h3>공식 라이브러리 검색</h3><div class="row"><input id="model" placeholder="예: qwen, coding, vision"><button id="search">검색</button><button id="refresh">설치 모델</button></div><p id="modelMsg" class="msg"></p><div id="searchList"></div><h3>설치된 모델</h3><div id="modelList"></div></div><div class="card"><h2>다운로드 상태</h2><div id="jobs"></div></div></section>
-<section id="tools" class="page"><div class="card"><h2>승인된 Tool 카탈로그</h2><p class="muted">임의 명령 대신 아래 허용 목록만 설치합니다.</p><div id="toolList"></div><h3>설치 상태</h3><div id="toolJobs"></div></div></section>
-<section id="status" class="page"><div class="grid"><div class="card"><b>CPU</b><div id="cpu" class="metric">-</div></div><div class="card"><b>RAM</b><div id="ram" class="metric">-</div></div><div class="card"><b>GPU</b><div id="gpuName" class="muted"></div><div id="gpu" class="metric">-</div></div></div><div class="card"><h2>Worker</h2><button id="start">시작</button> <button id="stop" class="danger">중지</button></div><div class="card"><h2>최근 로그</h2><pre id="logs">로그가 없습니다.</pre></div></section></main></div><script>
-const $=s=>document.querySelector(s), esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])),api=async(p,o={})=>{let r=await fetch(p,{headers:{'Content-Type':'application/json'},...o}),d=r.status===204?{}:await r.json();if(!r.ok)throw Error(d.error||'요청 실패');return d};let S={};
-document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button,.page').forEach(x=>x.classList.remove('active'));b.classList.add('active');$('#'+b.dataset.p).classList.add('active');if(b.dataset.p==='models')models();if(b.dataset.p==='tools')tools()});
-async function status(){try{S=await api('/api/status');$('#dot').className='dot '+(S.running||S.current_task?'on':'');$('#state').textContent=S.current_task?'Task 실행 중':S.running?'실행 중':S.registered?'등록됨 · 중지':'등록 필요';$('#server').value=S.server_url||$('#server').value;let name=$('#name');if(!name.value)name.value=S.device_name||S.specs.hostname||'';$('#homeDeviceName').textContent=S.device_name||'-';if(document.activeElement!==$('#settingsName'))$('#settingsName').value=S.device_name||'';$('#homeTask').textContent=S.current_task?'#'+S.current_task.task_id+' '+S.current_task.agent_name:'대기 중';$('#homeTaskDetail').textContent=S.current_task?(S.current_task.label||'실행 #'+S.current_task.execution_id)+' · '+(S.current_task.model||'기본 모델'):S.running?'새 작업을 기다리고 있습니다.':'Worker가 중지되어 있습니다.';$('#specs').textContent=Object.entries(S.specs).map(x=>x.join(': ')).join(' · ');$('#cpu').textContent=S.stats.cpu_percent+'%';$('#ram').textContent=S.stats.ram_percent+'%';$('#gpu').textContent=S.stats.gpu_percent==null?'감지 안 됨':S.stats.gpu_percent+'%';$('#gpuName').textContent=(S.stats.gpu_devices||[]).map(g=>g.name).join(', ')||'장치 없음';$('#logs').textContent=S.logs.join('\n')||'로그가 없습니다.';$('#workerLogin').classList.toggle('shell-hidden',S.registered);document.body.style.overflow=S.registered?'':'hidden';folders()}catch(e){$('#state').textContent='API 오류'}}
-function folders(){$('#folders').innerHTML=(S.shared_folders||[]).map((x,i)=>`<div class="item"><span>${esc(x)}</span><button class="danger" onclick="removeFolder(${i})">삭제</button></div>`).join('')||'<p class="muted">등록된 디렉터리가 없습니다.</p>'}async function save(f){try{await api('/api/folders',{method:'POST',body:JSON.stringify({folders:f})});status()}catch(e){alert(e.message)}}window.removeFolder=i=>save(S.shared_folders.filter((_,n)=>n!==i));$('#add').onclick=()=>{let v=$('#folder').value.trim();if(v)save([...(S.shared_folders||[]),v]);$('#folder').value=''};
-$('#workerLoginForm').onsubmit=async e=>{e.preventDefault();{try{$('#setupMsg').textContent='등록 중…';await api('/api/register',{method:'POST',body:JSON.stringify({server_url:$('#server').value,username:$('#user').value,password:$('#pass').value,device_name:$('#name').value})});$('#pass').value='';$('#setupMsg').textContent='등록 완료';status()}catch(e){$('#setupMsg').textContent=e.message;$('#setupMsg').className='msg bad'}}};
-$('#rename').onclick=async()=>{try{let name=$('#settingsName').value.trim();if(!name)throw Error('기기 이름을 입력하세요.');await api('/api/settings/name',{method:'POST',body:JSON.stringify({name})});$('#settingsMsg').className='msg';$('#settingsMsg').textContent='이름을 변경했습니다.';status()}catch(e){$('#settingsMsg').className='msg bad';$('#settingsMsg').textContent=e.message}};
-$('#logout').onclick=async()=>{if(confirm('이 앱에서 로그아웃할까요? 서버의 기기 등록은 유지됩니다.')){await api('/api/logout',{method:'POST',body:'{}'});location.reload()}};
-$('#unregister').onclick=async()=>{if(confirm('워크스페이스에서 이 기기의 등록을 해제할까요? 이 작업은 되돌릴 수 없습니다.')){try{await api('/api/unregister',{method:'POST',body:'{}'});location.reload()}catch(e){$('#settingsMsg').className='msg bad';$('#settingsMsg').textContent=e.message}}};
-async function models(){try{let d=await api('/api/models');$('#modelMsg').textContent='Ollama 연결됨';$('#ollamaInstall').innerHTML='';$('#modelList').innerHTML=(d.models||[]).map(m=>`<div class="item"><b>${esc(m.name)}</b><button class="danger" onclick="delModel('${esc(m.name)}')">삭제</button></div>`).join('')||'<p class="muted">설치된 모델 없음</p>'}catch(e){let i=await api('/api/ollama/install');$('#modelMsg').textContent='Ollama가 실행 중이 아닙니다.';$('#modelMsg').className='msg bad';$('#ollamaInstall').innerHTML=`<p>${esc(i.instructions)}</p><p><a href="${i.download_url}" target="_blank"><button>Ollama 공식 다운로드</button></a></p>`}}window.delModel=async n=>{if(confirm(n+' 삭제?')){await api('/api/models/delete',{method:'POST',body:JSON.stringify({name:n})});models()}};window.pullModel=async n=>{await api('/api/models/pull',{method:'POST',body:JSON.stringify({name:n})});jobs()};$('#refresh').onclick=models;$('#search').onclick=async()=>{try{$('#modelMsg').textContent='공식 라이브러리 검색 중…';let d=await api('/api/models/search?q='+encodeURIComponent($('#model').value));$('#searchList').innerHTML=d.models.map(m=>`<div class="item"><span><b>${esc(m.name)}</b> <small class="muted">${esc(m.performance)} ${esc(m.tags.join(' · '))}</small><br>${esc(m.description)}<br><a href="${m.url}" target="_blank" class="muted">상세 정보</a></span><button onclick="pullModel('${esc(m.name)}')">다운로드</button></div>`).join('')||'<p class="muted">검색 결과가 없습니다.</p>';$('#modelMsg').textContent=d.models.length+'개 모델'}catch(e){$('#modelMsg').textContent=e.message}};
-async function jobs(){let d=await api('/api/jobs');$('#jobs').innerHTML=d.jobs.map(j=>`<div class="item"><span><b>${esc(j.label)}</b><br><small class="${j.status==='failed'?'bad':'muted'}">${esc(j.error||j.message)} · ${j.percent||0}%</small><br><progress max="100" value="${j.percent||0}" style="width:280px;max-width:100%"></progress></span><b>${esc(j.status)}</b></div>`).join('')||'<p class="muted">다운로드 내역이 없습니다.</p>'}
-async function toolJobs(){let d=await api('/api/jobs'),items=d.jobs.filter(j=>j.kind==='tool');$('#toolJobs').innerHTML=items.map(j=>`<div class="item"><span><b>${esc(j.label)}</b><br><small class="${j.status==='failed'?'bad':'muted'}">${esc(j.error||j.message)} · ${j.percent||0}%</small><br><progress max="100" value="${j.percent||0}" style="width:280px;max-width:100%"></progress></span><span><b>${esc(j.status)}</b>${j.status==='failed'&&j.tool_id?` <button onclick="installTool('${esc(j.tool_id)}',true)">pip 재설치</button>`:''}</span></div>`).join('')||'<p class="muted">Tool 설치 내역이 없습니다.</p>'}
-async function tools(){let d=await api('/api/tools');$('#toolList').innerHTML=d.tools.map(t=>`<div class="item"><span><b>${esc(t.name)}</b><br><small class="muted">${t.installed?'설치됨':'설치 필요'}</small></span><button onclick="installTool('${esc(t.id)}',${t.installed})">${t.installed?'재설치':'pip install'}</button></div>`).join('');toolJobs()}window.installTool=async(id,reinstall=false)=>{let action=reinstall?'재설치':'설치';if(confirm('승인된 패키지를 '+action+'할까요?')){try{await api('/api/tools/install',{method:'POST',body:JSON.stringify({id,reinstall})});toolJobs()}catch(e){alert(e.message);toolJobs()}}};$('#start').onclick=async()=>{await api('/api/worker/start',{method:'POST',body:'{}'});status()};$('#stop').onclick=async()=>{await api('/api/worker/stop',{method:'POST',body:'{}'});status()};status();setInterval(()=>{status();jobs();tools()},2000);
-</script></body></html>'''.replace('\n+','\n')
+# 로그인 화면에 한 번 보여줄 안내(등록이 해제됐을 때 등)
+NOTICE = ""
 
-SHELL_CSS = r'''
-#appShell{min-height:100vh;display:grid;grid-template-columns:224px minmax(0,1fr);grid-template-rows:auto 1fr;background:#f7f8fc}
-#appShell>header{grid-column:1;grid-row:1;width:auto;margin:0;padding:25px 24px 18px;border-right:1px solid #e7e9f2;background:#fff;align-items:flex-start;flex-direction:column;gap:18px}
-#appShell>header .brand{padding:0;color:#1e1b4b}
-#appShell>header .worker-state{padding:7px 10px;box-shadow:none;background:#fafbfe}
-#appShell>nav{grid-column:1;grid-row:2;width:auto;margin:0;padding:4px 14px 24px;border:0;border-right:1px solid #e7e9f2;border-radius:0;background:#fff;box-shadow:none;display:flex;flex-direction:column;justify-content:flex-start;gap:5px}
-#appShell>nav:before{padding:2px 11px 8px;color:#9aa3b5;font-size:10px;font-weight:800;letter-spacing:.1em;content:'WORKER CONSOLE'}
-#appShell>nav button{flex:0 0 auto;text-align:left;color:#667085;padding:10px 11px}
-#appShell>nav button:hover{color:#4f46e5;background:#f5f3ff}
-#appShell>nav button.active{color:#5b35ce;background:linear-gradient(100deg,#f0ebff,#edf3ff)}
-#appShell>main{grid-column:2;grid-row:1 / span 2;width:min(1180px,100%);margin:0 auto;padding:38px 46px 52px}
-#appShell .page:before{display:block;margin-bottom:6px;color:#8872ca;font-size:10px;font-weight:800;letter-spacing:.1em;content:'M.A.R.S / LOCAL WORKER'}
-#appShell .page>div:first-child h2{margin-top:0;color:#18213b;font-size:25px;letter-spacing:-.035em}
-#appShell .card{padding:22px;border-color:#e5e8f0;border-radius:15px;box-shadow:0 6px 22px rgba(25,33,61,.035)}
-#appShell .metric{color:#202944}
-.worker-auth{position:relative;z-index:1000;min-height:100vh;display:grid;grid-template-columns:minmax(0,1.08fr) minmax(430px,.92fr);padding:0;background:#f7f8fc;backdrop-filter:none}
-.worker-auth.shell-hidden{display:none}
-.worker-auth:not(.shell-hidden)+#appShell{display:none}
-.worker-auth-intro{display:block;min-height:100vh;padding:clamp(48px,9vw,128px) clamp(36px,10vw,150px)}
-.worker-auth-form{width:auto;display:grid;place-items:center;padding:36px}
-.worker-auth-card{width:min(100%,385px);padding:0;border:0;border-radius:0;background:transparent;box-shadow:none}
-.worker-auth-card:before{display:none}
-.worker-auth-card h2{font-size:25px}
-@media(max-width:760px){
-  .worker-auth{grid-template-columns:1fr}
-  .worker-auth-intro{min-height:auto;padding:36px 28px}
-  .worker-auth-form{padding:44px 25px}
-  #appShell{grid-template-columns:68px minmax(0,1fr)}
-  #appShell>header{padding:18px 14px;align-items:center}
-  #appShell>header .brand-copy,#appShell>header .worker-state{display:none}
-  #appShell>nav{padding:4px 8px 20px}
-  #appShell>nav:before{display:none}
-  #appShell>nav button{padding:10px 6px;text-align:center;font-size:10px}
-  #appShell>main{padding:25px 16px 40px}
-}
-'''
-HTML = HTML.replace("</style>", SHELL_CSS + "</style>")
+
+def web_devices_url(server_url: str) -> str:
+    """웹의 워커 설정 화면 주소. 배포 서버는 /api 앞이 웹이고, 로컬 개발은 Vite(5173)다."""
+    base = server_url.rstrip("/")
+    if base.endswith("/api"):
+        return base[:-4] + "/devices"
+    host = urlparse(base).hostname
+    return "http://localhost:5173/devices" if host in {"localhost", "127.0.0.1", "::1"} else ""
+
+
+def status_payload(c: dict) -> dict:
+    """화면이 2초마다 읽는 상태. 등록 해제를 감지하면 인증 정보를 지워 로그인 화면으로 돌린다."""
+    global NOTICE
+    state = runtime_state.read()
+    if state.get("status") == "unregistered" and c.get("api_key"):
+        c.update(device_id=None, device_name="", api_key="")
+        cfg.save(c)
+        runtime_state.clear()
+        state = {}
+        NOTICE = "서버에서 이 워커의 등록이 해제되었습니다. 다시 로그인하세요."
+        LOGS.append(NOTICE)
+    registered = bool(c.get("api_key"))
+    if registered:
+        NOTICE = ""
+    running = bool(PROCESS and PROCESS.poll() is None)
+    stats = collect_runtime_stats()
+    task = state.get("task") if state.get("status") == "running" else None
+    return {
+        "registered": registered,
+        "running": running,
+        "server_url": c["server_url"],
+        "web_url": web_devices_url(c["server_url"]),
+        "device_id": c.get("device_id"),
+        "device_name": c["device_name"],
+        "current_task": task,
+        "badge": worker_badge(running=running, state=state, stats=stats),
+        "account": state.get("account") if registered else None,
+        "limits": state.get("limits") or {},
+        "overload": state.get("overload") if task else None,
+        "notice": NOTICE,
+        "shared_folders": c.get("shared_folders", []),
+        "specs": collect_specs(),
+        "stats": stats,
+        "logs": list(LOGS),
+    }
+TOOLS = ({"id":"pdf-ocr","name":"PDF & OCR","packages":["pypdf","PyMuPDF","pytesseract","Pillow"],"modules":["pypdf","fitz","pytesseract","PIL"],"binary":"tesseract"},{"id":"office","name":"Office 문서","packages":["python-docx","openpyxl","python-pptx"],"modules":["docx","openpyxl","pptx"]})
 
 def tool_states():
     return [{**t,"installed":all(importlib.util.find_spec(m) for m in t["modules"]) and (not t.get("binary") or bool(shutil.which(t["binary"])))} for t in TOOLS]
@@ -119,7 +110,7 @@ class Handler(BaseHTTPRequestHandler):
                 b=HTML.encode();self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Content-Length",str(len(b)));self.send_header("Content-Security-Policy","default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'");self.end_headers();self.wfile.write(b);return
             c=cfg.load()
             if self.path=="/api/status":
-                worker_state=runtime_state.read();self.reply({"registered":bool(c.get("api_key")),"running":bool(PROCESS and PROCESS.poll() is None),"server_url":c["server_url"],"device_id":c.get("device_id"),"device_name":c["device_name"],"current_task":worker_state.get("task") if worker_state.get("status")=="running" else None,"shared_folders":c.get("shared_folders",[]),"specs":collect_specs(),"stats":collect_runtime_stats(),"logs":list(LOGS)});return
+                self.reply(status_payload(c));return
             if self.path=="/api/models": r=httpx.get(c["ollama_url"].rstrip('/')+'/api/tags',timeout=5);r.raise_for_status();self.reply(r.json());return
             if self.path=="/api/ollama/install": self.reply(ollama_install_info());return
             if self.path=="/api/jobs": self.reply({"jobs":get_jobs()});return
@@ -192,6 +183,17 @@ class Handler(BaseHTTPRequestHandler):
                     if not p.is_dir():raise ValueError('존재하지 않는 디렉터리: '+str(raw))
                     if str(p) not in folders:folders.append(str(p))
                 c["shared_folders"]=folders;cfg.save(c);self.reply({"folders":folders});return
+            if self.path=="/api/overload":
+                # 과부하 경고에 대한 선택을 Worker 프로세스가 읽어 가도록 남긴다
+                decision=d.get("decision")
+                if decision not in {"continue","release"}:raise ValueError("선택 값이 올바르지 않습니다.")
+                overload=runtime_state.read().get("overload")
+                if not isinstance(overload,dict):raise ValueError("진행 중인 과부하 경고가 없습니다.")
+                runtime_state.update(overload={**overload,"decision":decision})
+                LOGS.append("과부하 경고 선택: "+("다른 기기로 넘기기" if decision=="release" else "계속 실행"));self.reply({"ok":True});return
+            if self.path=="/api/resume":
+                r=httpx.post(c["server_url"].rstrip("/")+"/worker/resume",headers={"X-Device-Key":c["api_key"]},timeout=15)
+                r.raise_for_status();runtime_state.update(paused_until=None);LOGS.append("일시 중지 해제: 다시 작업을 받습니다");self.reply({"ok":True});return
             if self.path=="/api/worker/start":
                 if not c.get("api_key"):raise ValueError("먼저 Worker를 등록하세요.")
                 start_worker_process()
