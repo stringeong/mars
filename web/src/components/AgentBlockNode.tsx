@@ -19,6 +19,7 @@ export default function AgentBlockNode({ data, selected }: { data: any; selected
       <div className="agent-block-tags">
         <div className="agent-block-tag" style={{ background: category.color }}>{category.tag}</div>
         {data.final && <div className="agent-block-tag agent-final-tag">FINAL</div>}
+        {data.split && <div className="agent-block-tag agent-split-tag" title="실행할 때 파일을 나눠 여러 워커에서 동시에 실행합니다">{data.split.parts > 1 ? `나눠서 ×${data.split.parts}` : '나눠서 병렬'}</div>}
       </div>
       <div className="agent-block-name">{data.label}</div>
       <div className="agent-block-model">{data.model || '기본 모델'}</div>

@@ -10,8 +10,8 @@ import ShareDialog from '../components/ShareDialog'
 import ValidationPanel from '../components/ValidationPanel'
 import { stagePositions } from '../flowLayout'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
-import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { announceServiceRenamed, applyAutoFlags, blockingErrors, FlagExplanation, generationLabel, issuesByNode, onServiceRenamed, shortDate, shortDateTime } from '../workflow'
+import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, SplitSettings, UploadedFile, ValidationResult, WorkflowNode } from '../types'
+import { announceServiceRenamed, applyAutoFlags, blockingErrors, DEFAULT_SPLIT, FlagExplanation, generationLabel, issuesByNode, onServiceRenamed, shortDate, shortDateTime, splitPreviewText } from '../workflow'
 
 const nodeTypes = { agent: AgentBlockNode }
 const edgeTypes = { deletable: DeletableEdge }
@@ -139,6 +139,10 @@ export default function ServiceDetailPage() {
   const selectedAgent = selected ? agents[selected] : null
   const issueMap = useMemo(() => issuesByNode(validation), [validation])
   const selectedIssues = selected ? issueMap.get(selected) ?? [] : []
+  // 파일 나눠서 병렬 실행: 지금 실행하면 몇 조각이 되는지 서버 검사 결과에서 가져온다
+  const splitPreviews = useMemo(() => new Map((validation?.splits ?? []).map((preview) => [preview.node_id, preview])), [validation])
+  const split: SplitSettings = { ...DEFAULT_SPLIT, ...(selectedAgent?.split ?? {}) }
+  const splitPreview = selected ? splitPreviews.get(selected) : undefined
   const nodeNames = useMemo(() => Object.fromEntries(Object.values(agents).map((agent) => [agent.id, agent.name])), [agents])
   const directoryById = useMemo(() => new Map(directories.map((directory) => [directory.id, directory])), [directories])
   const deviceById = useMemo(() => new Map(devices.map((device) => [device.id, device])), [devices])
@@ -162,6 +166,7 @@ export default function ServiceDetailPage() {
     label: agent.name,
     model: agent.model,
     final: agent.final,
+    split: agent.split?.enabled ? { parts: splitPreviews.get(agent.id)?.parts } : undefined,
     issueLevel: issues.some((issue) => issue.severity === 'error') ? 'error' : issues.length ? 'warning' : undefined,
     issueCount: issues.length,
     issueMessages: issues.map((issue) => issue.message).join('\n'),
@@ -172,7 +177,7 @@ export default function ServiceDetailPage() {
       ...inputSlots.filter((slot) => (agent.input_slot_ids ?? []).includes(slot.id)).flatMap((slot) => slot.file_ids),
     ].map((fileId) => uploadedFileById.get(fileId)?.original_name ?? `#${fileId}`),
     }
-  }, [deviceById, directoryById, inputSlots, issueMap, uploadedFileById])
+  }, [deviceById, directoryById, inputSlots, issueMap, splitPreviews, uploadedFileById])
 
   const applyAgents = useCallback((nextAgents: AgentNode[], graphEdges: Graph['edges'] = []) => {
     const positions = layout(nextAgents, graphEdges.filter((edge) => !edge.relation || edge.relation === 'workflow'))
@@ -370,6 +375,10 @@ export default function ServiceDetailPage() {
   function changeFlags(patch: Partial<AgentNode>) {
     pushHistory()
     updateAgent(patch)
+  }
+
+  function updateSplit(patch: Partial<SplitSettings>) {
+    updateAgent({ split: { ...split, ...patch } })
   }
 
   function setNeedsFile(checked: boolean) {
@@ -665,12 +674,37 @@ export default function ServiceDetailPage() {
             {directories.length ? directories.map((directory) => <label key={directory.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.directory_ids ?? []).includes(directory.id)} onChange={(event) => updateAgent({ directory_ids: event.target.checked ? [...(selectedAgent.directory_ids ?? []), directory.id] : (selectedAgent.directory_ids ?? []).filter((directoryId) => directoryId !== directory.id) })} /><span><strong>{directory.alias}</strong><small>{directory.local_path}</small></span></label>) : <span className="muted">등록한 폴더가 없어요.</span>}
           </div>
           <div className="uploaded-file-picker">
-            <div className="uploaded-file-heading"><strong>첨부 파일</strong><div className="file-picker-actions"><button type="button" className="btn sm ghost" disabled={fileUploading} onClick={() => uploadInputRef.current?.click()}>{fileUploading ? '업로드 중…' : '새 파일 업로드'}</button><button type="button" className="btn sm ghost" onClick={openFileLibrary}>기존 파일 선택</button></div><input ref={uploadInputRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx" onChange={(event) => uploadForSelectedAgent(event.target.files)} /></div>
+            <div className="uploaded-file-heading"><strong>첨부 파일</strong><div className="file-picker-actions"><button type="button" className="btn sm ghost" disabled={fileUploading} onClick={() => uploadInputRef.current?.click()}>{fileUploading ? '업로드 중…' : '새 파일 업로드'}</button><button type="button" className="btn sm ghost" onClick={openFileLibrary}>기존 파일 선택</button></div><input ref={uploadInputRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.log,.jsonl,.xlsx,.pptx" onChange={(event) => uploadForSelectedAgent(event.target.files)} /></div>
             <small className="file-picker-help">현재 에이전트가 실행할 때 우선 읽는 파일입니다.</small>
             <div className="selected-file-list">
               {(selectedAgent.uploaded_file_ids ?? []).map((fileId) => { const file = uploadedFileById.get(fileId); return <div className="selected-file-chip" key={fileId}><span><strong>{file?.original_name ?? '삭제된 파일'}</strong><small>{file ? file.size_bytes.toLocaleString() + ' bytes' : '#' + fileId}</small></span><button type="button" aria-label="첨부 해제" onClick={() => updateAgent({ uploaded_file_ids: (selectedAgent.uploaded_file_ids ?? []).filter((id) => id !== fileId) })}>×</button></div> })}
               {!(selectedAgent.uploaded_file_ids ?? []).length && <span className="muted">선택된 파일이 없습니다.</span>}
             </div>
+          </div>
+          <div className="split-setting">
+            <label className="toggle-row"><input type="checkbox" checked={split.enabled} onChange={(event) => changeFlags({ split: { ...split, enabled: event.target.checked } })} />파일 나눠서 병렬 실행</label>
+            <small className="flag-reason">큰 파일을 실행할 때 워커 수에 맞춰 나누고, 이 블록을 조각 수만큼 펼쳐 여러 워커에서 동시에 실행합니다. 다음 블록은 조각 결과를 원본 순서대로 받습니다.</small>
+            {split.enabled && <>
+              <div className="split-grid">
+                <div><label htmlFor="split-unit">나누는 단위</label><select id="split-unit" value={split.unit} onChange={(event) => updateSplit({ unit: event.target.value as SplitSettings['unit'] })}>
+                  <option value="auto">자동 (파일 형식에 맞춤)</option>
+                  <option value="line">줄 (.txt .log .md .jsonl)</option>
+                  <option value="csv">CSV 행 (헤더는 조각마다 유지)</option>
+                  <option value="file">파일 (여러 파일을 나눠 맡김)</option>
+                </select></div>
+                <div><label htmlFor="split-parts">조각 수</label><div className="split-parts"><select id="split-parts" value={split.parts === 'auto' ? 'auto' : 'manual'} onChange={(event) => updateSplit({ parts: event.target.value === 'auto' ? 'auto' : Math.max(2, splitPreview?.parts ?? 2) })}>
+                  <option value="auto">자동</option>
+                  <option value="manual">직접</option>
+                </select>{split.parts !== 'auto' && <input type="number" aria-label="조각 수 직접 입력" min={2} max={50} value={split.parts} onChange={(event) => updateSplit({ parts: Math.min(50, Math.round(Number(event.target.value)) || 2) })} onBlur={() => updateSplit({ parts: Math.max(2, Number(split.parts) || 2) })} />}</div></div>
+                <div><label htmlFor="split-overlap">앞 문맥 겹침</label><select id="split-overlap" disabled={split.unit === 'csv' || split.unit === 'file'} value={split.overlap_lines} onChange={(event) => updateSplit({ overlap_lines: Number(event.target.value) })}>
+                  <option value={0}>끄기 (서로 독립된 자료)</option>
+                  {[...new Set([10, 20, 50, split.overlap_lines])].filter(Boolean).sort((a, b) => a - b).map((lines) => <option key={lines} value={lines}>{lines}줄{lines === 20 ? ' (로그·대화 추천)' : ''}</option>)}
+                </select></div>
+                {split.parts === 'auto' && <div><label htmlFor="split-max">조각 최대 글자 수</label><input id="split-max" type="number" min={1000} max={30000} step={1000} value={split.max_chars} onChange={(event) => updateSplit({ max_chars: Math.min(30000, Math.round(Number(event.target.value)) || 0) })} onBlur={() => updateSplit({ max_chars: Math.min(30000, Math.max(1000, split.max_chars || 12000)) })} /></div>}
+              </div>
+              <small className="flag-reason">{split.parts === 'auto' ? '자동: 사용 가능한 워커 수와, 조각이 최대 글자 수를 넘지 않는 데 필요한 수 중 큰 쪽으로 나눕니다.' : '조각 수가 줄 수보다 많으면 줄 수만큼만 만듭니다.'}{split.overlap_lines > 0 && ' 겹친 줄은 참고용이라 두 번 처리되지 않습니다.'}</small>
+              <p className={`split-preview${splitPreview ? '' : ' empty'}`} aria-live="polite">{splitPreview ? splitPreviewText(splitPreview) : selectedIssues.some((issue) => issue.code.startsWith('split_') || issue.code === 'missing_file') ? '위 문제를 해결하면 예상 조각 수를 보여줍니다.' : '예상 조각 수를 계산하는 중…'}</p>
+            </>}
           </div>
         </> : <>
           <h2>서비스 정보</h2><label>이름</label><input value={svcName} onChange={(event) => setSvcName(event.target.value)} /><label>설명</label><textarea rows={3} value={svcDesc} onChange={(event) => setSvcDesc(event.target.value)} />

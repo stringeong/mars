@@ -1,5 +1,5 @@
 import { api, ApiError } from './api'
-import { AgentNode, Device, GenerationInfo, RunInputRecord, Task, ValidationIssue, ValidationResult } from './types'
+import { AgentNode, Device, GenerationInfo, RunInputRecord, SplitPreview, SplitSettings, Task, ValidationIssue, ValidationResult } from './types'
 
 export type FlagExplanation = { manual: boolean; reason: string }
 export type AutoFlagReasons = { needsFile: FlagExplanation; final: FlagExplanation }
@@ -262,4 +262,21 @@ export function shortDate(value: string) {
 export function shortDateTime(value: string) {
   const date = new Date(value)
   return `${shortDate(value)} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+export const DEFAULT_SPLIT: SplitSettings = { enabled: false, unit: 'auto', parts: 'auto', overlap_lines: 0, max_chars: 12000 }
+
+/** "667 / 667 / 666줄"처럼 조각별 크기를 보여준다. 조각이 많으면 범위로 줄인다 */
+export function splitSizes(preview: SplitPreview) {
+  const { sizes, unit_label: unit } = preview
+  if (preview.unit === 'file') return `파일 ${sizes.join(' / ')}개씩`
+  if (sizes.length <= 6) return `${sizes.join(' / ')}${unit}`
+  const [min, max] = [Math.min(...sizes), Math.max(...sizes)]
+  return min === max ? `조각마다 ${max}${unit}` : `조각마다 ${min}~${max}${unit}`
+}
+
+/** "현재 사용 가능한 워커 2대 → 3조각 예상 (667 / 667 / 666줄)" */
+export function splitPreviewText(preview: SplitPreview) {
+  if (preview.parts <= 1) return `현재 사용 가능한 워커 ${preview.workers}대 → 나누지 않고 한 번에 실행해요 (파일이 작아요)`
+  return `현재 사용 가능한 워커 ${preview.workers}대 → ${preview.parts}조각 예상 (${splitSizes(preview)})`
 }

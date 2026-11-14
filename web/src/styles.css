@@ -540,6 +540,20 @@ tr.clickable:hover { background: #f8fafc; }
 .setup-block-cell .flag-reason { padding-left: 0; margin-top: 2px; }
 .flag-reset { justify-self: start; margin-left: 18px; font-size: 12px; }
 
+/* 파일 나눠서 병렬 실행 */
+.split-setting { display: grid; gap: 4px; margin-top: 12px; padding-top: 10px; border-top: 1px dashed #d9d7e6; }
+.split-setting .toggle-row { margin-top: 2px; }
+.split-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 8px; margin-top: 4px; }
+.split-grid label { margin-top: 0; }
+.split-grid select, .split-grid input { width: 100%; min-width: 0; }
+.split-parts { display: grid; grid-template-columns: minmax(0, 1fr) 58px; gap: 4px; }
+.split-parts select:only-child { grid-column: 1 / -1; }
+.split-preview { margin: 6px 0 0; padding: 8px 10px; border-radius: 8px; background: #ecfdf5; color: #065f46; font-size: 12px; font-weight: 600; line-height: 1.5; }
+.split-preview.empty { background: #f4f5f9; color: var(--muted); font-weight: 500; }
+.agent-split-tag { background: #047857; }
+.run-entry-split { color: #047857 !important; font-weight: 600; }
+.run-input-pieces { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+
 /* 편집기 연결 목록 */
 .connection-list { display: grid; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; }
 .connection-group { display: grid; gap: 4px; }

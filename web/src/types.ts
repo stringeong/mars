@@ -1,3 +1,26 @@
+/** 파일 나눠서 병렬 실행. 실행할 때 연결된 파일을 나누고 블록을 조각 수만큼 펼친다 */
+export interface SplitSettings {
+  enabled: boolean
+  // auto: 파일 하나면 형식에 따라 줄·행, 여러 개면 파일 단위
+  unit: 'auto' | 'line' | 'csv' | 'file'
+  parts: 'auto' | number
+  overlap_lines: number
+  max_chars: number
+}
+
+/** 지금 실행하면 어떻게 나뉘는지 (서버 구성 검사가 함께 돌려준다) */
+export interface SplitPreview {
+  node_id: string
+  unit: 'line' | 'csv' | 'file'
+  unit_label: string
+  workers: number
+  parts: number
+  auto: boolean
+  sizes: number[]
+  overlap_lines: number
+  source_name: string | null
+}
+
 export interface AgentNode {
   id: string
   type: 'agent'
@@ -19,6 +42,7 @@ export interface AgentNode {
   needs_file_hint?: boolean
   final_manual?: boolean
   needs_file_manual?: boolean
+  split?: SplitSettings | null
   position?: { x: number; y: number } | null
 }
 
@@ -124,6 +148,7 @@ export interface ValidationResult {
   warnings: ValidationIssue[]
   stages: string[][]
   final_node_ids: string[]
+  splits?: SplitPreview[]
   reason?: string | null
 }
 
@@ -214,12 +239,14 @@ export interface UploadedFile {
 }
 
 export interface RunInputRecord {
-  kind: 'slot' | 'node'
+  // split: 파일을 나눠 실행한 블록의 원본 파일과 조각
+  kind: 'slot' | 'node' | 'split'
   id: string
   label: string
   node_ids: string[]
   files: { id: number; name: string }[]
   directories: { id: number; alias: string }[]
+  pieces?: { index: number; file_ids: number[]; label: string; name?: string }[]
 }
 
 export interface Task {
