@@ -24,6 +24,8 @@ import psutil
 
 from . import config as cfg
 from . import executor
+from . import idle
+from .overload import OverloadWatch
 from . import runtime_state
 from . import sandbox
 
@@ -31,6 +33,13 @@ _MODEL_CACHE: tuple[float, list[str]] = (0.0, [])
 _MODEL_CACHE_SECONDS = 30
 # 서버 MARS_HEARTBEAT_TIMEOUT(기본 30초)보다 충분히 짧아야 한다.
 _TASK_HEARTBEAT_SECONDS = 10
+# M.A.R.S.가 쓰는 CPU로 셀 프로세스: 이 Worker와 Ollama(ollama, ollama_llama_server, ollama runner 등)
+_MARS_PROCESS_PREFIX = "ollama"
+_PROCESSES: dict[int, psutil.Process] = {}
+
+
+class Unregistered(Exception):
+    """서버가 이 기기 키를 더는 받지 않는다(웹에서 기기를 삭제한 경우 등)."""
 
 
 
@@ -85,11 +94,48 @@ def collect_gpu_devices() -> list[dict]:
     return devices
 
 
+def mars_cpu_percent() -> float:
+    """이 Worker와 Ollama 프로세스가 쓰는 CPU(기기 전체 대비 %).
+
+    psutil의 프로세스별 값은 직전 호출 이후의 평균이고 코어 하나가 100%라서, 프로세스 객체를
+    기억해 두고 코어 수로 나눈다. 처음 본 프로세스는 이번 측정에서 0으로 나온다.
+    """
+    current: dict[int, psutil.Process] = {}
+    total = 0.0
+    own_pid = os.getpid()
+    for process in psutil.process_iter(["pid", "name"]):
+        try:
+            name = (process.info.get("name") or "").lower()
+            pid = process.info["pid"]
+            if pid != own_pid and not name.startswith(_MARS_PROCESS_PREFIX):
+                continue
+            tracked = _PROCESSES.get(pid) or process
+            total += tracked.cpu_percent(None)
+            current[pid] = tracked
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            continue
+    _PROCESSES.clear()
+    _PROCESSES.update(current)
+    return total / (psutil.cpu_count(logical=True) or 1)
+
+
+def split_cpu(total_percent: float, mars_percent: float) -> dict:
+    """전체 CPU를 M.A.R.S. 사용분과 다른 프로그램 사용분으로 나눈다."""
+    mars = round(min(max(mars_percent, 0.0), max(total_percent, 0.0)), 1)
+    return {
+        "cpu_percent": total_percent,
+        "mars_cpu_percent": mars,
+        "other_cpu_percent": round(max(0.0, total_percent - mars), 1),
+    }
+
+
 def collect_runtime_stats() -> dict:
-    """Report CPU and, when NVIDIA tools are available, GPU utilization."""
+    """Report CPU (split into M.A.R.S. and other programs), user idle time and GPU utilization."""
     stats = {
-        "cpu_percent": psutil.cpu_percent(),
+        **split_cpu(psutil.cpu_percent(), mars_cpu_percent()),
         "ram_percent": psutil.virtual_memory().percent,
+        # 측정할 수 없으면 None을 보내 서버에 남은 예전 값을 지운다
+        "user_idle_sec": idle.user_idle_seconds(),
     }
     try:
         result = subprocess.run(
@@ -173,30 +219,61 @@ def cmd_register(args: argparse.Namespace) -> None:
     print("이제 `python -m agent run` 으로 에이전트를 실행하세요.")
 
 
-def send_heartbeat(server: str, headers: dict) -> None:
-    httpx.post(
+def send_heartbeat(server: str, headers: dict) -> dict:
+    """사용률을 보고하고, 응답으로 받은 계정·상한 설정을 Worker 화면이 볼 수 있게 남긴다."""
+    stats = collect_runtime_stats()
+    response = httpx.post(
         f"{server}/worker/heartbeat",
         headers=headers,
-        json={"specs": collect_runtime_stats()},
+        json={"specs": stats},
         timeout=15,
     )
+    if response.status_code == 401:
+        raise Unregistered()
+    try:
+        data = response.json()
+    except ValueError:
+        data = None
+    if isinstance(data, dict) and data.get("ok"):
+        runtime_state.update(
+            account=data.get("account"),
+            limits=data.get("resource_limits") or {},
+            paused_until=data.get("paused_until"),
+        )
+    return stats
+
+
+def release_task(server: str, headers: dict, task_id) -> str | None:
+    """실행 중인 작업을 내려놓아 다른 기기가 이어받게 한다. 이 기기가 쉬는 시각을 돌려준다."""
+    response = httpx.post(f"{server}/worker/tasks/{task_id}/release", headers=headers, timeout=15)
+    response.raise_for_status()
+    return response.json().get("paused_until")
 
 
 @contextmanager
-def heartbeat_while_running(server: str, headers: dict, interval: float = _TASK_HEARTBEAT_SECONDS):
+def heartbeat_while_running(server: str, headers: dict, interval: float = _TASK_HEARTBEAT_SECONDS, watch: OverloadWatch | None = None):
     """작업 실행 중에도 하트비트를 보낸다.
 
     실행이 하트비트 타임아웃보다 오래 걸리면 서버가 기기를 offline으로 보고
     작업을 회수하므로(UC-204 e203), 결과 제출이 거부되고 같은 작업을 반복하게 된다.
+    watch가 있으면 하트비트 때 잰 사용률로 과부하를 판정하고, 사용자의 선택을 1초마다 확인한다.
     """
     stop = threading.Event()
 
     def beat() -> None:
-        while not stop.wait(interval):
-            try:
-                send_heartbeat(server, headers)
-            except Exception as e:
-                print(f"하트비트 전송 실패(재시도 예정): {e}")
+        tick = min(interval, 1.0) if watch else interval
+        next_beat = time.monotonic() + interval
+        while not stop.wait(tick):
+            if time.monotonic() >= next_beat:
+                next_beat = time.monotonic() + interval
+                try:
+                    stats = send_heartbeat(server, headers)
+                    if watch:
+                        watch.observe(stats)
+                except Exception as e:
+                    print(f"하트비트 전송 실패(재시도 예정): {e}")
+            if watch:
+                watch.poll()
 
     thread = threading.Thread(target=beat, name="task-heartbeat", daemon=True)
     thread.start()
@@ -285,18 +362,31 @@ def process_execution_task(server: str, headers: dict, config: dict, task: dict)
     )
     print(f"[RECEIVED] 작업 수신: #{task['task_id']} {task['agent_name']}")
     staging_dir = None
+    watch = OverloadWatch(
+        task["task_id"],
+        read_state=runtime_state.read,
+        update_state=runtime_state.update,
+        release=lambda task_id: release_task(server, headers, task_id),
+    )
     try:
-        with heartbeat_while_running(server, headers):
+        with heartbeat_while_running(server, headers, watch=watch):
             staging_dir = stage_uploaded_files(server, headers, task)
             output = executor.run_task(task, config)
         result = {"status": "done", "output": output, "error": ""}
-        print(f"[DONE] 작업 완료: #{task['task_id']} ({len(output)}자)")
+        if not watch.released:
+            print(f"[DONE] 작업 완료: #{task['task_id']} ({len(output)}자)")
     except Exception as exc:  # LLM 실패 등 -> 서버에 실패 보고
         result = {"status": "failed", "output": "", "error": str(exc)}
         print(f"[ERROR] 작업 실패: #{task['task_id']} - {exc}")
     finally:
         if staging_dir:
             shutil.rmtree(staging_dir, ignore_errors=True)
+        runtime_state.update(overload=None)
+    if watch.released:
+        # 다른 기기로 넘긴 작업이다. 모델 호출은 바로 멈추지 못하므로 결과만 버린다
+        print(f"[RELEASED] 넘긴 작업 #{task['task_id']}의 결과는 제출하지 않습니다.")
+        runtime_state.write(status="idle")
+        return
     httpx.post(
         f"{server}/worker/tasks/{task['task_id']}/result",
         headers=headers,
@@ -366,6 +456,7 @@ def cmd_run(_args: argparse.Namespace) -> None:
     interval = config.get("poll_interval_sec", 3)
     print(f"[M.A.R.S Worker] {config['device_name']} - {server} 폴링 시작 (Ctrl+C로 종료)")
     runtime_state.write(status="idle")
+    runtime_state.update(overload=None)
 
     while True:
         try:
@@ -387,6 +478,11 @@ def cmd_run(_args: argparse.Namespace) -> None:
                     continue
             # 대기 중에도 주기적으로 상태(사양) 보고
             send_heartbeat(server, headers)
+        except Unregistered:
+            # 통신 오류처럼 계속 재시도하지 않고, Worker 화면이 다시 로그인하게 안내하도록 알린다
+            runtime_state.write(status="unregistered")
+            print("[ERROR] 서버에서 이 기기의 등록이 해제되었습니다. 다시 로그인하세요.")
+            return
         except KeyboardInterrupt:
             runtime_state.clear()
             print("\n종료합니다.")

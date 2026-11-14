@@ -1248,3 +1248,92 @@ class TestFileSplit:
         graph = editable_graph(service)
         graph["nodes"][0]["split"] = {"enabled": True, "parts": 500}
         assert client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth).status_code == 422
+
+
+class TestWorkerLoadAndAccount:
+    """Worker 사용률 경고·유휴 판단: 넘김, 일시 중지, 자리 비움, 계정 표시."""
+
+    def _two_workers(self, client):
+        auth = signup_and_login(client)
+        first = register_device(client, auth, name="A")
+        second = register_device(client, auth, name="B")
+        for key in (first, second):
+            client.post("/worker/heartbeat", headers=key)
+        return auth, first, second
+
+    def _device(self, client, auth, name):
+        return next(d for d in client.get("/devices", headers=auth).json() if d["name"] == name)
+
+    def test_released_task_is_finished_by_another_worker(self, client):
+        auth, first, second = self._two_workers(client)
+        service = create_service(client, auth)
+        execution = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "실행"}, headers=auth).json()
+        task = client.post("/worker/tasks/next", headers=first).json()
+
+        released = client.post(f"/worker/tasks/{task['task_id']}/release", headers=first)
+        assert released.status_code == 200 and released.json()["paused_until"]
+        # 넘긴 A는 5분 동안 새 작업을 받지 않고, 그 이유가 기기 목록에 보인다
+        assert client.post("/worker/tasks/next", headers=first).status_code == 204
+        device = self._device(client, auth, "A")
+        assert device["state"] == "paused" and "5분" in device["state_reason"]
+
+        # B가 같은 작업을 이어받아 끝낸다
+        again = client.post("/worker/tasks/next", headers=second).json()
+        assert again["task_id"] == task["task_id"]
+        assert self._device(client, auth, "B")["state"] == "running"
+        # A가 늦게 보낸 결과는 거부된다
+        late = client.post(f"/worker/tasks/{task['task_id']}/result", json={"status": "done", "output": "늦은 결과"}, headers=first)
+        assert late.status_code == 404
+        done = client.post(f"/worker/tasks/{task['task_id']}/result", json={"status": "done", "output": "B 결과"}, headers=second)
+        assert done.status_code == 200
+        body = client.get(f"/executions/{execution['id']}", headers=auth).json()
+        assert [(t["status"], t["assigned_device_name"]) for t in body["tasks"]][0] == ("done", "B")
+
+        # 다른 기기의 작업은 넘길 수 없고, 끝난 작업도 넘길 수 없다
+        assert client.post(f"/worker/tasks/{task['task_id']}/release", headers=first).status_code == 404
+        assert client.post(f"/worker/tasks/{task['task_id']}/release", headers=second).status_code == 409
+
+        # Worker 화면에서 일시 중지를 풀면 다시 받는다. Worker가 보낸 값으로 일시 중지를 덮어쓸 수는 없다
+        client.post("/worker/heartbeat", json={"specs": {"paused_until": None, "resource_limits": {}}}, headers=first)
+        assert self._device(client, auth, "A")["state"] == "paused"
+        assert client.post("/worker/resume", headers=first).status_code == 200
+        assert self._device(client, auth, "A")["state"] == "available"
+
+    def test_idle_threshold_and_overload_settings(self, client):
+        auth, first, _ = self._two_workers(client)
+        device = self._device(client, auth, "A")
+        r = client.patch(
+            f"/devices/{device['id']}",
+            json={"resource_limits": {"max_cpu_percent": 70, "min_user_idle_min": 5, "on_overload": "release"}},
+            headers=auth,
+        )
+        assert r.status_code == 200
+        assert r.json()["resource_limits"] == {
+            "max_cpu_percent": 70, "max_gpu_percent": None, "min_user_idle_min": 5, "on_overload": "release",
+        }
+        bad = client.patch(f"/devices/{device['id']}", json={"resource_limits": {"on_overload": "explode"}}, headers=auth)
+        assert bad.status_code == 422
+
+        service = create_service(client, auth)
+        client.post(f"/services/{service['id']}/executions", json={"run_prompt": "실행"}, headers=auth)
+        # 사용자가 1분 전에 입력했으면 안 받고, 기준(5분)을 넘기면 받는다
+        client.post("/worker/heartbeat", json={"specs": {"user_idle_sec": 60, "other_cpu_percent": 5}}, headers=first)
+        assert client.post("/worker/tasks/next", headers=first).status_code == 204
+        assert self._device(client, auth, "A")["state"] == "user_active"
+        client.post("/worker/heartbeat", json={"specs": {"user_idle_sec": 400, "other_cpu_percent": 5}}, headers=first)
+        assert client.post("/worker/tasks/next", headers=first).status_code == 200
+
+    def test_heartbeat_tells_the_worker_its_account_and_limits(self, client):
+        auth = signup_and_login(client, username="hyunjeong", email="hyunjeong@example.com")
+        key = register_device(client, auth, name="연구실 PC")
+        device = self._device(client, auth, "연구실 PC")
+        client.patch(f"/devices/{device['id']}", json={"resource_limits": {"max_cpu_percent": 70}}, headers=auth)
+
+        body = client.post("/worker/heartbeat", headers=key).json()
+        assert body["ok"] is True and body["device_id"] == device["id"] and body["device_name"] == "연구실 PC"
+        assert body["account"] == {"username": "hyunjeong", "email": "h***@example.com"}
+        assert body["resource_limits"] == {"max_cpu_percent": 70} and body["paused_until"] is None
+
+        # 웹에서 기기를 지우면 하트비트가 401로 실패해 Worker가 다시 로그인하게 된다
+        assert client.delete(f"/devices/{device['id']}", headers=auth).status_code == 204
+        assert client.post("/worker/heartbeat", headers=key).status_code == 401
