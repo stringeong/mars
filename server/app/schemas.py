@@ -42,6 +42,10 @@ class ResourceLimits(BaseModel):
 
     max_cpu_percent: int | None = Field(default=None, ge=1, le=100)
     max_gpu_percent: int | None = Field(default=None, ge=1, le=100)
+    # 자리 비움 기준(분). 값이 있으면 마지막 키보드·마우스 입력 뒤 이만큼 지나야 새 작업을 준다
+    min_user_idle_min: int | None = Field(default=None, ge=1, le=240)
+    # 실행 중 다른 프로그램 사용률이 상한을 넘었을 때: 물어보기 / 계속 실행 / 바로 다른 기기로 넘기기
+    on_overload: Literal["ask", "continue", "release"] | None = None
 
 
 class DeviceRegister(BaseModel):
@@ -58,6 +62,9 @@ class DeviceOut(BaseModel):
     resource_limits: ResourceLimits = Field(default_factory=ResourceLimits)
     last_heartbeat: UTCDateTime | None
     online: bool = False
+    # offline | running | paused | user_active | busy | available 와 그 이유
+    state: str = "offline"
+    state_reason: str = ""
 
     model_config = {"from_attributes": True}
 

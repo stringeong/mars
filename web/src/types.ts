@@ -199,11 +199,20 @@ export interface Device {
   resource_limits: ResourceLimits
   last_heartbeat: string | null
   online: boolean
+  // 지금 작업을 받을 수 있는지와 그 이유 (서버가 작업 배정과 같은 기준으로 판단)
+  state?: DeviceState
+  state_reason?: string
 }
 
+export type DeviceState = 'offline' | 'running' | 'paused' | 'user_active' | 'busy' | 'available'
+
 export interface ResourceLimits {
-  max_cpu_percent?: number
-  max_gpu_percent?: number
+  max_cpu_percent?: number | null
+  max_gpu_percent?: number | null
+  // 자리 비움 기준(분): 마지막 키보드·마우스 입력 뒤 이만큼 지나야 새 작업을 받는다
+  min_user_idle_min?: number | null
+  // 실행 중 다른 프로그램 사용률이 상한을 넘었을 때
+  on_overload?: 'ask' | 'continue' | 'release' | null
 }
 
 

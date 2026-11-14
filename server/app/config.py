@@ -56,6 +56,9 @@ MAX_OUTPUT_TOKENS = _positive_int_env("MARS_MAX_OUTPUT_TOKENS", 16384)
 # 해당 기기에 할당된 실행 중 작업을 다른 기기로 재할당한다.
 HEARTBEAT_TIMEOUT_SEC = int(os.environ.get("MARS_HEARTBEAT_TIMEOUT", "30"))
 
+# 과부하로 작업을 다른 기기에 넘긴 Worker에게 이 시간(초) 동안 새 작업을 주지 않는다.
+RELEASE_PAUSE_SEC = int(os.environ.get("MARS_RELEASE_PAUSE", "300"))
+
 
 def _parse_origins(raw: str) -> list[str]:
     origins = [value.strip().rstrip("/") for value in raw.split(",") if value.strip()]

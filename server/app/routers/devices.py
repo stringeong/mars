@@ -12,13 +12,16 @@ from .. import models, schemas
 from ..database import get_db
 from ..security import get_current_user, hash_device_key
 from ..services import directory_access
+from ..services import orchestrator, worker_queue
 from ..services.orchestrator import device_is_online
 
 router = APIRouter(prefix="/devices", tags=["devices"])
 
 
-def _to_out(device: models.Device, api_key: str | None = None) -> dict:
+def _to_out(device: models.Device, api_key: str | None = None, db: Session | None = None) -> dict:
     specs = device.specs or {}
+    running = worker_queue.has_running_work(db, device) if db is not None else False
+    state, reason = orchestrator.device_state(device, running)
     data = {
         "id": device.id,
         "name": device.name,
@@ -26,6 +29,8 @@ def _to_out(device: models.Device, api_key: str | None = None) -> dict:
         "resource_limits": specs.get("resource_limits") or {},
         "last_heartbeat": device.last_heartbeat,
         "online": device_is_online(device),
+        "state": state,
+        "state_reason": reason,
     }
     if api_key is not None:
         data["api_key"] = api_key
@@ -89,7 +94,7 @@ def list_devices(
     user: models.User = Depends(get_current_user), db: Session = Depends(get_db)
 ):
     devices = db.query(models.Device).filter(models.Device.user_id == user.id).all()
-    return [_to_out(d) for d in devices]
+    return [_to_out(d, db=db) for d in devices]
 
 
 @router.get("/{device_id}/models", response_model=schemas.DeviceModelsOut)
@@ -147,7 +152,7 @@ def update_device(
         }
     db.commit()
     db.refresh(device)
-    return _to_out(device)
+    return _to_out(device, db=db)
 
 
 @router.delete("/{device_id}", status_code=204)
