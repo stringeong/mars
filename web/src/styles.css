@@ -1369,12 +1369,20 @@ body.canvas-fullscreen { overflow: hidden; }
 .validation-list .validation-group-nodes button { width: auto; padding: 2px 8px; border: 1px solid rgba(0, 0, 0, .08); border-radius: 6px; background: rgba(255, 255, 255, .7); font-size: 12px; }
 /* 탭을 바꿔도 칸 너비가 그대로 (오프라인 탭 기준 비율) */
 .device-table { width: 100%; table-layout: fixed; }
-.device-table col.c-name { width: 39%; }
-.device-table col.c-os { width: 16%; }
-.device-table col.c-cpu { width: 11%; }
-.device-table col.c-ram { width: 11%; }
+.device-table col.c-name { width: 27%; }
+.device-table col.c-os { width: 13%; }
+.device-table col.c-cpu { width: 9%; }
+.device-table col.c-ram { width: 9%; }
+.device-table col.c-state { width: 19%; }
 .device-table col.c-use { width: 17%; }
 .device-table col.c-act { width: 6%; }
+/* 워커 상태 배지와 마지막 응답 시각 */
+.device-state { display: inline-grid; justify-items: center; gap: 3px; }
+.device-state small { color: #9a9a96; font-size: 12px; font-variant-numeric: tabular-nums; }
+.device-badge.available { background: #dcfce7; color: #15803d; }
+.device-badge.user_active, .device-badge.busy, .device-badge.paused { background: #fef3c7; color: #b45309; }
+.device-usage { flex-wrap: wrap; }
+.device-usage small { flex-basis: 100%; color: #9a9a96; font-size: 12px; }
 .device-table .device-actions-cell { width: auto; }
 .device-table .device-name strong { min-width: 0; }
 

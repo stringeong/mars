@@ -1,7 +1,7 @@
 import AppIcon from '../components/AppIcon'
 import { FormEvent, useEffect, useState } from 'react'
 import { api, getDeviceDirectories } from '../api'
-import { Device, DirectoryInspection, SharedDirectory } from '../types'
+import { Device, DeviceState, DirectoryInspection, SharedDirectory } from '../types'
 import { sortDevices, timeAgo } from '../workflow'
 
 const emptyDirectory = { alias: '', local_path: '', permission: 'read' as const }
@@ -12,12 +12,36 @@ function osLabel(device: Device) {
   return /^darwin/i.test(os) ? 'macOS' : os || '-'
 }
 
-/** 온라인이면 지금 CPU 사용률, 오프라인이면 마지막 접속 시각 */
+const STATE_LABELS: Record<DeviceState, string> = {
+  offline: '오프라인',
+  running: '실행 중',
+  paused: '일시 중지',
+  user_active: '사용자 사용 중',
+  busy: '다른 프로그램 사용 중',
+  available: '작업 가능',
+}
+
+/** 마지막 하트비트 뒤 지난 시간. 30초가 지나면 오프라인이 되는 게 정상이다 */
+function lastSeen(device: Device, now: number) {
+  if (!device.last_heartbeat) return '응답 기록 없음'
+  const seconds = Math.max(0, Math.round((now - new Date(device.last_heartbeat).getTime()) / 1000))
+  return seconds < 60 ? `마지막 응답 ${seconds}초 전` : `마지막 응답 ${timeAgo(device.last_heartbeat)}`
+}
+
+/** 지금 작업을 받을 수 있는지(배지)와 마지막 응답 시각. 마우스를 올리면 이유가 보인다 */
+function stateCell(device: Device, now: number) {
+  const state = device.state ?? (device.online ? 'available' : 'offline')
+  return <span className="device-state" title={device.state_reason}><span className={`badge device-badge ${state}`}>{STATE_LABELS[state]}</span><small>{lastSeen(device, now)}</small></span>
+}
+
+/** 온라인이면 지금 CPU 사용률(M.A.R.S.와 다른 프로그램을 나눠서), 오프라인이면 표시하지 않는다 */
 function usageCell(device: Device) {
-  if (!device.online) return <span className="device-seen">{device.last_heartbeat ? `${timeAgo(device.last_heartbeat)} 접속` : '접속 기록 없음'}</span>
+  if (!device.online) return <span className="device-seen">-</span>
   const percent = Number(device.specs.cpu_percent)
   if (!Number.isFinite(percent)) return <span className="device-seen">-</span>
-  return <span className="device-usage"><i><b style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} /></i>{percent}%</span>
+  const other = Number(device.specs.other_cpu_percent)
+  const split = device.specs.other_cpu_percent != null && Number.isFinite(other)
+  return <span className="device-usage" title={split ? `M.A.R.S. ${Math.round(Number(device.specs.mars_cpu_percent) || 0)}% · 다른 프로그램 ${Math.round(other)}%` : undefined}><i><b style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} /></i>{Math.round(percent)}%{split && <small>다른 프로그램 {Math.round(other)}%</small>}</span>
 }
 
 export default function DevicesPage() {
@@ -27,6 +51,9 @@ export default function DevicesPage() {
   const [name, setName] = useState('')
   const [maxCpu, setMaxCpu] = useState('')
   const [maxGpu, setMaxGpu] = useState('')
+  const [minIdle, setMinIdle] = useState('')
+  const [onOverload, setOnOverload] = useState<'ask' | 'continue' | 'release'>('ask')
+  const [now, setNow] = useState(Date.now())
   const [directoryForm, setDirectoryForm] = useState(emptyDirectory)
   const [editingDirectoryId, setEditingDirectoryId] = useState<number | null>(null)
   const [inspections, setInspections] = useState<Record<number, DirectoryInspection>>({})
@@ -37,7 +64,7 @@ export default function DevicesPage() {
   const selected = devices.find((device) => device.id === selectedId) ?? null
 
   async function load() {
-    try { setDevices(await api.get<Device[]>('/devices')) }
+    try { setDevices(await api.get<Device[]>('/devices')); setNow(Date.now()) }
     catch (cause) { setError(cause instanceof Error ? cause.message : '조회 실패') }
   }
 
@@ -52,6 +79,8 @@ export default function DevicesPage() {
     setName(device.name)
     setMaxCpu(device.resource_limits.max_cpu_percent?.toString() ?? '')
     setMaxGpu(device.resource_limits.max_gpu_percent?.toString() ?? '')
+    setMinIdle(device.resource_limits.min_user_idle_min?.toString() ?? '')
+    setOnOverload(device.resource_limits.on_overload ?? 'ask')
     setDirectoryForm(emptyDirectory)
     setEditingDirectoryId(null)
     setError('')
@@ -68,6 +97,8 @@ export default function DevicesPage() {
         resource_limits: {
           max_cpu_percent: maxCpu ? Number(maxCpu) : null,
           max_gpu_percent: maxGpu ? Number(maxGpu) : null,
+          min_user_idle_min: minIdle ? Number(minIdle) : null,
+          on_overload: onOverload,
         },
       })
       await load()
@@ -144,16 +175,17 @@ export default function DevicesPage() {
       <div className="device-filter" role="tablist" aria-label="상태별 보기">
         {([['all', '전체', devices.length], ['on', '온라인', devices.filter((device) => device.online).length], ['off', '오프라인', devices.filter((device) => !device.online).length]] as const).map(([key, label, count]) => <button key={key} type="button" role="tab" aria-selected={filter === key} className={filter === key ? 'active' : ''} onClick={() => setFilter(key)}>{label} <b>{count}</b></button>)}
       </div>
-      <table className="device-table"><colgroup><col className="c-name" /><col className="c-os" /><col className="c-cpu" /><col className="c-ram" /><col className="c-use" /><col className="c-act" /></colgroup><thead><tr><th>이름</th><th>운영체제</th><th>CPU</th><th>RAM</th><th>사용률 · 접속</th><th aria-label="관리" /></tr></thead><tbody>
+      <table className="device-table"><colgroup><col className="c-name" /><col className="c-os" /><col className="c-cpu" /><col className="c-ram" /><col className="c-state" /><col className="c-use" /><col className="c-act" /></colgroup><thead><tr><th>이름</th><th>운영체제</th><th>CPU</th><th>RAM</th><th>상태</th><th>CPU 사용률</th><th aria-label="관리" /></tr></thead><tbody>
         {sortDevices(devices).filter((device) => filter === 'all' || (filter === 'on') === device.online).map((device) => <tr key={device.id} className={[device.online ? 'on' : 'off', selectedId === device.id ? 'selected-row' : ''].filter(Boolean).join(' ')} onClick={() => selectDevice(device)} title={`${device.name} 설정 열기`}>
           <td><span className="device-name"><AppIcon name="workers" /><strong>{device.name}</strong><span className="sr-only">{device.online ? '온라인' : '오프라인'}</span></span></td>
           <td>{osLabel(device)}</td>
           <td>{device.specs.cpu_count != null ? `${String(device.specs.cpu_count)}코어` : '-'}</td>
           <td>{device.specs.ram_gb != null ? `${String(device.specs.ram_gb)}GB` : '-'}</td>
+          <td>{stateCell(device, now)}</td>
           <td>{usageCell(device)}</td>
           <td className="device-actions-cell"><div className="row device-actions"><button type="button" className="icon-btn" title="워커 설정" aria-label={`${device.name} 설정`} onClick={(event) => { event.stopPropagation(); selectDevice(device) }}><AppIcon name="settings" /></button><button type="button" className="icon-btn danger" title="워커 삭제" aria-label={`${device.name} 삭제`} onClick={(event) => { event.stopPropagation(); removeDevice(device.id) }}><AppIcon name="trash" /></button></div></td>
         </tr>)}
-        {!devices.length && <tr><td colSpan={6} className="device-empty">등록된 워커가 없어요. 워커 프로그램을 설치하면 여기에 나타나요.</td></tr>}
+        {!devices.length && <tr><td colSpan={7} className="device-empty">등록된 워커가 없어요. 워커 프로그램을 설치하면 여기에 나타나요.</td></tr>}
       </tbody></table>
     </div>
 
@@ -165,7 +197,17 @@ export default function DevicesPage() {
             <div><label>CPU 수용 상한 (%)</label><input type="number" min="1" max="100" placeholder="제한 없음" value={maxCpu} onChange={(event) => setMaxCpu(event.target.value)} /></div>
             <div><label>GPU 수용 상한 (%)</label><input type="number" min="1" max="100" placeholder="제한 없음" value={maxGpu} onChange={(event) => setMaxGpu(event.target.value)} /></div>
           </div>
-          <p className="muted">현재 사용률이 상한 이상이면 이 워커에는 새 작업을 배정하지 않습니다. 실행 중인 Ollama 프로세스를 강제로 제한하는 값은 아닙니다.</p>
+          <p className="muted">다른 프로그램이 쓰는 사용률이 상한 이상이면 이 워커에는 새 작업을 주지 않아요. M.A.R.S.가 돌리는 Ollama 부하는 빼고 계산해요.</p>
+          <div className="resource-limit-grid">
+            <div><label htmlFor="min-idle">자리 비움 기준 (분)</label><input id="min-idle" type="number" min="1" max="240" placeholder="꺼짐" value={minIdle} onChange={(event) => setMinIdle(event.target.value)} /></div>
+            <div><label htmlFor="on-overload">실행 중 상한을 넘으면</label><select id="on-overload" value={onOverload} onChange={(event) => setOnOverload(event.target.value as typeof onOverload)}>
+              <option value="ask">워커 화면에서 물어보기</option>
+              <option value="continue">계속 실행</option>
+              <option value="release">바로 다른 기기로 넘기기</option>
+            </select></div>
+          </div>
+          <p className="muted">자리 비움 기준을 넣으면 키보드·마우스 입력이 그 시간 동안 없을 때만 작업을 받아요. 실행 중에 다른 프로그램 CPU 사용률이 30초 넘게 상한을 넘으면 위에서 고른 대로 처리하고, 넘긴 워커는 5분 동안 쉬어요.</p>
+          {selected.state_reason && <p className="muted">지금 상태: <strong>{STATE_LABELS[selected.state ?? 'offline']}</strong> · {selected.state_reason}</p>}
           <button className="btn">워커 설정 저장</button>
         </form>
       </section>
