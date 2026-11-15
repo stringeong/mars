@@ -1475,3 +1475,11 @@ body.canvas-fullscreen { overflow: hidden; }
 .run-split-toggle input { width: auto; margin-top: 3px; }
 .run-split-toggle b { display: block; font-size: 13px; }
 .run-split-toggle small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+.run-split-parts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: -2px 0 10px; padding: 0 2px; font-size: 13px; }
+.run-split-parts > span { color: var(--muted); font-size: 12px; font-weight: 600; }
+.run-split-parts button { padding: 5px 10px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.run-split-parts button.active { border-color: var(--primary); background: var(--primary); color: #fff; }
+.run-split-count { display: inline-flex; align-items: center; gap: 4px; margin: 0; font-size: 12px; }
+.run-split-count input { width: 64px; padding: 4px 8px; }
+.run-split-parts small { flex-basis: 100%; color: var(--muted); font-size: 12px; }

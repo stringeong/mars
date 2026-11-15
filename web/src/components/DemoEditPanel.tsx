@@ -62,7 +62,7 @@ export default function DemoEditPanel({ block, edit, onChange, onReset, onRun }:
           <div className="uploaded-file-heading">
             <strong>첨부 파일</strong>
             <div className="file-picker-actions"><button type="button" className="btn sm ghost" onClick={() => fileRef.current?.click()}>새 파일 업로드</button></div>
-            <input ref={fileRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx" onChange={(event) => addFiles(event.target.files)} />
+            <input ref={fileRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx,.json" onChange={(event) => addFiles(event.target.files)} />
           </div>
           <small className="file-picker-help">이 블록이 실행할 때 우선 읽는 파일이에요. 예시 화면이라 고른 파일은 어디에도 올라가지 않아요.</small>
           <div className="selected-file-list">

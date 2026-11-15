@@ -674,7 +674,7 @@ export default function ServiceDetailPage() {
             {directories.length ? directories.map((directory) => <label key={directory.id} className="resource-check"><input type="checkbox" checked={(selectedAgent.directory_ids ?? []).includes(directory.id)} onChange={(event) => updateAgent({ directory_ids: event.target.checked ? [...(selectedAgent.directory_ids ?? []), directory.id] : (selectedAgent.directory_ids ?? []).filter((directoryId) => directoryId !== directory.id) })} /><span><strong>{directory.alias}</strong><small>{directory.local_path}</small></span></label>) : <span className="muted">등록한 폴더가 없어요.</span>}
           </div>
           <div className="uploaded-file-picker">
-            <div className="uploaded-file-heading"><strong>첨부 파일</strong><div className="file-picker-actions"><button type="button" className="btn sm ghost" disabled={fileUploading} onClick={() => uploadInputRef.current?.click()}>{fileUploading ? '업로드 중…' : '새 파일 업로드'}</button><button type="button" className="btn sm ghost" onClick={openFileLibrary}>기존 파일 선택</button></div><input ref={uploadInputRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.log,.jsonl,.xlsx,.pptx" onChange={(event) => uploadForSelectedAgent(event.target.files)} /></div>
+            <div className="uploaded-file-heading"><strong>첨부 파일</strong><div className="file-picker-actions"><button type="button" className="btn sm ghost" disabled={fileUploading} onClick={() => uploadInputRef.current?.click()}>{fileUploading ? '업로드 중…' : '새 파일 업로드'}</button><button type="button" className="btn sm ghost" onClick={openFileLibrary}>기존 파일 선택</button></div><input ref={uploadInputRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.log,.jsonl,.xlsx,.pptx,.json" onChange={(event) => uploadForSelectedAgent(event.target.files)} /></div>
             <small className="file-picker-help">현재 에이전트가 실행할 때 우선 읽는 파일입니다.</small>
             <div className="selected-file-list">
               {(selectedAgent.uploaded_file_ids ?? []).map((fileId) => { const file = uploadedFileById.get(fileId); return <div className="selected-file-chip" key={fileId}><span><strong>{file?.original_name ?? '삭제된 파일'}</strong><small>{file ? file.size_bytes.toLocaleString() + ' bytes' : '#' + fileId}</small></span><button type="button" aria-label="첨부 해제" onClick={() => updateAgent({ uploaded_file_ids: (selectedAgent.uploaded_file_ids ?? []).filter((id) => id !== fileId) })}>×</button></div> })}
@@ -690,6 +690,7 @@ export default function ServiceDetailPage() {
                   <option value="auto">자동 (파일 형식에 맞춤)</option>
                   <option value="line">줄 (.txt .log .md .jsonl)</option>
                   <option value="csv">CSV 행 (헤더는 조각마다 유지)</option>
+                  <option value="json">JSON 배열 항목 (.json)</option>
                   <option value="file">파일 (여러 파일을 나눠 맡김)</option>
                 </select></div>
                 <div><label htmlFor="split-parts">조각 수</label><div className="split-parts"><select id="split-parts" value={split.parts === 'auto' ? 'auto' : 'manual'} onChange={(event) => updateSplit({ parts: event.target.value === 'auto' ? 'auto' : Math.max(2, splitPreview?.parts ?? 2) })}>

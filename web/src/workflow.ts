@@ -278,5 +278,9 @@ export function splitSizes(preview: SplitPreview) {
 /** "현재 사용 가능한 워커 2대 → 3조각 예상 (667 / 667 / 666줄)" */
 export function splitPreviewText(preview: SplitPreview) {
   if (preview.parts <= 1) return `현재 사용 가능한 워커 ${preview.workers}대 → 나누지 않고 한 번에 실행해요 (파일이 작아요)`
+  if (!preview.auto) {
+    const queue = preview.parts > preview.workers ? ` · 워커 ${preview.workers}대가 차례로 나눠 처리` : ` · 사용 가능한 워커 ${preview.workers}대`
+    return `직접 정한 ${preview.parts}조각 (${splitSizes(preview)})${queue}`
+  }
   return `현재 사용 가능한 워커 ${preview.workers}대 → ${preview.parts}조각 예상 (${splitSizes(preview)})`
 }

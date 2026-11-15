@@ -2,7 +2,7 @@
 export interface SplitSettings {
   enabled: boolean
   // auto: 파일 하나면 형식에 따라 줄·행, 여러 개면 파일 단위
-  unit: 'auto' | 'line' | 'csv' | 'file'
+  unit: 'auto' | 'line' | 'csv' | 'json' | 'file'
   parts: 'auto' | number
   overlap_lines: number
   max_chars: number
@@ -11,7 +11,7 @@ export interface SplitSettings {
 /** 지금 실행하면 어떻게 나뉘는지 (서버 구성 검사가 함께 돌려준다) */
 export interface SplitPreview {
   node_id: string
-  unit: 'line' | 'csv' | 'file'
+  unit: 'line' | 'csv' | 'json' | 'file'
   unit_label: string
   workers: number
   parts: number

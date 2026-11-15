@@ -7,11 +7,11 @@ import { generationLabel, onServiceRenamed, splitPreviewText } from '../workflow
 
 type Transfer = { node_id: string; node_name: string; provider: string; type: 'user_input' | 'derived_text' | 'file_text'; file_ids?: number[]; sources?: string[] }
 type Preview = { requires_consent: boolean; consent_token: string | null; transfers: Transfer[]; validation: ValidationResult }
-type RunInputs = { slots: Record<string, number[]>; nodes: Record<string, number[]>; split?: Record<string, boolean> }
+type RunInputs = { slots: Record<string, number[]>; nodes: Record<string, number[]>; split?: Record<string, boolean | { enabled: boolean; parts: 'auto' | number }> }
 type InputEntry = { kind: 'slot' | 'node'; id: string; label: string; format?: string; blocks: string[]; blockIds: string[]; directories: number[]; defaults: number[]; split: boolean }
 
 // 줄·행 단위로 나눌 수 있는 파일과, 실행 화면에서 '나눠서 병렬 실행'을 기본으로 켜는 크기(조각 최대 글자 수 기본값)
-const SPLITTABLE = /\.(txt|log|md|jsonl|csv)$/i
+const SPLITTABLE = /\.(txt|log|md|jsonl|csv|json)$/i
 const AUTO_SPLIT_BYTES = 12000
 const entryKey = (entry: InputEntry) => `${entry.kind}:${entry.id}`
 
@@ -38,6 +38,8 @@ export default function WorkflowRunPage() {
   const [plan, setPlan] = useState<{ splits: SplitPreview[]; issues: string[]; loading: boolean }>({ splits: [], issues: [], loading: false })
   // 실행 화면에서 사용자가 직접 켜거나 끈 '나눠서 병렬 실행' (입력 칸별). 없으면 기본 규칙을 따른다
   const [splitChoice, setSplitChoice] = useState<Record<string, boolean>>({})
+  // 조각 수: 고르지 않으면 편집 화면 설정(없으면 자동), 고르면 이번 실행에만 그 값
+  const [splitParts, setSplitParts] = useState<Record<string, 'auto' | number>>({})
   const [acknowledged, setAcknowledged] = useState(false)
   const [uploadTarget, setUploadTarget] = useState<InputEntry | null>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
@@ -101,7 +103,7 @@ export default function WorkflowRunPage() {
   // 이번 실행에서 나눠서 실행할 블록 (실행 화면 스위치 기준)
   const splitIdSet = new Set(entries.filter(splitOn).flatMap((entry) => entry.blockIds))
   const splitBlocks = (service?.graph.nodes ?? []).filter(isAgent).filter((agent) => splitIdSet.has(agent.id))
-  const inputsKey = JSON.stringify(inputs) + JSON.stringify([...splitIdSet].sort())
+  const inputsKey = JSON.stringify(inputs) + JSON.stringify([...splitIdSet].sort()) + JSON.stringify(splitParts)
   useEffect(() => {
     if (!service || !splitBlocks.length) { setPlan({ splits: [], issues: [], loading: false }); return }
     let cancelled = false
@@ -146,6 +148,11 @@ export default function WorkflowRunPage() {
   function splitOn(entry: InputEntry) {
     return splitOffered(entry) && (splitChoice[entryKey(entry)] ?? splitDefault(entry))
   }
+  function chooseParts(entry: InputEntry, parts: 'auto' | number) {
+    setSplitParts((current) => ({ ...current, [entryKey(entry)]: parts }))
+    setValidation(null)
+    setAcknowledged(false)
+  }
   function chooseSplit(entry: InputEntry, on: boolean) {
     setSplitChoice((current) => ({ ...current, [entryKey(entry)]: on }))
     setValidation(null)
@@ -167,7 +174,10 @@ export default function WorkflowRunPage() {
     entries.forEach((entry) => {
       payload[entry.kind === 'slot' ? 'slots' : 'nodes'][entry.id] = selected(entry)
       // 스위치가 보이는 입력 칸만 보낸다. 나머지 블록은 저장된 설정을 그대로 쓴다
-      if (splitOffered(entry)) entry.blockIds.forEach((blockId) => { payload.split![blockId] = splitOn(entry) })
+      if (splitOffered(entry)) {
+        const parts = splitParts[entryKey(entry)]
+        entry.blockIds.forEach((blockId) => { payload.split![blockId] = parts === undefined || !splitOn(entry) ? splitOn(entry) : { enabled: true, parts } })
+      }
     })
     return payload
   }
@@ -270,6 +280,13 @@ export default function WorkflowRunPage() {
                 <input type="checkbox" checked={splitOn(entry)} onChange={(event) => chooseSplit(entry, event.target.checked)} />
                 <span><b>파일 나눠서 병렬 실행</b><small>{splitChoice[entryKey(entry)] !== undefined ? '이번 실행에서 직접 정했어요.' : entry.split ? '편집 화면에서 켜 둔 설정이에요.' : splitDefault(entry) ? `큰 텍스트 파일이라 자동으로 켰어요. 워커 수에 맞춰 나눠서 동시에 처리해요.` : '파일이 작아 꺼 뒀어요. 켜면 워커 수만큼 나눠요.'} 전체 맥락이 필요한 자료는 끄세요.</small></span>
               </label>}
+              {splitOn(entry) && <div className="run-split-parts" role="group" aria-label="조각 수">
+                <span>조각 수</span>
+                <button type="button" className={(splitParts[entryKey(entry)] ?? 'auto') === 'auto' ? 'active' : ''} onClick={() => chooseParts(entry, 'auto')}>자동 (워커 수에 맞춤)</button>
+                <button type="button" className={typeof splitParts[entryKey(entry)] === 'number' ? 'active' : ''} onClick={() => chooseParts(entry, typeof splitParts[entryKey(entry)] === 'number' ? splitParts[entryKey(entry)] : Math.max(2, plan.splits.find((item) => entry.blockIds.includes(item.node_id))?.parts ?? 2))}>직접 정하기</button>
+                {typeof splitParts[entryKey(entry)] === 'number' && <label className="run-split-count"><input type="number" min={2} max={50} value={splitParts[entryKey(entry)] as number} onChange={(event) => chooseParts(entry, Math.min(50, Math.max(2, Math.round(Number(event.target.value)) || 2)))} aria-label="조각 수 직접 입력" />개</label>}
+                <small>{typeof splitParts[entryKey(entry)] === 'number' ? '워커가 적으면 한 워커가 여러 조각을 차례로 처리해요.' : '사용 가능한 워커 수와 파일 크기로 정해요.'}</small>
+              </div>}
               <div className="slot-sources">
                 {current.map((fileId) => <span className="source-chip upload" key={fileId}><span>{fileName(fileId)}</span><small>업로드 · 서버를 거쳐 전달</small><button type="button" aria-label="이번 실행에서 빼기" onClick={() => setSelected(entry, current.filter((value) => value !== fileId))}>×</button></span>)}
                 {entry.directories.map((directoryId) => <span className="source-chip directory" key={`d${directoryId}`}><span>등록한 폴더 #{directoryId}</span><small>그 PC에서만 읽음</small></span>)}
@@ -320,7 +337,7 @@ export default function WorkflowRunPage() {
         <div className="run-files-note"><div><strong>입력 파일 보관함</strong><small>{files.length}개</small></div><Link to="/files">파일 관리 →</Link></div>
       </aside>
     </div>
-    <input ref={uploadRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.log,.jsonl,.xlsx,.pptx" onChange={onUpload} />
+    <input ref={uploadRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.log,.jsonl,.xlsx,.pptx,.json" onChange={onUpload} />
     {preview && <div className="file-library-modal-backdrop" role="presentation"><section className="file-library-modal transfer-consent-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title"><header><div><span className="eyebrow">외부 전송</span><h2 id="transfer-title">클라우드 전송 내용을 확인해 주세요</h2></div><button className="modal-close" onClick={() => setPreview(null)}>×</button></header><p>API 키는 서버에만 보관되며 아래 입력과 결과만 외부 공급자에 전달됩니다.</p><div className="transfer-list">{preview.transfers.map((item, index) => <div className={`transfer-item ${item.type}`} key={`${item.node_id}-${item.type}-${index}`}><strong>{item.node_name} → {item.provider}</strong><span>{item.type === 'user_input' ? '사용자 실행 요청' : item.type === 'derived_text' ? `로컬 파일에서 파생된 텍스트: ${(item.sources || []).join(', ')}` : `첨부파일에서 추출한 텍스트: ${(item.file_ids || []).map(fileName).join(', ')}`}</span></div>)}</div><footer><span>이번 실행에만 적용됩니다.</span><div><button className="btn sm ghost" onClick={() => setPreview(null)}>취소</button><button className="btn sm" disabled={loading} onClick={() => start(preview.consent_token)}>동의하고 실행</button></div></footer></section></div>}
   </div>
 }
