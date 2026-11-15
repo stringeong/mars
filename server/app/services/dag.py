@@ -406,10 +406,13 @@ def apply_run_inputs(
     graph: dict,
     slots: dict[str, list[int]] | None = None,
     nodes: dict[str, list[int]] | None = None,
+    split: dict[str, bool | dict] | None = None,
 ) -> dict:
     """이번 실행에만 쓰는 입력 파일을 반영한 그래프 복사본. 저장된 워크플로우는 바뀌지 않는다.
 
     slots는 슬롯별, nodes는 슬롯 없이 블록에 직접 붙은 파일(이전 버전 워크플로우)을 덮어쓴다.
+    split은 블록별로 이번 실행에서 '파일 나눠서 병렬 실행'을 켜거나 끈다. 값이 {"enabled", "parts"}면
+    조각 수도 이번 실행에만 정한다("auto"면 워커 수로 자동). 나머지(단위·겹침)는 편집 화면 설정을 쓴다.
     """
     applied = copy.deepcopy(graph)
     slot_map = {slot.get("id"): slot for slot in applied.get("input_slots") or []}
@@ -422,6 +425,15 @@ def apply_run_inputs(
         if node_id not in agent_map:
             raise DagError(f"존재하지 않는 블록입니다: {node_id}")
         agent_map[node_id]["uploaded_file_ids"] = list(dict.fromkeys(file_ids))
+    for node_id, choice in (split or {}).items():
+        if node_id not in agent_map:
+            raise DagError(f"존재하지 않는 블록입니다: {node_id}")
+        node = agent_map[node_id]
+        current = node.get("split") if isinstance(node.get("split"), dict) else {}
+        if isinstance(choice, dict):
+            node["split"] = {**current, "enabled": bool(choice.get("enabled", True)), "parts": choice.get("parts", "auto")}
+        else:
+            node["split"] = {**current, "enabled": bool(choice)}
     return applied
 
 
@@ -472,6 +484,78 @@ def expand_input_slots(graph: dict) -> dict:
     return expanded
 
 
+def split_enabled(node: dict) -> bool:
+    """'파일 나눠서 병렬 실행'을 켠 블록인지."""
+    split = node.get("split")
+    return isinstance(split, dict) and bool(split.get("enabled"))
+
+
+def split_node_id(node_id: str, index: int) -> str:
+    """조각 블록 id. index는 1부터."""
+    return f"{node_id}__p{index:02d}"
+
+
+def expand_split_nodes(graph: dict, pieces_by_node: dict[str, list[dict]]) -> dict:
+    """분할 블록을 조각 수만큼 펼친 복사본. 실행 스냅샷에 이 결과를 쓴다.
+
+    pieces_by_node[블록 id]는 조각 순서대로의 {"uploaded_file_ids": [...], "split_part": {...}} 목록이다.
+    조각 블록은 원래 블록의 역할 프롬프트·모델·Worker·디렉터리 설정을 그대로 복사하고, 들어오고 나가는
+    연결도 모두 이어받는다. 조각을 번호 순서로 넣으므로 다음 블록은 결과를 원본 순서대로 받는다.
+    조각이 하나뿐이면 펼치지 않는다.
+    """
+    expanded = copy.deepcopy(graph)
+    targets = {
+        node["id"]: pieces_by_node[node["id"]]
+        for node in _agent_nodes(expanded)
+        if len(pieces_by_node.get(node["id"]) or []) > 1
+    }
+    if not targets:
+        return expanded
+
+    nodes: list[dict] = []
+    for node in expanded.get("nodes", []):
+        pieces = targets.get(node["id"]) if _node_type(node) == "agent" else None
+        if not pieces:
+            nodes.append(node)
+            continue
+        name = node.get("name") or node["id"]
+        for index, piece in enumerate(pieces, start=1):
+            suffix = f" #{index}"
+            copy_node = copy.deepcopy(node)
+            copy_node.update(
+                id=split_node_id(node["id"], index),
+                name=name[: 128 - len(suffix)] + suffix,
+                uploaded_file_ids=list(piece.get("uploaded_file_ids") or []),
+                # 슬롯 파일은 이미 블록 필드로 펼쳐져 조각에 나뉘어 들어갔다
+                input_slot_ids=[],
+                split=None,
+                split_part={
+                    **(piece.get("split_part") or {}),
+                    "index": index,
+                    "total": len(pieces),
+                    "origin_id": node["id"],
+                    "origin_name": name,
+                },
+            )
+            position = node.get("position")
+            if isinstance(position, dict) and isinstance(position.get("y"), (int, float)):
+                copy_node["position"] = {**position, "y": position["y"] + (index - 1) * 215}
+            nodes.append(copy_node)
+    expanded["nodes"] = nodes
+
+    def ids(node_id: str) -> list[str]:
+        pieces = targets.get(node_id)
+        return [split_node_id(node_id, index) for index in range(1, len(pieces) + 1)] if pieces else [node_id]
+
+    expanded["edges"] = [
+        {**edge, "source": source, "target": target}
+        for edge in expanded.get("edges", [])
+        for target in ids(edge["target"])
+        for source in ids(edge["source"])
+    ]
+    return expanded
+
+
 def _ancestors(graph: dict, node_id: str) -> set[str]:
     parents: dict[str, list[str]] = defaultdict(list)
     for source, target in _workflow_pairs(graph):
@@ -486,11 +570,42 @@ def _ancestors(graph: dict, node_id: str) -> set[str]:
     return seen
 
 
-def inspect_graph(graph: dict, *, run_prompt: str = "", has_model=None) -> dict:
+def _inspect_split(graph: dict, node: dict, name: str, file_ids: list[int], missing_file: bool, split_problem, add) -> None:
+    """'파일 나눠서 병렬 실행'을 켠 블록의 검사."""
+    node_id = node["id"]
+    if node.get("executor") == "cloud" or node.get("provider") in {"openai", "anthropic", "gemini"}:
+        add(
+            "error",
+            "split_cloud",
+            f"'{name}' 블록은 외부 API 블록이라 파일을 나눠 실행할 수 없습니다. "
+            "실행 위치를 Local Worker로 바꾸거나 나눠서 실행을 끄세요.",
+            [node_id],
+        )
+        return
+    if not file_ids:
+        # 파일 필요 블록이면 '필요한 파일이 비어 있습니다' 오류가 이미 같은 내용을 알린다
+        if not missing_file:
+            add("error", "split_no_file", f"'{name}' 블록은 나눠서 실행하도록 켜져 있지만 연결된 파일이 없습니다.", [node_id])
+        return
+    problem = split_problem(node) if split_problem is not None else None
+    if problem:
+        add("error", problem[0], f"'{name}' 블록: {problem[1]}", [node_id])
+    if not any(source == node_id for source, _ in _workflow_pairs(graph)):
+        add(
+            "warning",
+            "split_no_next",
+            f"'{name}' 블록 뒤에 조각 결과를 모을 블록이 없습니다. 조각별 결과가 그대로 이어 붙습니다.",
+            [node_id],
+        )
+
+
+def inspect_graph(graph: dict, *, run_prompt: str = "", has_model=None, split_problem=None) -> dict:
     """저장·실행 전 구성 검사. 오류는 실행을 막고, 경고는 사용자 확인 후 진행할 수 있다.
 
     has_model(node)는 지정 워커에 모델이 설치되어 있으면 True, 아니면 False,
     판단할 수 없으면(클라우드 블록, 워커 미지정 등) None을 반환한다.
+    split_problem(node)는 분할 블록의 파일을 나눌 수 없으면 (문제 코드, 메시지)를, 문제가 없으면
+    None을 반환한다(파일 형식·크기, 사용 가능한 Worker 수처럼 그래프만으로는 알 수 없는 검사).
     """
     errors: list[dict] = []
     warnings: list[dict] = []
@@ -518,7 +633,10 @@ def inspect_graph(graph: dict, *, run_prompt: str = "", has_model=None) -> dict:
         # 텍스트 입력은 사용자가 명시적으로 활성화한 것 자체를 입력으로 본다.
         # 따라서 내용이 빈 문자열이어도 시작 블록을 실행할 수 있다.
         has_input = bool(file_ids or directory_ids or node.get("text_input_enabled"))
-        if node.get("needs_file") and not has_input:
+        missing_file = bool(node.get("needs_file")) and not has_input
+        if split_enabled(node):
+            _inspect_split(graph, node, names[node_id], file_ids, missing_file, split_problem, add)
+        if missing_file:
             add("error", "missing_file", f"'{names[node_id]}' 블록에 필요한 파일이 비어 있습니다.", [node_id])
         elif not has_input and not parents.get(node_id) and not run_prompt.strip():
             add(

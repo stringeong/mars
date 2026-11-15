@@ -6,12 +6,12 @@
 - 기기 단절: 하트비트가 끊긴 기기의 running 작업을 ready로 되돌린다 (재할당, UC-204 e203).
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy.orm import Session
 
 from .. import models
-from ..config import HEARTBEAT_TIMEOUT_SEC
+from ..config import HEARTBEAT_TIMEOUT_SEC, RELEASE_PAUSE_SEC
 from . import dag, directory_access
 
 
@@ -57,20 +57,81 @@ def device_is_online(device: models.Device) -> bool:
     return models.utcnow() - device.last_heartbeat < timedelta(seconds=HEARTBEAT_TIMEOUT_SEC)
 
 
-def device_has_capacity(device: models.Device) -> bool:
-    """현재 사용률이 사용자가 지정한 신규 작업 수용 상한 아래인지 확인한다."""
+def _number(value) -> float | None:
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+def paused_until(device: models.Device):
+    """작업을 다른 기기로 넘긴 뒤 새 작업을 받지 않는 시각(지났거나 없으면 None)."""
+    raw = (device.specs or {}).get("paused_until")
+    if not isinstance(raw, str):
+        return None
+    try:
+        until = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return until if until > models.utcnow() else None
+
+
+def capacity_block(device: models.Device) -> tuple[str, str] | None:
+    """이 기기에 지금 새 작업을 주지 않는 이유 (코드, 설명). 줄 수 있으면 None.
+
+    CPU는 기기 전체 사용률이 아니라 M.A.R.S.(Worker·Ollama)를 뺀 '다른 프로그램' 사용률로
+    판단한다. 전체 사용률로 보면 방금 끝낸 자기 작업의 부하 때문에 다음 작업을 못 받는다.
+    분리 측정값을 보내지 않는 구버전 Worker는 기존처럼 전체 사용률로 본다.
+    """
     specs = device.specs or {}
     limits = specs.get("resource_limits") or {}
-    for current_key, limit_key in (
-        ("cpu_percent", "max_cpu_percent"),
-        ("gpu_percent", "max_gpu_percent"),
-    ):
-        current = specs.get(current_key)
-        limit = limits.get(limit_key)
-        if isinstance(current, (int, float)) and isinstance(limit, (int, float)):
-            if current >= limit:
-                return False
-    return True
+
+    until = paused_until(device)
+    if until is not None:
+        minutes = max(1, round((until - models.utcnow()).total_seconds() / 60))
+        return "paused", f"작업을 다른 기기로 넘겨 {minutes}분 동안 새 작업을 받지 않습니다."
+
+    min_idle = _number(limits.get("min_user_idle_min"))
+    idle = _number(specs.get("user_idle_sec"))
+    if min_idle is not None and idle is not None and idle < min_idle * 60:
+        return "user_active", f"사용자가 기기를 쓰고 있습니다. 입력이 {int(min_idle)}분 동안 없으면 작업을 받습니다."
+
+    other_cpu = _number(specs.get("other_cpu_percent"))
+    cpu = other_cpu if other_cpu is not None else _number(specs.get("cpu_percent"))
+    cpu_limit = _number(limits.get("max_cpu_percent"))
+    if cpu is not None and cpu_limit is not None and cpu >= cpu_limit:
+        label = "다른 프로그램 CPU" if other_cpu is not None else "CPU"
+        return "busy", f"{label} {round(cpu)}%가 상한 {round(cpu_limit)}% 이상입니다."
+
+    gpu = _number(specs.get("gpu_percent"))
+    gpu_limit = _number(limits.get("max_gpu_percent"))
+    if gpu is not None and gpu_limit is not None and gpu >= gpu_limit:
+        return "busy", f"GPU {round(gpu)}%가 상한 {round(gpu_limit)}% 이상입니다."
+    return None
+
+
+def device_has_capacity(device: models.Device) -> bool:
+    """지금 새 작업을 줄 수 있는 기기인지(사용률 상한, 자리 비움 기준, 넘김 뒤 일시 중지)."""
+    return capacity_block(device) is None
+
+
+def device_state(device: models.Device, running: bool) -> tuple[str, str]:
+    """기기 목록에 보여줄 상태와 이유."""
+    if not device_is_online(device):
+        return "offline", "Worker 프로그램이 꺼져 있거나 서버에 연결되지 않았습니다."
+    if running:
+        return "running", "작업을 실행하고 있습니다."
+    return capacity_block(device) or ("available", "새 작업을 받을 수 있습니다.")
+
+
+def release_task(db: Session, task: models.TaskRecord, device: models.Device) -> None:
+    """실행 중이던 작업을 내려놓아 다른 Worker가 이어받게 하고, 넘긴 기기는 잠시 쉬게 한다.
+
+    하트비트가 끊긴 기기의 작업을 회수할 때(reclaim_stale_tasks)와 같은 처리다.
+    """
+    task.status = "ready"
+    task.assigned_device_id = None
+    task.started_at = None
+    until = models.utcnow() + timedelta(seconds=RELEASE_PAUSE_SEC)
+    device.specs = {**(device.specs or {}), "paused_until": until.isoformat()}
+    db.flush()
 
 
 def device_has_model(device: models.Device, model: str) -> bool:
@@ -81,8 +142,13 @@ def device_has_model(device: models.Device, model: str) -> bool:
     return True if not isinstance(available, list) else model in available
 
 
-def inspect_graph_for_user(db: Session, user_id: int, graph: dict, run_prompt: str = "") -> dict:
-    """dag.inspect_graph에 사용자의 Worker 모델 정보를 더해 구성 검사를 한다."""
+def inspect_graph_for_user(db: Session, user_id: int, graph: dict, run_prompt: str = "", split_plans=None) -> dict:
+    """dag.inspect_graph에 사용자의 Worker 모델 정보와 파일 분할 계획을 더해 구성 검사를 한다.
+
+    결과의 splits는 분할 블록별 예상 조각(Worker 수, 조각 수, 조각별 줄 수)이다.
+    실행처럼 이미 계획을 세운 곳에서는 split_plans로 넘겨 파일을 두 번 읽지 않는다.
+    """
+    from . import split_inputs
     from .transfers import is_cloud_node
 
     # 저장 이후 자동 규칙이 바뀌었거나 이전 버전 그래프여도 실행할 때와 같은 기준으로 검사한다
@@ -99,7 +165,11 @@ def inspect_graph_for_user(db: Session, user_id: int, graph: dict, run_prompt: s
             return None
         return device_has_model(device, node.get("model") or "")
 
-    return dag.inspect_graph(graph, run_prompt=run_prompt, has_model=has_model)
+    if split_plans is None:
+        split_plans = split_inputs.plan_graph(db, user_id, graph)
+    result = dag.inspect_graph(graph, run_prompt=run_prompt, has_model=has_model, split_problem=split_plans.problem)
+    result["splits"] = split_plans.summaries()
+    return result
 
 
 def reclaim_stale_tasks(db: Session, user_id: int) -> None:
@@ -214,14 +284,36 @@ def populate_task_context(db: Session, task: models.TaskRecord) -> None:
         parts.append(f"[텍스트 데이터 입력]\n{text_input}")
     if execution.run_prompt:
         parts.append(f"[사용자 실행 요청]\n{execution.run_prompt}")
+    part_note = _split_part_note(node)
+    if part_note:
+        parts.append(part_note)
     if parents:
+        nodes = {item.get("id"): item for item in (execution.graph_snapshot or {}).get("nodes", [])}
         parent_tasks = {t.node_id: t for t in db.query(models.TaskRecord).filter(models.TaskRecord.execution_id == execution.id, models.TaskRecord.node_id.in_(parents)).all()}
         for parent_id in parents:
             parent = parent_tasks.get(parent_id)
             if parent and parent.output:
-                parts.append(f"[이전 단계: {parent.agent_name}의 결과]\n{parent.output}")
+                # 나눠서 실행한 조각의 결과에는 원본에서 맡은 범위를 함께 적는다
+                label = (nodes.get(parent_id, {}).get("split_part") or {}).get("label")
+                suffix = f" · {label}" if label else ""
+                parts.append(f"[이전 단계: {parent.agent_name}의 결과{suffix}]\n{parent.output}")
     task.input_context = "\n\n".join(parts)
     db.flush()
+
+
+def _split_part_note(node: dict) -> str:
+    """조각 블록에게 자신이 원본의 어느 부분을 맡았는지 알려준다."""
+    part = node.get("split_part")
+    if not isinstance(part, dict) or part.get("unit") not in ("line", "csv", "json"):
+        return ""
+    note = (
+        f"[나눠 받은 자료]\n첨부 파일은 원본 '{part.get('source_name')}'의 {part.get('label')}입니다 "
+        f"(전체 {part.get('total')}조각 중 {part.get('index')}번째). 이 범위만 처리하세요. "
+        "나머지 범위는 다른 조각이 같은 방식으로 처리합니다."
+    )
+    if part.get("context_start"):
+        note += " 파일 앞의 '참고 문맥'은 직전 조각의 끝부분이므로 이해에만 쓰고 결과에는 넣지 마세요."
+    return note
 
 
 def complete_task(
@@ -370,4 +462,8 @@ def delete_execution(db: Session, execution: models.Execution) -> None:
         )
     usage.update({"execution_id": None, "task_id": None}, synchronize_session=False)
     db.query(models.TaskRecord).filter(models.TaskRecord.execution_id == execution.id).delete(synchronize_session=False)
+    # 파일을 나눠 실행하며 만든 조각 파일은 이 실행에서만 쓰므로 함께 지운다
+    from . import split_inputs
+
+    split_inputs.delete_piece_files(db, execution.graph_snapshot)
     db.delete(execution)

@@ -1,3 +1,26 @@
+/** 파일 나눠서 병렬 실행. 실행할 때 연결된 파일을 나누고 블록을 조각 수만큼 펼친다 */
+export interface SplitSettings {
+  enabled: boolean
+  // auto: 파일 하나면 형식에 따라 줄·행, 여러 개면 파일 단위
+  unit: 'auto' | 'line' | 'csv' | 'json' | 'file'
+  parts: 'auto' | number
+  overlap_lines: number
+  max_chars: number
+}
+
+/** 지금 실행하면 어떻게 나뉘는지 (서버 구성 검사가 함께 돌려준다) */
+export interface SplitPreview {
+  node_id: string
+  unit: 'line' | 'csv' | 'json' | 'file'
+  unit_label: string
+  workers: number
+  parts: number
+  auto: boolean
+  sizes: number[]
+  overlap_lines: number
+  source_name: string | null
+}
+
 export interface AgentNode {
   id: string
   type: 'agent'
@@ -21,6 +44,7 @@ export interface AgentNode {
   needs_file_manual?: boolean
   approval_required?: boolean
   approval_message?: string
+  split?: SplitSettings | null
   position?: { x: number; y: number } | null
 }
 
@@ -126,6 +150,7 @@ export interface ValidationResult {
   warnings: ValidationIssue[]
   stages: string[][]
   final_node_ids: string[]
+  splits?: SplitPreview[]
   reason?: string | null
 }
 
@@ -176,11 +201,20 @@ export interface Device {
   resource_limits: ResourceLimits
   last_heartbeat: string | null
   online: boolean
+  // 지금 작업을 받을 수 있는지와 그 이유 (서버가 작업 배정과 같은 기준으로 판단)
+  state?: DeviceState
+  state_reason?: string
 }
 
+export type DeviceState = 'offline' | 'running' | 'paused' | 'user_active' | 'busy' | 'available'
+
 export interface ResourceLimits {
-  max_cpu_percent?: number
-  max_gpu_percent?: number
+  max_cpu_percent?: number | null
+  max_gpu_percent?: number | null
+  // 자리 비움 기준(분): 마지막 키보드·마우스 입력 뒤 이만큼 지나야 새 작업을 받는다
+  min_user_idle_min?: number | null
+  // 실행 중 다른 프로그램 사용률이 상한을 넘었을 때
+  on_overload?: 'ask' | 'continue' | 'release' | null
 }
 
 
@@ -216,12 +250,14 @@ export interface UploadedFile {
 }
 
 export interface RunInputRecord {
-  kind: 'slot' | 'node'
+  // split: 파일을 나눠 실행한 블록의 원본 파일과 조각
+  kind: 'slot' | 'node' | 'split'
   id: string
   label: string
   node_ids: string[]
   files: { id: number; name: string }[]
   directories: { id: number; alias: string }[]
+  pieces?: { index: number; file_ids: number[]; label: string; name?: string }[]
 }
 
 export interface Task {

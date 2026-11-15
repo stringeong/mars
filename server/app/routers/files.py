@@ -11,6 +11,7 @@ from .. import models, schemas
 from ..config import UPLOAD_DIR
 from ..database import get_db
 from ..security import get_current_user
+from ..services.split_inputs import PIECE_PREFIX
 
 router = APIRouter(prefix="/files", tags=["files"])
 
@@ -30,7 +31,11 @@ def list_files(
 ):
     return (
         db.query(models.UploadedFile)
-        .filter(models.UploadedFile.user_id == user.id)
+        # 실행할 때 서버가 나눠 만든 조각 파일은 보관함에 보이지 않는다
+        .filter(
+            models.UploadedFile.user_id == user.id,
+            ~models.UploadedFile.stored_name.like(f"{PIECE_PREFIX}%"),
+        )
         .order_by(models.UploadedFile.created_at.desc())
         .all()
     )

@@ -30,8 +30,11 @@ def test_load_applies_runtime_server_and_ollama_urls(tmp_path, monkeypatch):
 
 def test_worker_ui_uses_shared_mars_visual_language():
     assert "https://marsflowlab.com/api" in webui.HTML
-    assert "grid-template-columns:224px" in webui.HTML
-    assert "WORKER CONSOLE" in webui.HTML
+    # 웹(styles.css)과 같은 토큰·사이드바 폭·글꼴을 쓰고, 영어 머리말 대신 한국어로 통일한다
+    assert "--primary:#1f1f1f" in webui.HTML
+    assert ".side{width:224px" in webui.HTML
+    assert "'Pretendard Variable','Pretendard'" in webui.HTML
+    assert "WORKER CONSOLE" not in webui.HTML
     assert ".worker-auth:not(.shell-hidden)+#appShell{display:none}" in webui.HTML
 
 
@@ -56,3 +59,51 @@ def test_worker_ui_exposes_device_controls_and_current_task():
     assert "/api/settings/name" in webui.HTML
     assert "/api/logout" in webui.HTML
     assert "/api/unregister" in webui.HTML
+
+
+def test_runtime_state_update_keeps_other_fields(tmp_path, monkeypatch):
+    monkeypatch.setenv("MARS_DATA_DIR", str(tmp_path))
+
+    runtime_state.update(account={"username": "hyunjeong"}, limits={"max_cpu_percent": 70})
+    runtime_state.write(status="running", task={"task_id": 1})
+    runtime_state.update(overload={"reason": "x"})
+
+    saved = runtime_state.read()
+    assert saved["account"] == {"username": "hyunjeong"}
+    assert saved["limits"] == {"max_cpu_percent": 70}
+    assert saved["status"] == "running" and saved["overload"] == {"reason": "x"}
+
+
+def test_worker_ui_shows_state_account_and_overload_controls():
+    for element in ('id="badge"', 'id="reason"', 'id="accountName"', 'id="switchAccount"', 'id="cpuOtherText"',
+                    'id="idle"', 'id="overloadBanner"', 'id="webLink"', "/api/overload", "/api/resume"):
+        assert element in webui.HTML
+
+
+def test_web_settings_link_follows_server_address():
+    assert webui.web_devices_url("https://marsflowlab.com/api") == "https://marsflowlab.com/devices"
+    assert webui.web_devices_url("http://localhost:8000/") == "http://localhost:5173/devices"
+    assert webui.web_devices_url("http://10.0.0.5:8000") == ""
+
+
+def test_status_returns_to_login_when_registration_was_removed(tmp_path, monkeypatch):
+    monkeypatch.setenv("MARS_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(config, "CONFIG_PATH", tmp_path / "agent_config.json")
+    monkeypatch.setattr(webui, "collect_specs", lambda: {})
+    monkeypatch.setattr(webui, "collect_runtime_stats", lambda: {})
+    config.save({**config.DEFAULTS, "api_key": "key", "device_name": "연구실 PC", "device_id": 3})
+    runtime_state.update(account={"username": "hyunjeong", "email": "h***@gmail.com"})
+
+    assert webui.status_payload(config.load())["account"]["username"] == "hyunjeong"
+
+    runtime_state.write(status="unregistered")
+    payload = webui.status_payload(config.load())
+    assert payload["registered"] is False and payload["account"] is None
+    assert "다시 로그인" in payload["notice"]
+    assert config.load()["api_key"] == ""
+
+
+def test_register_form_keeps_the_address_the_user_typed():
+    # 2초마다 상태를 읽을 때 사용자가 입력 중인 서버 주소를 설정값으로 덮어쓰지 않는다
+    assert "serverEdited" in webui.HTML
+    assert "if(!serverEdited&&document.activeElement!==$('#server'))" in webui.HTML

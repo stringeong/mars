@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { blockId, Demo, DemoBlock } from '../demos'
 import { Execution, Task } from '../types'
-import { TASK_STATUS, taskWorkerLabel } from '../workflow'
+import { executionStatusLabel, TASK_STATUS, taskWorkerLabel } from '../workflow'
 import ExecutionGantt from './ExecutionGantt'
 import ExecutionStageView from './ExecutionStageView'
 
@@ -147,21 +147,21 @@ export default function RunPreview({ demo, runKey }: { demo: Demo; runKey: numbe
     <div className="mk-run">
       <header className="result-header">
         <div>
-          <div className="result-title-row"><h1>Workflow result</h1><span className={`status-pill large ${execution.status}`}>{execution.status}</span></div>
+          <div className="result-title-row"><h1>실행 결과</h1><span className={`status-pill large ${execution.status}`}>{executionStatusLabel(execution.status)}</span></div>
           <p>{demo.prompt}</p>
         </div>
         <div className="result-actions"><button className="btn ghost" onClick={replay} disabled={active && started}>{active && started ? '실행 중…' : '▶ 다시 실행'}</button></div>
       </header>
 
       <section className="run-progress-card">
-        <div className="run-progress-heading"><span><i className={active ? 'pulse-dot' : 'check-dot'} /> {active ? 'Workflow is running' : 'Execution complete'}</span><strong>{execution.progress}%</strong></div>
+        <div className="run-progress-heading"><span><i className={active ? 'pulse-dot' : 'check-dot'} /> {active ? '실행 중이에요' : '실행이 끝났어요'}</span><strong>{execution.progress}%</strong></div>
         <div className="progress-bar"><div style={{ width: `${execution.progress}%` }} /></div>
         {!active && <small className="mk-run-saved">한 기기로 순서대로 했다면 약 {sequential}초 → 나눠서 {Math.round(plan.total)}초 만에 끝났어요 (미리보기는 {SPEED}배속)</small>}
       </section>
 
       <section className="result-section">
         <div className="result-section-heading timeline-heading">
-          <div><h2>Agent collaboration</h2><p>같은 단계(열)의 블록은 동시에 실행될 수 있습니다. 블록마다 배정 워커, 시작·종료 시각, 소요 시간을 보여줍니다.</p></div>
+          <div><h2>에이전트 진행 상황</h2><p>같은 단계(열)의 블록은 동시에 실행될 수 있습니다. 블록마다 배정 워커, 시작·종료 시각, 소요 시간을 보여줍니다.</p></div>
           <div className="view-toggle" role="group" aria-label="타임라인 보기 방식">
             <button type="button" className={view === 'stages' ? 'active' : ''} aria-pressed={view === 'stages'} onClick={() => setView('stages')}>단계 보기</button>
             <button type="button" className={view === 'gantt' ? 'active' : ''} aria-pressed={view === 'gantt'} onClick={() => setView('gantt')}>간트 보기</button>
@@ -174,10 +174,10 @@ export default function RunPreview({ demo, runKey }: { demo: Demo; runKey: numbe
       </section>
 
       {execution.result
-        ? <section className="final-result-card mk-run-final"><div className="result-section-heading"><div><h2>Generated result</h2></div><button className="btn sm ghost" onClick={downloadResult}>Download</button></div><article className="result-box">{execution.result}</article></section>
-        : <section className="final-result-card mk-run-final-wait"><h2>Generated result</h2><p>{started ? '마지막 블록이 끝나면 최종 결과가 여기에 나와요.' : '실행을 시작하면 진행 상황이 실시간으로 바뀌어요.'}</p></section>}
+        ? <section className="final-result-card mk-run-final"><div className="result-section-heading"><div><h2>최종 결과</h2></div><button className="btn sm ghost" onClick={downloadResult}>다운로드</button></div><article className="result-box">{execution.result}</article></section>
+        : <section className="final-result-card mk-run-final-wait"><h2>최종 결과</h2><p>{started ? '마지막 블록이 끝나면 최종 결과가 여기에 나와요.' : '실행을 시작하면 진행 상황이 실시간으로 바뀌어요.'}</p></section>}
 
-      {execution.tasks.some((task) => task.output) && <section className="agent-output-section"><h2>Agent outputs</h2>{execution.tasks.filter((task) => task.output).map((task) => <details key={task.id}><summary><span>{task.agent_name}</span><small>{taskWorkerLabel(task)}</small></summary><div className="result-box">{task.output}</div></details>)}</section>}
+      {execution.tasks.some((task) => task.output) && <section className="agent-output-section"><h2>에이전트별 출력</h2>{execution.tasks.filter((task) => task.output).map((task) => <details key={task.id}><summary><span>{task.agent_name}</span><small>{taskWorkerLabel(task)}</small></summary><div className="result-box">{task.output}</div></details>)}</section>}
     </div>
   </div>
 }

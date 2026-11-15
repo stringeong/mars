@@ -19,22 +19,23 @@ export default function AgentBlockNode({ data, selected }: { data: any; selected
       <div className="agent-block-tags">
         <div className="agent-block-tag" style={{ background: category.color }}>{category.tag}</div>
         {data.final && <div className="agent-block-tag agent-final-tag">FINAL</div>}
+        {data.split && <div className="agent-block-tag agent-split-tag" title="실행할 때 파일을 나눠 여러 워커에서 동시에 실행합니다">{data.split.parts > 1 ? `나눠서 ×${data.split.parts}` : '나눠서 병렬'}</div>}
       </div>
       <div className="agent-block-name">{data.label}</div>
       <div className="agent-block-model">{data.model || '기본 모델'}</div>
 
       <div className="agent-resources">
         <div className="resource-slot worker-slot">
-          <span>⚙ Worker</span>
+          <span>⚙ 워커</span>
           <strong>{data.workerName || '자동 배정'}</strong>
         </div>
         <div className="resource-slot directory-slot">
-          <span>▣ Directory</span>
+          <span>▣ 폴더</span>
           <strong>{directories.length ? directories.join(', ') : '없음'}</strong>
         </div>
         <div className="resource-slot file-slot">
-          <span>Files</span>
-          <strong>{files.length ? files.join(', ') : 'None'}</strong>
+          <span>파일</span>
+          <strong>{files.length ? files.join(', ') : '없음'}</strong>
         </div>
       </div>
 

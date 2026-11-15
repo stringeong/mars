@@ -42,12 +42,40 @@ def _chunk_document(path: str, content: str) -> list[str]:
     ]
 
 
+# 답을 쓰는 데 남겨 둘 토큰. reasoning 모델은 생각하는 과정도 여기에 쓴다
+_OUTPUT_RESERVE_TOKENS = 8192
+_MIN_CONTEXT_TOKENS = 8192
+
+
+def _max_context_tokens() -> int:
+    """한 번에 쓸 최대 문맥 길이. 문맥이 길수록 Ollama가 메모리를 더 쓰므로 기기에 맞게 줄일 수 있다."""
+    try:
+        return max(_MIN_CONTEXT_TOKENS, int(os.getenv("MARS_MAX_CONTEXT", "32768")))
+    except ValueError:
+        return 32768
+
+
+def context_tokens(messages: list[dict]) -> int:
+    """이번 요청에 필요한 문맥 길이(num_ctx).
+
+    지정하지 않으면 Ollama 기본값(4096 등)으로 떠서 긴 입력의 앞부분을 말없이 잘라 버린다.
+    로그·CSV처럼 숫자가 많은 글은 글자 하나가 토큰 하나 가까이 되므로 글자 수를 그대로 토큰 수로 잡는다.
+    """
+    estimate = sum(len(str(message.get("content") or "")) for message in messages)
+    needed = estimate + _OUTPUT_RESERVE_TOKENS
+    rounded = -(-needed // 1024) * 1024
+    limit = _max_context_tokens()
+    if rounded > limit:
+        print(f"  입력이 커서 문맥 상한({limit:,}토큰)을 넘을 수 있습니다. 앞부분이 잘릴 수 있어요: 약 {estimate:,}자")
+    return min(max(_MIN_CONTEXT_TOKENS, rounded), limit)
+
+
 def _chat(config: dict, model: str, messages: list[dict], temperature: float, response_format: str | None = None) -> str:
     payload = {
         "model": model,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": temperature, "num_predict": _max_output_tokens()},
+        "options": {"temperature": temperature, "num_predict": _max_output_tokens(), "num_ctx": context_tokens(messages)},
     }
     if response_format:
         payload["format"] = response_format

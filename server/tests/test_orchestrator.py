@@ -460,3 +460,55 @@ class TestExecutionProgress:
         db.refresh(execution)
 
         assert orchestrator.execution_progress(execution) == 66.7
+
+
+class TestCapacityBlock:
+    """새 작업을 줄 수 있는지: 다른 프로그램 사용률, 자리 비움 기준, 넘김 뒤 일시 중지."""
+
+    def _device(self, make_user, make_device, db, **specs):
+        device = make_device(make_user(), last_heartbeat=models.utcnow())
+        device.specs = specs
+        return device
+
+    def test_own_ollama_load_does_not_block_new_tasks(self, make_user, make_device, db):
+        device = self._device(
+            make_user, make_device, db,
+            cpu_percent=92, mars_cpu_percent=85, other_cpu_percent=7, resource_limits={"max_cpu_percent": 70},
+        )
+        assert orchestrator.device_has_capacity(device) is True
+
+    def test_other_programs_over_the_limit_block(self, make_user, make_device, db):
+        device = self._device(
+            make_user, make_device, db, cpu_percent=80, other_cpu_percent=72, resource_limits={"max_cpu_percent": 70},
+        )
+        assert orchestrator.capacity_block(device) == ("busy", "다른 프로그램 CPU 72%가 상한 70% 이상입니다.")
+
+    def test_old_worker_without_split_uses_total_cpu(self, make_user, make_device, db):
+        device = self._device(make_user, make_device, db, cpu_percent=80, resource_limits={"max_cpu_percent": 70})
+        assert orchestrator.capacity_block(device)[1] == "CPU 80%가 상한 70% 이상입니다."
+
+    def test_user_idle_threshold(self, make_user, make_device, db):
+        device = self._device(make_user, make_device, db, user_idle_sec=60, resource_limits={"min_user_idle_min": 5})
+        assert orchestrator.capacity_block(device)[0] == "user_active"
+        device.specs = {**device.specs, "user_idle_sec": 400}
+        assert orchestrator.device_has_capacity(device) is True
+
+    def test_idle_rule_is_off_by_default_and_skipped_when_unmeasurable(self, make_user, make_device, db):
+        device = self._device(make_user, make_device, db, user_idle_sec=1)
+        assert orchestrator.device_has_capacity(device) is True
+        device.specs = {"user_idle_sec": None, "resource_limits": {"min_user_idle_min": 5}}
+        assert orchestrator.device_has_capacity(device) is True
+
+    def test_paused_device_gets_no_tasks_until_the_pause_ends(self, make_user, make_device, db):
+        later = (models.utcnow() + timedelta(minutes=4)).isoformat()
+        device = self._device(make_user, make_device, db, paused_until=later)
+        assert orchestrator.capacity_block(device)[0] == "paused"
+        device.specs = {"paused_until": (models.utcnow() - timedelta(seconds=1)).isoformat()}
+        assert orchestrator.device_has_capacity(device) is True
+
+    def test_device_state_for_the_device_list(self, make_user, make_device, db):
+        device = self._device(make_user, make_device, db)
+        assert orchestrator.device_state(device, running=False)[0] == "available"
+        assert orchestrator.device_state(device, running=True)[0] == "running"
+        device.last_heartbeat = None
+        assert orchestrator.device_state(device, running=False)[0] == "offline"

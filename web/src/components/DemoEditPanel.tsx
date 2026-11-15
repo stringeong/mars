@@ -44,7 +44,7 @@ export default function DemoEditPanel({ block, edit, onChange, onReset, onRun }:
           <option value="anthropic">Cloud · Anthropic</option>
           <option value="gemini">Cloud · Google Gemini</option>
         </select>
-        <label htmlFor="demo-worker">컴퓨팅 자원 (Worker)</label>
+        <label htmlFor="demo-worker">컴퓨팅 자원 (워커)</label>
         <select id="demo-worker" disabled={!local} value={edit.worker} onChange={(event) => onChange({ ...edit, worker: event.target.value })}>
           <option value="">자동 배정</option>
           {DEMO_WORKERS.map((name) => <option key={name} value={name}>{name} · 온라인</option>)}
@@ -54,7 +54,7 @@ export default function DemoEditPanel({ block, edit, onChange, onReset, onRun }:
       <div>
         <label htmlFor="demo-model">모델</label>
         <select id="demo-model" value={edit.model} onChange={(event) => onChange({ ...edit, model: event.target.value })}>
-          <option value="">{local ? `Worker 기본 모델 · ${DEMO_DEFAULT_MODEL}` : `공급자 기본 모델 · ${models[0]}`}</option>
+          <option value="">{local ? `워커 기본 모델 · ${DEMO_DEFAULT_MODEL}` : `공급자 기본 모델 · ${models[0]}`}</option>
           {models.map((model) => <option key={model} value={model}>{model}</option>)}
         </select>
         <small className="muted">블록마다 다른 모델을 고를 수 있어요. 검수 블록만 큰 모델로 두는 식이에요.</small>
@@ -62,7 +62,7 @@ export default function DemoEditPanel({ block, edit, onChange, onReset, onRun }:
           <div className="uploaded-file-heading">
             <strong>첨부 파일</strong>
             <div className="file-picker-actions"><button type="button" className="btn sm ghost" onClick={() => fileRef.current?.click()}>새 파일 업로드</button></div>
-            <input ref={fileRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx" onChange={(event) => addFiles(event.target.files)} />
+            <input ref={fileRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx,.json" onChange={(event) => addFiles(event.target.files)} />
           </div>
           <small className="file-picker-help">이 블록이 실행할 때 우선 읽는 파일이에요. 예시 화면이라 고른 파일은 어디에도 올라가지 않아요.</small>
           <div className="selected-file-list">

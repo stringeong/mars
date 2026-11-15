@@ -1,5 +1,5 @@
 import { api, ApiError } from './api'
-import { AgentNode, GenerationInfo, RunInputRecord, Task, ValidationIssue, ValidationResult } from './types'
+import { AgentNode, Device, GenerationInfo, RunInputRecord, SplitPreview, SplitSettings, Task, ValidationIssue, ValidationResult } from './types'
 
 export type FlagExplanation = { manual: boolean; reason: string }
 export type AutoFlagReasons = { needsFile: FlagExplanation; final: FlagExplanation }
@@ -78,6 +78,13 @@ export const TASK_STATUS: Record<string, { label: string; icon: string }> = {
   running: { label: '실행 중', icon: '▶' },
   done: { label: '완료', icon: '✓' },
   failed: { label: '실패', icon: '✕' },
+}
+
+/** 실행 상태 이름 */
+export const EXECUTION_STATUS: Record<string, string> = { pending: '대기', running: '실행 중', completed: '완료', failed: '실패', cancelled: '취소' }
+
+export function executionStatusLabel(status: string) {
+  return EXECUTION_STATUS[status] ?? status
 }
 
 export function taskStatus(status: string) {
@@ -222,4 +229,60 @@ export function issuesByNode(validation: ValidationResult | null | undefined) {
 /** 실행 프롬프트를 넣어도 풀리지 않는 오류 */
 export function blockingErrors(validation: ValidationResult | null | undefined) {
   return (validation?.errors ?? []).filter((issue) => !issue.resolvable_by_run_prompt)
+}
+
+/** 기기 아이콘 종류: macOS(Darwin)는 노트북, 나머지는 모니터 */
+export function deviceIcon(device: Device): 'laptop' | 'desktop' {
+  return /darwin|mac/i.test(`${JSON.stringify(device.specs ?? {})} ${device.name}`) ? 'laptop' : 'desktop'
+}
+
+/** 온라인 기기가 앞에 오도록 정렬 */
+export function sortDevices(devices: Device[]) {
+  return [...devices].sort((a, b) => Number(b.online) - Number(a.online))
+}
+
+/** '방금', '5분 전', '3시간 전', '어제', 그보다 오래되면 '26.11.10' */
+export function timeAgo(value: string) {
+  const minutes = Math.floor((Date.now() - new Date(value).getTime()) / 60000)
+  if (minutes < 1) return '방금'
+  if (minutes < 60) return `${minutes}분 전`
+  if (minutes < 60 * 24) return `${Math.floor(minutes / 60)}시간 전`
+  if (minutes < 60 * 48) return '어제'
+  return shortDate(value)
+}
+
+
+const pad2 = (value: number) => String(value).padStart(2, '0')
+
+/** 날짜를 '26.11.10' 모양으로 */
+export function shortDate(value: string) {
+  const date = new Date(value)
+  return `${pad2(date.getFullYear() % 100)}.${pad2(date.getMonth() + 1)}.${pad2(date.getDate())}`
+}
+
+/** 날짜와 시각을 '26.11.10 16:53' 모양으로 */
+export function shortDateTime(value: string) {
+  const date = new Date(value)
+  return `${shortDate(value)} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+export const DEFAULT_SPLIT: SplitSettings = { enabled: false, unit: 'auto', parts: 'auto', overlap_lines: 0, max_chars: 12000 }
+
+/** "667 / 667 / 666줄"처럼 조각별 크기를 보여준다. 조각이 많으면 범위로 줄인다 */
+export function splitSizes(preview: SplitPreview) {
+  const { sizes, unit_label: unit } = preview
+  if (preview.unit === 'file') return `파일 ${sizes.join(' / ')}개씩`
+  if (sizes.length <= 6) return `${sizes.join(' / ')}${unit}`
+  const [min, max] = [Math.min(...sizes), Math.max(...sizes)]
+  return min === max ? `조각마다 ${max}${unit}` : `조각마다 ${min}~${max}${unit}`
+}
+
+/** "현재 사용 가능한 워커 2대 → 3조각 예상 (667 / 667 / 666줄)" */
+export function splitPreviewText(preview: SplitPreview) {
+  if (preview.parts <= 1) return `현재 사용 가능한 워커 ${preview.workers}대 → 나누지 않고 한 번에 실행해요 (파일이 작아요)`
+  if (!preview.auto) {
+    const queue = preview.parts > preview.workers ? ` · 워커 ${preview.workers}대가 차례로 나눠 처리` : ` · 사용 가능한 워커 ${preview.workers}대`
+    return `직접 정한 ${preview.parts}조각 (${splitSizes(preview)})${queue}`
+  }
+  return `현재 사용 가능한 워커 ${preview.workers}대 → ${preview.parts}조각 예상 (${splitSizes(preview)})`
 }

@@ -1035,3 +1035,415 @@ def test_device_registration_persists_only_key_digest(client, db):
     assert client.post(
         "/worker/heartbeat", headers={"X-Device-Key": raw_key}
     ).status_code == 200
+
+
+class TestFileSplit:
+    """파일 나눠서 병렬 실행: 실행할 때 파일을 나누고 블록을 조각 수만큼 펼친다."""
+
+    @pytest.fixture(autouse=True)
+    def uploads(self, tmp_path, monkeypatch):
+        for module in ("app.routers.files", "app.routers.worker", "app.services.split_inputs"):
+            monkeypatch.setattr(f"{module}.UPLOAD_DIR", tmp_path)
+        return tmp_path
+
+    def _workers(self, client, auth, count):
+        keys = [register_device(client, auth, name=f"워커{index}") for index in range(1, count + 1)]
+        for key in keys:
+            client.post("/worker/heartbeat", headers=key)
+        return keys
+
+    def _split_service(self, client, auth, file_ids, **split):
+        """a(분할) -> b -> c. a에 파일을 직접 연결한다."""
+        service = create_service(client, auth)
+        graph = editable_graph(service)
+        graph["nodes"][0].update(uploaded_file_ids=file_ids, split={"enabled": True, **split})
+        r = client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def _start(self, client, auth, service, **body):
+        r = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "이상 징후 찾기", **body}, headers=auth)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    def _finish(self, client, key, task, output):
+        r = client.post(f"/worker/tasks/{task['task_id']}/result", json={"status": "done", "output": output}, headers=key)
+        assert r.status_code == 200, r.text
+
+    def test_log_is_split_across_two_workers_and_merged_in_order(self, client, uploads):
+        auth = signup_and_login(client)
+        first, second = self._workers(client, auth, 2)
+        log = "".join(f"line {index}\n" for index in range(1, 2001)).encode()
+        source = upload(client, auth, "BGL_2k.log", log)
+        service = self._split_service(client, auth, [source["id"]], max_chars=30_000)
+
+        # 저장·미리보기: 지금 Worker 수로 예상 조각을 알려준다
+        assert service["validation"]["splits"] == [{
+            "node_id": "a", "unit": "line", "unit_label": "줄", "workers": 2, "parts": 2, "auto": True,
+            "sizes": [1000, 1000], "overlap_lines": 0, "source_name": "BGL_2k.log",
+        }]
+        preview = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x"}, headers=auth).json()
+        assert preview["validation"]["splits"][0]["sizes"] == [1000, 1000]
+        # 미리보기는 조각 파일을 만들지 않는다
+        assert len(list(uploads.iterdir())) == 1
+
+        execution = self._start(client, auth, service)
+        assert execution["stages"] == [["a__p01", "a__p02"], ["b"], ["c"]]
+        assert [t["agent_name"] for t in execution["tasks"]] == ["에이전트 a #1", "에이전트 a #2", "에이전트 b", "에이전트 c"]
+        record = execution["input_files"][-1]
+        assert record["kind"] == "split" and record["files"] == [{"id": source["id"], "name": "BGL_2k.log"}]
+        assert [(p["label"], p["name"]) for p in record["pieces"]] == [
+            ("1~1000줄", "BGL_2k.part01of02.log"), ("1001~2000줄", "BGL_2k.part02of02.log"),
+        ]
+        # 저장된 워크플로우는 펼쳐지지 않는다
+        saved = client.get(f"/services/{service['id']}", headers=auth).json()
+        assert [n["id"] for n in saved["graph"]["nodes"]] == ["a", "b", "c"]
+
+        # 두 Worker가 조각을 하나씩 동시에 가져간다
+        task1 = client.post("/worker/tasks/next", headers=first).json()
+        task2 = client.post("/worker/tasks/next", headers=second).json()
+        assert [task1["agent_name"], task2["agent_name"]] == ["에이전트 a #1", "에이전트 a #2"]
+        assert task1["role_prompt"] == task2["role_prompt"] == "a 역할"
+        assert "원본 'BGL_2k.log'의 1001~2000줄" in task2["input_context"]
+        piece = task2["uploaded_files"][0]
+        assert piece["original_name"] == "BGL_2k.part02of02.log"
+        content = client.get(f"/worker/files/{piece['id']}", headers=second).content
+        assert content == "".join(f"line {index}\n" for index in range(1001, 2001)).encode()
+        body = client.get(f"/executions/{execution['id']}", headers=auth).json()
+        assert sorted(t["assigned_device_name"] for t in body["tasks"] if t["status"] == "running") == ["워커1", "워커2"]
+
+        # 뒤 조각이 먼저 끝나도 다음 블록은 조각 순서대로 받는다
+        self._finish(client, second, task2, "뒤쪽 결과")
+        assert client.post("/worker/tasks/next", headers=second).status_code == 204
+        self._finish(client, first, task1, "앞쪽 결과")
+        merged = client.post("/worker/tasks/next", headers=first).json()
+        assert merged["agent_name"] == "에이전트 b"
+        context = merged["input_context"]
+        assert "[이전 단계: 에이전트 a #1의 결과 · 1~1000줄]\n앞쪽 결과" in context
+        assert context.index("앞쪽 결과") < context.index("[이전 단계: 에이전트 a #2의 결과 · 1001~2000줄]\n뒤쪽 결과")
+
+        # 조각 파일은 보관함에 보이지 않고, 실행 이력을 지우면 함께 지워진다
+        assert [f["id"] for f in client.get("/files", headers=auth).json()] == [source["id"]]
+        assert len(list(uploads.iterdir())) == 3
+        client.post(f"/executions/{execution['id']}/cancel", headers=auth)
+        assert client.delete(f"/executions/{execution['id']}", headers=auth).status_code == 204
+        assert len(list(uploads.iterdir())) == 1
+        assert [f["id"] for f in client.get("/files", headers=auth).json()] == [source["id"]]
+
+    def test_csv_rows_keep_header_and_overlap_marks_context(self, client):
+        auth = signup_and_login(client)
+        (key,) = self._workers(client, auth, 1)
+        rows = "id,answer\n" + "".join(f"{index},답안 {index}\n" for index in range(1, 61))
+        answers = upload(client, auth, "answers.csv", rows.encode())
+        service = self._split_service(client, auth, [answers["id"]], parts=4)
+        assert service["validation"]["splits"][0] | {"sizes": None} == {
+            "node_id": "a", "unit": "csv", "unit_label": "행", "workers": 1, "parts": 4, "auto": False,
+            "sizes": None, "overlap_lines": 0, "source_name": "answers.csv",
+        }
+        execution = self._start(client, auth, service)
+        assert execution["stages"][0] == ["a__p01", "a__p02", "a__p03", "a__p04"]
+        seen: list[str] = []
+        for index in range(1, 5):
+            task = client.post("/worker/tasks/next", headers=key).json()
+            lines = client.get(f"/worker/files/{task['uploaded_files'][0]['id']}", headers=key).text.splitlines()
+            assert lines[0] == "id,answer"
+            seen += lines[1:]
+            self._finish(client, key, task, f"채점 {index}")
+        assert seen == [f"{index},답안 {index}" for index in range(1, 61)]
+        context = client.post("/worker/tasks/next", headers=key).json()["input_context"]
+        assert [context.index(f"채점 {index}") for index in range(1, 5)] == sorted(context.index(f"채점 {index}") for index in range(1, 5))
+        assert "의 결과 · 16~30행]" in context
+
+        # 줄 단위 + 겹침: 직전 조각의 끝부분이 참고 문맥으로만 붙는다
+        log = upload(client, auth, "chat.txt", "".join(f"msg {index}\n" for index in range(1, 41)).encode())
+        service = self._split_service(client, auth, [log["id"]], parts=2, overlap_lines=5)
+        self._start(client, auth, service)
+        client.post("/worker/tasks/next", headers=key)
+        task = client.post("/worker/tasks/next", headers=key).json()
+        text = client.get(f"/worker/files/{task['uploaded_files'][0]['id']}", headers=key).text
+        assert text.startswith("[참고 문맥: 16~20줄. 이해에만 쓰고 판정하지 마세요]\nmsg 16\n")
+        assert "\n[처리 대상: 21~40줄]\nmsg 21\n" in text
+        assert "참고 문맥" in task["input_context"]
+
+    def test_several_files_are_dealt_out_without_new_files(self, client, uploads):
+        auth = signup_and_login(client)
+        self._workers(client, auth, 2)
+        ids = [upload(client, auth, name, b"text\n")["id"] for name in ("a.pdf", "b.txt", "c.md")]
+        service = self._split_service(client, auth, ids)
+        assert service["validation"]["splits"][0]["unit"] == "file"
+        assert service["validation"]["splits"][0]["sizes"] == [2, 1]
+        execution = self._start(client, auth, service)
+        assert execution["stages"][0] == ["a__p01", "a__p02"]
+        assert [p["file_ids"] for p in execution["input_files"][-1]["pieces"]] == [[ids[0], ids[2]], [ids[1]]]
+        assert len(list(uploads.iterdir())) == 3
+
+    def test_small_file_with_one_worker_runs_unsplit(self, client, uploads):
+        auth = signup_and_login(client)
+        self._workers(client, auth, 1)
+        source = upload(client, auth, "note.txt", b"one\ntwo\n")
+        service = self._split_service(client, auth, [source["id"]])
+        assert service["validation"]["splits"][0]["parts"] == 1
+        execution = self._start(client, auth, service, acknowledge_warnings=True)
+        assert execution["stages"] == [["a"], ["b"], ["c"]]
+        assert [r["kind"] for r in execution["input_files"]] == ["node"]
+        assert len(list(uploads.iterdir())) == 1
+
+    def test_piece_left_by_a_lost_worker_is_finished_by_another(self, client, db):
+        auth = signup_and_login(client)
+        first, second = self._workers(client, auth, 2)
+        source = upload(client, auth, "run.log", "".join(f"l{index}\n" for index in range(100)).encode())
+        service = self._split_service(client, auth, [source["id"]])
+        self._start(client, auth, service)
+        lost = client.post("/worker/tasks/next", headers=first).json()
+        kept = client.post("/worker/tasks/next", headers=second).json()
+        # 워커1이 꺼져 하트비트가 끊긴다
+        device = db.query(models.Device).filter_by(name="워커1").one()
+        device.last_heartbeat = models.utcnow() - timedelta(minutes=5)
+        db.commit()
+        self._finish(client, second, kept, "둘째 조각")
+        again = client.post("/worker/tasks/next", headers=second).json()
+        assert again["task_id"] == lost["task_id"] and again["agent_name"] == "에이전트 a #1"
+
+    def test_split_problems_are_reported_before_running(self, client):
+        auth = signup_and_login(client)
+        pdf = upload(client, auth, "report.pdf", b"%PDF")
+        service = self._split_service(client, auth, [pdf["id"]])
+
+        def codes(result, severity="errors"):
+            return [issue["code"] for issue in result[severity]]
+
+        def validate(patch):
+            graph = editable_graph(service)
+            graph["nodes"][0].update(patch)
+            return client.post(f"/services/{service['id']}/validate", json={"graph": graph}, headers=auth).json()
+
+        # 온라인 Worker가 없어도 형식 문제를 먼저 알린다
+        assert codes(service["validation"]) == ["split_unsupported"]
+        log = upload(client, auth, "run.log", b"a\nb\nc\n")
+        assert codes(validate({"uploaded_file_ids": [log["id"]]})) == ["split_no_worker"]
+        self._workers(client, auth, 1)
+        assert codes(validate({"uploaded_file_ids": [log["id"]]})) == []
+        assert codes(validate({"uploaded_file_ids": [log["id"], pdf["id"]], "split": {"enabled": True, "unit": "line"}})) == ["split_unsupported"]
+        assert codes(validate({"uploaded_file_ids": [log["id"]], "provider": "openai", "executor": "cloud"})) == ["split_cloud"]
+        assert codes(validate({"uploaded_file_ids": [], "text_input_enabled": True})) == ["split_no_file"]
+        big = upload(client, auth, "big.log", ("x" * 99 + "\n").encode() * 20_000)
+        assert codes(validate({"uploaded_file_ids": [big["id"]]})) == ["split_too_large"]
+
+        # 실행도 같은 검사로 막는다
+        r = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "x"}, headers=auth)
+        assert r.status_code == 422
+        assert r.json()["detail"]["validation"]["errors"][0]["code"] == "split_unsupported"
+
+        # 뒤에 모을 블록이 없으면 경고만 한다
+        graph = editable_graph(service)
+        graph["nodes"] = [graph["nodes"][2]]
+        graph["edges"] = []
+        graph["nodes"][0].update(uploaded_file_ids=[log["id"]], split={"enabled": True})
+        result = client.post(f"/services/{service['id']}/validate", json={"graph": graph}, headers=auth).json()
+        assert (codes(result), codes(result, "warnings")) == ([], ["split_no_next"])
+
+    def test_split_settings_are_validated_on_save(self, client):
+        auth = signup_and_login(client)
+        service = create_service(client, auth)
+        graph = editable_graph(service)
+        graph["nodes"][0]["split"] = {"enabled": True, "parts": 500}
+        assert client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth).status_code == 422
+
+
+class TestWorkerLoadAndAccount:
+    """Worker 사용률 경고·유휴 판단: 넘김, 일시 중지, 자리 비움, 계정 표시."""
+
+    def _two_workers(self, client):
+        auth = signup_and_login(client)
+        first = register_device(client, auth, name="A")
+        second = register_device(client, auth, name="B")
+        for key in (first, second):
+            client.post("/worker/heartbeat", headers=key)
+        return auth, first, second
+
+    def _device(self, client, auth, name):
+        return next(d for d in client.get("/devices", headers=auth).json() if d["name"] == name)
+
+    def test_released_task_is_finished_by_another_worker(self, client):
+        auth, first, second = self._two_workers(client)
+        service = create_service(client, auth)
+        execution = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "실행"}, headers=auth).json()
+        task = client.post("/worker/tasks/next", headers=first).json()
+
+        released = client.post(f"/worker/tasks/{task['task_id']}/release", headers=first)
+        assert released.status_code == 200 and released.json()["paused_until"]
+        # 넘긴 A는 5분 동안 새 작업을 받지 않고, 그 이유가 기기 목록에 보인다
+        assert client.post("/worker/tasks/next", headers=first).status_code == 204
+        device = self._device(client, auth, "A")
+        assert device["state"] == "paused" and "5분" in device["state_reason"]
+
+        # B가 같은 작업을 이어받아 끝낸다
+        again = client.post("/worker/tasks/next", headers=second).json()
+        assert again["task_id"] == task["task_id"]
+        assert self._device(client, auth, "B")["state"] == "running"
+        # A가 늦게 보낸 결과는 거부된다
+        late = client.post(f"/worker/tasks/{task['task_id']}/result", json={"status": "done", "output": "늦은 결과"}, headers=first)
+        assert late.status_code == 404
+        done = client.post(f"/worker/tasks/{task['task_id']}/result", json={"status": "done", "output": "B 결과"}, headers=second)
+        assert done.status_code == 200
+        body = client.get(f"/executions/{execution['id']}", headers=auth).json()
+        assert [(t["status"], t["assigned_device_name"]) for t in body["tasks"]][0] == ("done", "B")
+
+        # 다른 기기의 작업은 넘길 수 없고, 끝난 작업도 넘길 수 없다
+        assert client.post(f"/worker/tasks/{task['task_id']}/release", headers=first).status_code == 404
+        assert client.post(f"/worker/tasks/{task['task_id']}/release", headers=second).status_code == 409
+
+        # Worker 화면에서 일시 중지를 풀면 다시 받는다. Worker가 보낸 값으로 일시 중지를 덮어쓸 수는 없다
+        client.post("/worker/heartbeat", json={"specs": {"paused_until": None, "resource_limits": {}}}, headers=first)
+        assert self._device(client, auth, "A")["state"] == "paused"
+        assert client.post("/worker/resume", headers=first).status_code == 200
+        assert self._device(client, auth, "A")["state"] == "available"
+
+    def test_idle_threshold_and_overload_settings(self, client):
+        auth, first, _ = self._two_workers(client)
+        device = self._device(client, auth, "A")
+        r = client.patch(
+            f"/devices/{device['id']}",
+            json={"resource_limits": {"max_cpu_percent": 70, "min_user_idle_min": 5, "on_overload": "release"}},
+            headers=auth,
+        )
+        assert r.status_code == 200
+        assert r.json()["resource_limits"] == {
+            "max_cpu_percent": 70, "max_gpu_percent": None, "min_user_idle_min": 5, "on_overload": "release",
+        }
+        bad = client.patch(f"/devices/{device['id']}", json={"resource_limits": {"on_overload": "explode"}}, headers=auth)
+        assert bad.status_code == 422
+
+        service = create_service(client, auth)
+        client.post(f"/services/{service['id']}/executions", json={"run_prompt": "실행"}, headers=auth)
+        # 사용자가 1분 전에 입력했으면 안 받고, 기준(5분)을 넘기면 받는다
+        client.post("/worker/heartbeat", json={"specs": {"user_idle_sec": 60, "other_cpu_percent": 5}}, headers=first)
+        assert client.post("/worker/tasks/next", headers=first).status_code == 204
+        assert self._device(client, auth, "A")["state"] == "user_active"
+        client.post("/worker/heartbeat", json={"specs": {"user_idle_sec": 400, "other_cpu_percent": 5}}, headers=first)
+        assert client.post("/worker/tasks/next", headers=first).status_code == 200
+
+    def test_heartbeat_tells_the_worker_its_account_and_limits(self, client):
+        auth = signup_and_login(client, username="hyunjeong", email="hyunjeong@example.com")
+        key = register_device(client, auth, name="연구실 PC")
+        device = self._device(client, auth, "연구실 PC")
+        client.patch(f"/devices/{device['id']}", json={"resource_limits": {"max_cpu_percent": 70}}, headers=auth)
+
+        body = client.post("/worker/heartbeat", headers=key).json()
+        assert body["ok"] is True and body["device_id"] == device["id"] and body["device_name"] == "연구실 PC"
+        assert body["account"] == {"username": "hyunjeong", "email": "h***@example.com"}
+        assert body["resource_limits"] == {"max_cpu_percent": 70} and body["paused_until"] is None
+
+        # 웹에서 기기를 지우면 하트비트가 401로 실패해 Worker가 다시 로그인하게 된다
+        assert client.delete(f"/devices/{device['id']}", headers=auth).status_code == 204
+        assert client.post("/worker/heartbeat", headers=key).status_code == 401
+
+
+class TestSplitFromRunScreen:
+    """실행 화면에서 이번 실행에만 분할을 켜고 끈다. 저장된 워크플로우는 바뀌지 않는다."""
+
+    @pytest.fixture(autouse=True)
+    def uploads(self, tmp_path, monkeypatch):
+        for module in ("app.routers.files", "app.routers.worker", "app.services.split_inputs"):
+            monkeypatch.setattr(f"{module}.UPLOAD_DIR", tmp_path)
+
+    def test_turning_split_on_for_one_run(self, client):
+        auth = signup_and_login(client)
+        for name in ("A", "B"):
+            client.post("/worker/heartbeat", headers=register_device(client, auth, name=name))
+        log = upload(client, auth, "big.log", "".join(f"line {i}\n" for i in range(1, 1001)).encode())
+        service = create_service(client, auth)
+        inputs = {"nodes": {"a": [log["id"]]}, "split": {"a": True}}
+
+        preview = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": inputs}, headers=auth).json()
+        assert [(s["node_id"], s["parts"], s["sizes"]) for s in preview["validation"]["splits"]] == [("a", 2, [500, 500])]
+
+        execution = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "x", "input_files": inputs}, headers=auth)
+        assert execution.status_code == 201, execution.text
+        assert execution.json()["stages"][0] == ["a__p01", "a__p02"]
+        saved = client.get(f"/services/{service['id']}", headers=auth).json()
+        assert not (saved["graph"]["nodes"][0].get("split") or {}).get("enabled")
+
+        # 끄면 나누지 않는다
+        off = {"nodes": {"a": [log["id"]]}, "split": {"a": False}}
+        preview = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": off}, headers=auth).json()
+        assert preview["validation"]["splits"] == []
+
+    def test_turning_off_keeps_saved_split_settings_for_later(self, client):
+        auth = signup_and_login(client)
+        client.post("/worker/heartbeat", headers=register_device(client, auth))
+        log = upload(client, auth, "big.log", b"a\nb\nc\nd\n")
+        service = create_service(client, auth)
+        graph = editable_graph(service)
+        graph["nodes"][0].update(uploaded_file_ids=[log["id"]], split={"enabled": True, "parts": 4})
+        client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
+        on = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": {"split": {"a": True}}}, headers=auth).json()
+        # 편집 화면에서 정한 조각 수(4)를 그대로 쓴다
+        assert on["validation"]["splits"][0]["parts"] == 4
+        off = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": {"split": {"a": False}}}, headers=auth).json()
+        assert off["validation"]["splits"] == []
+
+    def test_unknown_block_is_rejected(self, client):
+        auth = signup_and_login(client)
+        service = create_service(client, auth)
+        r = client.post(f"/services/{service['id']}/executions/preview", json={"input_files": {"split": {"ghost": True}}}, headers=auth)
+        assert r.status_code == 422
+
+
+class TestRunPieceCountAndJson:
+    """실행 화면에서 조각 수를 직접 정하고(워커 1대여도 여러 조각), JSON 배열을 항목 단위로 나눈다."""
+
+    @pytest.fixture(autouse=True)
+    def uploads(self, tmp_path, monkeypatch):
+        for module in ("app.routers.files", "app.routers.worker", "app.services.split_inputs"):
+            monkeypatch.setattr(f"{module}.UPLOAD_DIR", tmp_path)
+
+    def test_one_worker_can_run_several_pieces_one_after_another(self, client):
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        log = upload(client, auth, "run.log", "".join(f"line {i}\n" for i in range(1, 101)).encode())
+        service = create_service(client, auth)
+        inputs = {"nodes": {"a": [log["id"]]}, "split": {"a": {"enabled": True, "parts": 4}}}
+
+        preview = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": inputs}, headers=auth).json()
+        split = preview["validation"]["splits"][0]
+        assert (split["workers"], split["parts"], split["auto"], split["sizes"]) == (1, 4, False, [25, 25, 25, 25])
+
+        r = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "x", "input_files": inputs}, headers=auth)
+        assert r.status_code == 201, r.text
+        assert r.json()["stages"][0] == ["a__p01", "a__p02", "a__p03", "a__p04"]
+        # 한 워커가 조각을 하나씩 차례로 가져간다
+        names = []
+        for _ in range(4):
+            task = client.post("/worker/tasks/next", headers=key).json()
+            names.append(task["agent_name"])
+            client.post(f"/worker/tasks/{task['task_id']}/result", json={"status": "done", "output": "ok"}, headers=key)
+        assert names == ["에이전트 a #1", "에이전트 a #2", "에이전트 a #3", "에이전트 a #4"]
+
+        # 자동으로 돌려 두면 워커 수(1)와 크기로 정한다
+        auto = {"nodes": {"a": [log["id"]]}, "split": {"a": {"enabled": True, "parts": "auto"}}}
+        preview = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": auto}, headers=auth).json()
+        assert preview["validation"]["splits"][0]["parts"] == 1
+
+    def test_json_upload_is_split_by_items(self, client):
+        import json
+        auth = signup_and_login(client)
+        for name in ("A", "B"):
+            client.post("/worker/heartbeat", headers=register_device(client, auth, name=name))
+        answers = [{"id": i, "answer": f"답안 {i}"} for i in range(1, 7)]
+        source = upload(client, auth, "answers.json", json.dumps(answers, ensure_ascii=False).encode())
+        service = create_service(client, auth)
+        inputs = {"nodes": {"a": [source["id"]]}, "split": {"a": True}}
+        r = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "채점", "input_files": inputs}, headers=auth)
+        assert r.status_code == 201, r.text
+        record = [x for x in r.json()["input_files"] if x["kind"] == "split"][0]
+        assert [(p["label"], p["name"]) for p in record["pieces"]] == [
+            ("1~3번 항목", "answers.part01of02.json"), ("4~6번 항목", "answers.part02of02.json"),
+        ]
+
+    def test_bad_piece_count_is_rejected(self, client):
+        auth = signup_and_login(client)
+        service = create_service(client, auth)
+        r = client.post(f"/services/{service['id']}/executions/preview", json={"input_files": {"split": {"a": {"enabled": True, "parts": 1}}}}, headers=auth)
+        assert r.status_code == 422

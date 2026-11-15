@@ -42,6 +42,10 @@ class ResourceLimits(BaseModel):
 
     max_cpu_percent: int | None = Field(default=None, ge=1, le=100)
     max_gpu_percent: int | None = Field(default=None, ge=1, le=100)
+    # 자리 비움 기준(분). 값이 있으면 마지막 키보드·마우스 입력 뒤 이만큼 지나야 새 작업을 준다
+    min_user_idle_min: int | None = Field(default=None, ge=1, le=240)
+    # 실행 중 다른 프로그램 사용률이 상한을 넘었을 때: 물어보기 / 계속 실행 / 바로 다른 기기로 넘기기
+    on_overload: Literal["ask", "continue", "release"] | None = None
 
 
 class DeviceRegister(BaseModel):
@@ -58,6 +62,9 @@ class DeviceOut(BaseModel):
     resource_limits: ResourceLimits = Field(default_factory=ResourceLimits)
     last_heartbeat: UTCDateTime | None
     online: bool = False
+    # offline | running | paused | user_active | busy | available 와 그 이유
+    state: str = "offline"
+    state_reason: str = ""
 
     model_config = {"from_attributes": True}
 
@@ -135,6 +142,19 @@ class UploadedFileOut(BaseModel):
 # ---------- Service / Workflow ----------
 
 
+class SplitSettings(BaseModel):
+    """파일 나눠서 병렬 실행. 실행할 때 연결된 파일을 나누고 블록을 조각 수만큼 펼친다."""
+
+    enabled: bool = False
+    # auto: 파일 하나면 형식에 따라 줄(.txt .log .md .jsonl)·행(.csv), 여러 개면 파일 단위
+    unit: Literal["auto", "line", "csv", "json", "file"] = "auto"
+    # auto: max(사용 가능한 Worker 수, 전체 글자 수 / 조각 최대 글자 수)
+    parts: Literal["auto"] | Annotated[int, Field(ge=2, le=50)] = "auto"
+    # 순서가 있는 자료(로그·대화)에서 각 조각 앞에 붙일 직전 조각의 마지막 줄 수
+    overlap_lines: int = Field(default=0, ge=0, le=200)
+    max_chars: int = Field(default=12_000, ge=1_000, le=30_000)
+
+
 class AgentNode(BaseModel):
     id: str
     type: Literal["agent"] = "agent"
@@ -164,6 +184,7 @@ class AgentNode(BaseModel):
     # 실행 시점에는 별도 approval 작업으로 펼쳐진다.
     approval_required: bool = False
     approval_message: str = ""
+    split: SplitSettings | None = None
     position: dict | None = None
 
 
@@ -315,12 +336,22 @@ class CommunityWorkflowOut(BaseModel):
 # ---------- Execution ----------
 
 
+class RunSplit(BaseModel):
+    """실행 화면에서 정한 이번 실행의 분할: 켜기·끄기와 조각 수(자동 또는 직접)."""
+
+    enabled: bool = True
+    parts: Literal["auto"] | Annotated[int, Field(ge=2, le=50)] = "auto"
+
+
 class RunInputs(BaseModel):
     """이번 실행에만 쓰는 입력 파일. 저장된 워크플로우의 기본값을 덮어쓴다."""
 
     slots: dict[str, list[int]] = Field(default_factory=dict)
     # 슬롯 없이 블록에 직접 파일을 붙인 이전 버전 워크플로우용
     nodes: dict[str, list[int]] = Field(default_factory=dict)
+    # 블록별로 이번 실행에서만 '파일 나눠서 병렬 실행'을 켜거나 끈다 (실행 화면의 스위치)
+    # 값이 true/false면 켜기·끄기만, 객체면 조각 수도 정한다
+    split: dict[str, bool | RunSplit] = Field(default_factory=dict)
 
 
 class ExecutionCreate(BaseModel):

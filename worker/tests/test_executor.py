@@ -164,3 +164,32 @@ class TestBuildMessages:
         task = {"role_prompt": "역할", "directory_paths": [str(folder)]}
         user = executor._build_messages(task, CONFIG)[1]["content"]
         assert "로컬 파일" not in user
+
+
+
+class TestContextLength:
+    """Ollama 기본 문맥(4096)으로 긴 입력의 앞부분이 잘리지 않도록 요청마다 num_ctx를 정한다."""
+
+    def test_short_prompt_gets_the_minimum(self):
+        assert executor.context_tokens([{"role": "user", "content": "짧은 질문"}]) == 9216
+
+    def test_long_log_piece_fits_with_room_for_the_answer(self):
+        piece = "- 1117838573 2005.06.03 R02-M1-N1-C:J04-U1 RAS KERNEL INFO generating core.1487\n" * 140
+        messages = [{"role": "system", "content": "역할"}, {"role": "user", "content": piece}]
+        ctx = executor.context_tokens(messages)
+        assert ctx >= len(piece) + 8192 and ctx % 1024 == 0
+
+    def test_capped_by_setting(self, monkeypatch):
+        monkeypatch.setenv("MARS_MAX_CONTEXT", "16384")
+        assert executor.context_tokens([{"role": "user", "content": "x" * 50_000}]) == 16384
+
+    def test_request_sends_num_ctx(self, monkeypatch):
+        calls = []
+
+        def fake_post(url, json, timeout):
+            calls.append(json)
+            return httpx.Response(200, json={"message": {"content": "ok"}}, request=httpx.Request("POST", url))
+
+        monkeypatch.setattr(executor.httpx, "post", fake_post)
+        executor._chat(CONFIG, "qwen3:4b", [{"role": "user", "content": "y" * 20_000}], 0.5)
+        assert calls[0]["options"]["num_ctx"] == 28672

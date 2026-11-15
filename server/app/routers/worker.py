@@ -18,6 +18,14 @@ from ..services import directory_access, generation_jobs, orchestrator, worker_q
 
 router = APIRouter(prefix="/worker", tags=["worker"])
 
+_SERVER_OWNED_SPECS = {"resource_limits", "paused_until"}
+
+
+def _masked_email(email: str) -> str:
+    """앞 한 글자만 남긴다: hyunjeong@gmail.com -> h***@gmail.com"""
+    local, _, domain = email.partition("@")
+    return f"{local[:1]}***@{domain}" if domain else f"{email[:1]}***"
+
 
 def get_device(
     x_device_key: str = Header(...), db: Session = Depends(get_db)
@@ -40,9 +48,32 @@ def heartbeat(
 ):
     device.last_heartbeat = models.utcnow()
     if body and isinstance(body.get("specs"), dict):
-        device.specs = {**(device.specs or {}), **body["specs"]}
+        # 서버가 관리하는 값(상한 설정, 넘김 뒤 일시 중지)은 Worker가 덮어쓰지 못한다
+        reported = {k: v for k, v in body["specs"].items() if k not in _SERVER_OWNED_SPECS}
+        device.specs = {**(device.specs or {}), **reported}
     db.commit()
-    return {"ok": True, "device_id": device.id}
+    owner = db.get(models.User, device.user_id)
+    until = orchestrator.paused_until(device)
+    return {
+        "ok": True,
+        "device_id": device.id,
+        "device_name": device.name,
+        # Worker 화면이 어느 계정에 연결됐는지, 지금 왜 작업을 안 받는지 보여줄 수 있게 한다
+        "account": {"username": owner.username, "email": _masked_email(owner.email)} if owner else None,
+        "resource_limits": (device.specs or {}).get("resource_limits") or {},
+        "paused_until": until.isoformat() + "Z" if until else None,
+    }
+
+
+@router.post("/resume")
+def resume(device: models.Device = Depends(get_device), db: Session = Depends(get_db)):
+    """넘김 뒤 일시 중지를 사용자가 Worker 화면에서 바로 푼다."""
+    specs = dict(device.specs or {})
+    specs.pop("paused_until", None)
+    device.specs = specs
+    device.last_heartbeat = models.utcnow()
+    db.commit()
+    return {"ok": True}
 
 
 @router.patch("/device", response_model=schemas.DeviceOut)
@@ -308,6 +339,28 @@ def submit_generation(
     device.last_heartbeat = models.utcnow()
     db.commit()
     return {"ok": True, "status": job.status}
+
+
+@router.post("/tasks/{task_id}/release")
+def release_task(
+    task_id: int,
+    device: models.Device = Depends(get_device),
+    db: Session = Depends(get_db),
+):
+    """실행 중 과부하일 때 Worker가 작업을 내려놓는다. 다른 Worker가 이어서 가져간다.
+
+    이 기기가 나중에 보내는 결과는 할당 기기가 달라져 submit_result가 거부한다.
+    """
+    task = db.get(models.TaskRecord, task_id)
+    if task is None or task.assigned_device_id != device.id:
+        raise HTTPException(404, "할당된 작업이 아닙니다.")
+    if task.status != "running":
+        raise HTTPException(409, "이미 종료된 작업입니다.")
+    device.last_heartbeat = models.utcnow()
+    orchestrator.release_task(db, task, device)
+    db.commit()
+    until = orchestrator.paused_until(device)
+    return {"ok": True, "paused_until": until.isoformat() + "Z" if until else None}
 
 
 @router.post("/tasks/{task_id}/result")

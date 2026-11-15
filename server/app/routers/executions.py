@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from .. import models, schemas
 from ..database import get_db
 from ..security import get_current_user
-from ..services import dag, orchestrator, directory_access, transfers
+from ..services import dag, orchestrator, directory_access, split_inputs, transfers
 
 router = APIRouter(tags=["executions"])
 
@@ -37,7 +37,10 @@ def _validate_uploaded_files(db: Session, user_id: int, graph: dict) -> None:
 def _run_graph(service: models.Service, inputs: schemas.RunInputs) -> dict:
     """이번 실행의 입력 파일과 최종 블록·파일 필요 자동 규칙을 반영한 그래프(슬롯은 아직 펼치지 않음)."""
     try:
-        return dag.apply_auto_flags(dag.apply_run_inputs(service.graph, inputs.slots, inputs.nodes))
+        return dag.apply_auto_flags(dag.apply_run_inputs(
+            service.graph, inputs.slots, inputs.nodes,
+            {node_id: value if isinstance(value, bool) else value.model_dump() for node_id, value in inputs.split.items()},
+        ))
     except dag.DagError as e:
         raise HTTPException(422, f"실행 입력이 올바르지 않습니다: {e}")
 
@@ -128,7 +131,11 @@ def start_execution(
     # 이번 실행의 입력 파일을 반영하고 파일 슬롯을 블록 필드로 펼친 그래프로 검사·동의·스냅샷을 처리한다
     run_graph = _run_graph(service, body.input_files)
     graph = dag.expand_input_slots(run_graph)
-    validation = orchestrator.inspect_graph_for_user(db, user.id, graph, run_prompt=body.run_prompt)
+    # '파일 나눠서 병렬 실행' 블록은 지금 사용 가능한 Worker 수로 조각 계획을 세운다
+    split_plans = split_inputs.plan_graph(db, user.id, graph)
+    validation = orchestrator.inspect_graph_for_user(
+        db, user.id, graph, run_prompt=body.run_prompt, split_plans=split_plans
+    )
     if validation["errors"]:
         raise HTTPException(
             422,
@@ -153,13 +160,16 @@ def start_execution(
     if has_local_nodes and not any(orchestrator.device_is_online(d) for d in devices):
         raise HTTPException(409, "사용 가능한(온라인) 기기가 없습니다. Worker Agent를 실행해 주세요.")
 
+    # 조각 파일을 저장하고 분할 블록을 조각 수만큼 펼친다. 펼친 그래프가 스냅샷이 되므로
+    # 작업 생성·할당·회수는 일반 병렬 블록과 똑같이 동작한다
+    snapshot, split_records = split_inputs.materialize(db, user.id, graph, split_plans)
     execution = models.Execution(
         service_id=service.id,
         user_id=user.id,
         run_prompt=body.run_prompt.strip(),
-        graph_snapshot=graph,
+        graph_snapshot=snapshot,
         generation_info=service.generation_info,
-        input_files=input_record(db, user.id, run_graph),
+        input_files=input_record(db, user.id, run_graph) + split_records,
     )
     db.add(execution)
     db.flush()

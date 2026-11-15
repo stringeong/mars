@@ -208,19 +208,18 @@ export default function WorkflowSetupPage() {
     navigate(`/services/${id}/run`)
   }
 
-  if (!service || !graph) return <div className="page-loading">{error || 'Loading workflow...'}</div>
+  if (!service || !graph) return <div className="page-loading">{error || '워크플로우를 불러오는 중…'}</div>
 
   return <div className="setup-page">
     <header className="page-topbar">
       <div>
-        <div className="breadcrumb">M.A.R.S <span>/</span> Workflows <span>/</span> {service.name} <span>/</span> Setup</div>
+        <div className="breadcrumb">M.A.R.S <span>/</span> 워크플로우 <span>/</span> {service.name} <span>/</span> 설정 확인</div>
         <h1>설정 확인</h1>
-        <p>생성된 블록의 실행 위치·워커·모델과 입력 파일을 한 곳에서 확인하고 고칩니다.</p>
-        <div className="generation-badge"><span>생성 모델</span><strong>{generationLabel(service.generation_info)}</strong></div>
+        <p>블록마다 실행 위치·워커·모델과 입력 파일을 확인하고 고쳐요.</p>
+        <p className="builder-meta">생성 모델 · {generationLabel(service.generation_info)}</p>
         {service.generation_info?.fallback_reason && <small className="generation-reason">기본 워크플로우를 고른 이유: {service.generation_info.fallback_reason}</small>}
       </div>
       <div className="builder-header-actions">
-        <Link className="btn ghost" to={`/services/${id}`}>편집 화면</Link>
         <button className="btn ghost" disabled={busy || !dirty} onClick={save}>저장</button>
         <button className="btn" disabled={busy} onClick={saveAndRun}>{dirty ? '저장하고 실행 화면으로' : '실행 화면으로'}</button>
       </div>
@@ -230,12 +229,10 @@ export default function WorkflowSetupPage() {
 
     <div className="setup-layout">
       <div className="setup-main">
-        <section className="setup-card">
-          <div className="section-heading"><div><span className="eyebrow">INPUT FILES</span><h2>입력 파일 슬롯</h2></div><span className="count-pill">{slots.length}</span></div>
-          <div className="file-route-notice">
-            <strong>파일 전달 방식</strong>
-            <p>업로드 파일은 서버를 거쳐 워커에 전달되고, 공유 디렉터리 파일은 해당 기기 안에서만 읽힙니다.</p>
-          </div>
+        {/* 파일 슬롯이 없고 파일이 필요한 블록도 없으면 이 칸은 숨긴다 */}
+        {(slots.length > 0 || agents.some((agent) => agent.needs_file)) && <section className="setup-card">
+          <div className="section-heading"><div><span className="eyebrow">입력 파일</span><h2>입력 파일 슬롯</h2></div><span className="count-pill">{slots.length}</span></div>
+          {slots.length > 0 && <p className="setup-route-note">업로드한 파일은 서버를 거쳐 워커에 전달되고, 등록한 폴더의 원본은 그 PC에서만 읽어요.</p>}
           {slots.map((slot) => {
             const users = agents.filter((agent) => (agent.input_slot_ids ?? []).includes(slot.id))
             const filled = slot.file_ids.length + slot.directory_ids.length > 0
@@ -254,8 +251,8 @@ export default function WorkflowSetupPage() {
                 {slot.directory_ids.map((directoryId) => {
                   const directory = directoryById.get(directoryId)
                   return <span className="source-chip directory" key={`d${directoryId}`}>
-                    <span>디렉터리 · {directory?.alias ?? `#${directoryId}`}</span>
-                    <small>{directory ? `${deviceById.get(directory.device_id)?.name ?? '기기'} 안에서만 읽음` : '삭제된 디렉터리'}</small>
+                    <span>폴더 · {directory?.alias ?? `#${directoryId}`}</span>
+                    <small>{directory ? `${deviceById.get(directory.device_id)?.name ?? '기기'} 안에서만 읽음` : '삭제된 폴더'}</small>
                     <button type="button" aria-label="연결 해제" onClick={() => updateSlotSources(slot.id, 'directory_ids', (values) => values.filter((value) => value !== directoryId))}>×</button>
                   </span>
                 })}
@@ -267,17 +264,17 @@ export default function WorkflowSetupPage() {
                   {files.filter((file) => !slot.file_ids.includes(file.id)).map((file) => <option key={file.id} value={file.id}>{file.original_name}</option>)}
                 </select>
                 <select value="" onChange={(event) => event.target.value && updateSlotSources(slot.id, 'directory_ids', (values) => [...values, Number(event.target.value)])}>
-                  <option value="">공유 디렉터리 연결</option>
+                  <option value="">등록한 폴더 연결</option>
                   {directories.filter((directory) => !slot.directory_ids.includes(directory.id)).map((directory) => <option key={directory.id} value={directory.id}>{directory.alias} · {deviceById.get(directory.device_id)?.name ?? '기기'}</option>)}
                 </select>
               </div>
             </div>
           })}
-          {!slots.length && <p className="muted">파일이 필요한 블록이 없습니다. 블록 표에서 파일 슬롯을 추가할 수 있습니다.</p>}
-        </section>
+          {!slots.length && <p className="muted">아직 파일 슬롯이 없어요. 아래 표의 '파일 슬롯 추가'로 만들 수 있어요.</p>}
+        </section>}
 
         <section className="setup-card">
-          <div className="section-heading"><div><span className="eyebrow">BLOCK SETTINGS</span><h2>블록별 설정</h2></div><span className="count-pill">{agents.length}</span></div>
+          <div className="section-heading"><div><span className="eyebrow">블록 설정</span><h2>블록별 설정</h2></div><span className="count-pill">{agents.length}</span></div>
           <div className="setup-table-wrap">
             <table className="setup-table">
               <thead><tr><th>블록</th><th>실행 위치</th><th>워커</th><th>모델</th><th>입력</th><th>검사</th></tr></thead>
@@ -314,7 +311,7 @@ export default function WorkflowSetupPage() {
                         {devices.map((device) => <option key={device.id} value={device.id}>{device.name}{device.online ? '' : ' (오프라인)'}</option>)}
                       </select>
                       {isCloud && <small className="cell-hint">서버가 외부 API를 직접 호출</small>}
-                      {suggestion && suggestion.id !== node.worker_id && <button type="button" className="suggest-chip" onClick={() => updateNode(node.id, { worker_id: suggestion.id, model: '' })}>추천: {suggestion.name} (디렉터리 위치) 적용</button>}
+                      {suggestion && suggestion.id !== node.worker_id && <button type="button" className="suggest-chip" onClick={() => updateNode(node.id, { worker_id: suggestion.id, model: '' })}>추천: {suggestion.name} (폴더 위치) 적용</button>}
                     </td>
                     <td>
                       <select value={node.model} onChange={(event) => updateNode(node.id, { model: event.target.value })}>
@@ -350,11 +347,11 @@ export default function WorkflowSetupPage() {
       </div>
 
       <aside className="setup-side">
-        <span className="eyebrow">VALIDATION</span>
+        <span className="eyebrow">구성 검사</span>
         <h2>구성 검사</h2>
         <ValidationPanel validation={validation} nodeNames={nodeNames} onSelectNode={(nodeId) => document.getElementById(`setup-row-${nodeId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })} />
       </aside>
     </div>
-    <input ref={uploadRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.xlsx,.pptx" onChange={onUpload} />
+    <input ref={uploadRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.log,.jsonl,.xlsx,.pptx,.json" onChange={onUpload} />
   </div>
 }

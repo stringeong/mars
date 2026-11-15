@@ -9,7 +9,7 @@ import { EXAMPLES } from '../examples'
 
 const steps = [
   { title: '하고 싶은 일을 적어요', text: '"상담 기록에서 개인정보를 가리고 문의 유형을 분석해 줘"처럼 평소 말하듯 한 문장이면 충분해요.' },
-  { title: '만들어진 흐름을 확인해요', text: '역할별 에이전트와 실행 순서가 블록으로 그려져요. 연결을 바꾸거나 블록을 더해 직접 다듬을 수 있어요.' },
+  { title: '만들어진 흐름을 확인해요', text: '역할별 에이전트와 실행 순서가 블록으로 그려져요. 연결을 바꾸거나 블록을 더해 직접 다듬어요.' },
   { title: '내 기기들이 나눠서 실행해요', text: '동시에 할 수 있는 단계는 등록한 PC·노트북에 나눠 맡기고, 끝나면 결과를 한곳에 모아 보여줘요.' },
 ]
 
@@ -24,7 +24,7 @@ const features = [
 
 const privacy = [
   { title: '허용한 폴더만 읽어요', text: '워커는 워크플로우에 연결한 폴더 밖의 파일에 접근하지 않아요.' },
-  { title: '공유 폴더 파일은 기기 안에서만', text: '공유 디렉터리의 파일은 그 기기에서만 읽히고, 업로드한 파일만 서버를 거쳐 내 워커로 전달돼요.' },
+  { title: '등록한 폴더의 원본은 그 PC에서만', text: '워커에 등록한 폴더의 파일은 그 PC에서만 읽히고, 직접 업로드한 파일만 서버를 거쳐 내 워커로 전달돼요.' },
   { title: '외부 전송은 실행 전에 확인', text: '외부 API로 보내는 단계가 있으면 무엇이 어디로 가는지 보여주고 동의를 받은 뒤 실행해요.' },
   { title: '포트를 열지 않아요', text: '워커가 서버에 먼저 연락해 일을 가져가는 방식이라 공유기 설정이나 포트 개방이 필요 없어요.' },
 ]
@@ -104,8 +104,9 @@ export default function ProductPage() {
       <div className="mk-shell mk-hero-inner">
         <div className="mk-hero-copy">
           <span className="mk-kicker">멀티 에이전트 AI 워크플로우</span>
-          <h1>가진 컴퓨터들로 꾸리는<br />나만의 AI 팀</h1>
-          <p>하고 싶은 일을 문장으로 적으면 역할별 AI 에이전트가 짜이고, 집과 사무실의 PC·노트북이 나눠서 실행해요. 민감한 자료는 내 기기 밖으로 나가지 않아요.</p>
+          <h1>내 컴퓨터들이<br />함께 일하는 AI 팀</h1>
+          <p>하고 싶은 일을 문장으로 적으면 역할별 AI 에이전트가 생성되고, 집과 사무실의 PC·노트북이 나눠서 실행해요.<br />등록한 폴더의 원본 파일은 그 PC에서만 읽어요.</p>
+          <p className="mk-hero-sub">단계별 결과는 M.A.R.S 서버에 저장되고, 서버는 직접 설치해서 운영할 수도 있어요.</p>
           <div className="mk-hero-actions">
             <Link className="mk-btn mk-btn-primary mk-btn-lg" to="/login?mode=register">회원가입</Link>
             <Link className="mk-btn mk-btn-light mk-btn-lg" to="/download">워커 다운로드</Link>
@@ -173,7 +174,7 @@ export default function ProductPage() {
         <div className="mk-heading">
           <span className="mk-kicker">실행 미리보기</span>
           <h2>실행하면 이렇게 진행돼요</h2>
-          <p>같은 단계의 블록은 여러 기기가 동시에 맡아요. 진행률과 기기별 타임라인이 실시간으로 바뀌고, 마지막 블록이 끝나면 최종 결과가 나와요.</p>
+          <p>같은 단계의 블록은 여러 기기가 동시에 맡아요.<br />진행률과 기기별 타임라인이 실시간으로 바뀌고, 마지막 블록이 끝나면 최종 결과가 나와요.</p>
         </div>
         <div className="mk-demo-chips mk-run-chips" role="tablist" aria-label="실행해 볼 예시">
           {DEMOS.map((item, index) => <button key={item.label} type="button" role="tab" aria-selected={index === runIndex} className={index === runIndex ? 'active' : ''} onClick={() => setRunIndex(index)}>{item.label}</button>)}
