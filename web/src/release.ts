@@ -1,6 +1,6 @@
 /** 제품 소개·워커 다운로드 페이지가 쓰는 배포 정보. 새 버전을 낼 때 RELEASE만 바꾼다. */
 
-export const RELEASE = 'release0.0.4'
+export const RELEASE = 'release0.0.5'
 export const GITHUB_URL = 'https://github.com/stringeong/mars'
 
 /** 워커 코드는 GitHub의 이 버전 압축 파일로 받는다. 풀면 `mars-<버전>` 폴더가 생긴다. */
