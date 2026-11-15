@@ -14,7 +14,7 @@ function TaskNode({ data }: { data: any }) {
   const status = taskStatus(data.status)
   return <div className={`stage-task ${data.status}`}>
     <Handle type="target" position={Position.Left} isConnectable={false} className="stage-handle" />
-    <div className="stage-task-head"><strong title={data.name}>{data.name}</strong>{data.final && <b className="mini-final">FINAL</b>}</div>
+    <div className="stage-task-head"><strong title={data.name}>{data.name}</strong>{data.notice && <b className="mini-notice" title={data.notice} aria-label="입력 일부가 빠진 채 실행됨">!</b>}{data.final && <b className="mini-final">FINAL</b>}</div>
     <span className={`task-status ${data.status}`}><i aria-hidden="true">{status.icon}</i>{status.label}</span>
     <dl>
       <div><dt>워커</dt><dd title={data.worker}>{data.worker}</dd></div>
@@ -69,6 +69,7 @@ export default function ExecutionStageView({ execution, finalNodeIds, now, fixed
         data: {
           name: task.agent_name,
           status: task.status,
+          notice: task.notice,
           final: finalNodeIds.has(nodeId),
           worker: taskWorkerLabel(task),
           start: formatClock(task.started_at),

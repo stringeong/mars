@@ -557,6 +557,15 @@ tr.clickable:hover { background: #f8fafc; }
 .run-input-pieces { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
 /* 실행 화면: 파일이 길어 뒷부분이 빠질 입력 */
 .run-entry-cut { margin: 8px 0 0; padding: 8px 10px; border: 1px solid #fde68a; border-radius: 8px; background: #fffbeb; color: #92400e; font-size: 12px; line-height: 1.5; }
+/* 입력 일부가 빠진 채 끝난 블록 안내 */
+.notice-section { border-color: #fde68a; background: #fffbeb; }
+.notice-section h2 { margin: 5px 0; color: #92400e; font-size: 17px; }
+.notice-section p { color: #a16207; font-size: 12px; }
+.notice-section ul { display: grid; gap: 6px; margin: 12px 0 0; padding: 0; list-style: none; }
+.notice-section li { display: grid; grid-template-columns: minmax(90px, 180px) minmax(0, 1fr); gap: 12px; padding: 8px 10px; border: 1px solid #fde68a; border-radius: 8px; background: #fff; color: #5b4636; font-size: 12px; line-height: 1.5; }
+.notice-section li strong { overflow: hidden; color: #92400e; text-overflow: ellipsis; white-space: nowrap; }
+.task-notice { margin: 0; padding: 8px 13px; border-top: 1px solid #fde68a; background: #fffbeb; color: #92400e; font-size: 12px; line-height: 1.5; white-space: pre-line; }
+.mini-notice { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%; background: var(--warning); color: #fff; font-size: 11px; font-weight: 800; }
 
 /* 편집기 연결 목록 */
 .connection-list { display: grid; gap: 8px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; }

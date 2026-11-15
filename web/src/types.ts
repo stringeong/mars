@@ -268,6 +268,8 @@ export interface Task {
   assigned_device_id: number | null
   output: string | null
   error: string | null
+  /** 완료했지만 입력 일부가 빠진 채 실행된 사정 (파일 잘림, 모델 문맥 넘침). 한 줄에 하나씩 */
+  notice?: string | null
   started_at: string | null
   finished_at: string | null
   depth?: number | null
