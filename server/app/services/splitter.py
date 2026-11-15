@@ -5,6 +5,7 @@ DB나 파일 시스템은 건드리지 않는다(읽기·저장은 split_inputs.
 """
 
 import csv
+import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,7 +13,9 @@ from pathlib import Path
 # 줄 단위로 나눌 수 있는 형식. JSONL은 한 줄이 한 레코드라 줄 단위와 같다
 LINE_SUFFIXES = {".txt", ".log", ".md", ".jsonl"}
 CSV_SUFFIXES = {".csv"}
-TEXT_SUFFIXES = LINE_SUFFIXES | CSV_SUFFIXES
+# JSON은 맨 바깥이 배열(또는 배열 하나를 가진 객체)일 때 항목 단위로 나눈다
+JSON_SUFFIXES = {".json"}
+TEXT_SUFFIXES = LINE_SUFFIXES | CSV_SUFFIXES | JSON_SUFFIXES
 
 DEFAULT_MAX_CHARS = 12_000
 MIN_MAX_CHARS = 1_000
@@ -58,6 +61,8 @@ def detect_unit(names: list[str]) -> str | None:
     suffix = Path(names[0]).suffix.lower()
     if suffix in CSV_SUFFIXES:
         return "csv"
+    if suffix in JSON_SUFFIXES:
+        return "json"
     return "line" if suffix in LINE_SUFFIXES else None
 
 
@@ -163,8 +168,45 @@ def split_csv(text: str, parts: int) -> list[Piece]:
     return pieces
 
 
+def _json_items(text: str) -> tuple[list, str | None]:
+    """JSON에서 나눌 항목 목록과, 객체 안의 배열이면 그 키를 돌려준다."""
+    try:
+        data = json.loads(text)
+    except ValueError as exc:
+        raise SplitError("split_unsupported", f"JSON 형식이 올바르지 않아 나눌 수 없습니다: {exc}") from exc
+    if isinstance(data, list):
+        return data, None
+    if isinstance(data, dict):
+        lists = [key for key, value in data.items() if isinstance(value, list)]
+        if len(lists) == 1:
+            return data[lists[0]], lists[0]
+    raise SplitError(
+        "split_unsupported",
+        "JSON은 맨 바깥이 배열이거나, 배열 하나를 가진 객체일 때만 항목 단위로 나눌 수 있습니다.",
+    )
+
+
+def split_json(text: str, parts: int) -> list[Piece]:
+    """JSON 배열을 항목 단위로 나눈다. 조각마다 같은 모양(배열 또는 {키: 배열})의 JSON 파일이 된다.
+
+    start~end는 1부터 센 항목 번호다.
+    """
+    items, key = _json_items(text)
+    pieces: list[Piece] = []
+    start = 0
+    for index, size in enumerate(part_sizes(len(items), parts), start=1):
+        end = start + size
+        chunk = items[start:end]
+        body = {key: chunk} if key is not None else chunk
+        pieces.append(Piece(index, start + 1, end, json.dumps(body, ensure_ascii=False, indent=2) + "\n"))
+        start = end
+    return pieces
+
+
 def unit_count(text: str, unit: str) -> int:
-    """나눌 수 있는 항목 수(줄 수 또는 데이터 행 수)."""
+    """나눌 수 있는 항목 수(줄 수, 데이터 행 수, JSON 항목 수)."""
+    if unit == "json":
+        return len(_json_items(text)[0])
     return csv_row_count(text) if unit == "csv" else len(_lines(text))
 
 
@@ -182,7 +224,7 @@ def split_text(
     자동일 때는 Worker 수와 글자 수로 조각 수를 정한 뒤, 줄 길이가 고르지 않아 어떤 조각이
     '조각 최대 글자 수'를 넘으면 넘지 않을 때까지 조각을 늘린다.
     """
-    if unit not in ("line", "csv"):
+    if unit not in ("line", "csv", "json"):
         raise ValueError(f"지원하지 않는 단위입니다: {unit}")
     overlap = overlap if unit == "line" else 0
     max_chars = min(PIECE_HARD_LIMIT, max(MIN_MAX_CHARS, max_chars))
@@ -191,6 +233,8 @@ def split_text(
         raise SplitError("split_empty", "나눌 내용이 없습니다. 파일이 비어 있습니다.")
 
     def cut(count: int) -> list[Piece]:
+        if unit == "json":
+            return split_json(text, count)
         return split_csv(text, count) if unit == "csv" else split_lines(text, count, overlap)
 
     if parts is not None:
@@ -228,8 +272,8 @@ def split_text(
 
 
 def range_label(start: int, end: int, unit: str) -> str:
-    """"668~1334줄", "21~40행"처럼 조각의 원본 범위를 표시한다."""
-    word = "행" if unit == "csv" else "줄"
+    """"668~1334줄", "21~40행", "1~50번 항목"처럼 조각의 원본 범위를 표시한다."""
+    word = {"csv": "행", "json": "번 항목"}.get(unit, "줄")
     return f"{start}{word}" if start == end else f"{start}~{end}{word}"
 
 

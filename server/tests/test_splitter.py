@@ -150,3 +150,36 @@ class TestHelpers:
         assert splitter.range_label(21, 40, "csv") == "21~40행"
         assert splitter.range_label(7, 7, "line") == "7줄"
         assert splitter.piece_name("BGL_2k.log", 2, 3) == "BGL_2k.part02of03.log"
+
+
+class TestSplitJson:
+    ITEMS = [{"id": i, "answer": f"답안 {i}"} for i in range(1, 11)]
+
+    def test_array_items_are_split_into_valid_json_pieces(self):
+        import json
+        pieces = splitter.split_json(json.dumps(self.ITEMS, ensure_ascii=False), 3)
+        assert [(p.start, p.end) for p in pieces] == [(1, 4), (5, 7), (8, 10)]
+        restored = [item for p in pieces for item in json.loads(p.text)]
+        assert restored == self.ITEMS
+
+    def test_object_with_one_array_keeps_its_key(self):
+        import json
+        text = json.dumps({"answers": self.ITEMS, "meta": {"class": "A"}}, ensure_ascii=False)
+        pieces = splitter.split_json(text, 2)
+        assert [list(json.loads(p.text)) for p in pieces] == [["answers"], ["answers"]]
+        assert sum(len(json.loads(p.text)["answers"]) for p in pieces) == 10
+
+    def test_unsplittable_json_is_rejected(self):
+        for text in ('{"a": 1}', '{"a": [1], "b": [2]}', "not json", '"text"'):
+            with pytest.raises(splitter.SplitError) as error:
+                splitter.split_json(text, 2)
+            assert error.value.code == "split_unsupported"
+
+    def test_detect_and_label(self):
+        assert splitter.detect_unit(["answers.json"]) == "json"
+        assert splitter.range_label(1, 50, "json") == "1~50번 항목"
+        assert splitter.unit_count('[1, 2, 3]', "json") == 3
+
+    def test_split_text_supports_json(self):
+        pieces = splitter.split_text("[1, 2, 3, 4, 5]", "json", parts=None, workers=2)
+        assert [p.count for p in pieces] == [3, 2]

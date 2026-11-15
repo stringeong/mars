@@ -23,7 +23,7 @@ PIECE_PREFIX = "split-"
 # 이보다 큰 파일은 읽어 보지 않고도 최대 조각 수로 나눌 수 없다
 MAX_SOURCE_BYTES = splitter.MAX_PARTS * splitter.PIECE_HARD_LIMIT * 4
 
-UNIT_LABELS = {"line": "줄", "csv": "행", "file": "파일"}
+UNIT_LABELS = {"line": "줄", "csv": "행", "json": "개", "file": "파일"}
 
 
 @dataclass
@@ -91,7 +91,7 @@ class SplitPlans:
 
 def settings_of(node: dict) -> Settings:
     raw = node.get("split") if isinstance(node.get("split"), dict) else {}
-    unit = raw.get("unit") if raw.get("unit") in ("line", "csv", "file") else "auto"
+    unit = raw.get("unit") if raw.get("unit") in ("line", "csv", "json", "file") else "auto"
     parts = raw.get("parts")
     parts = min(max(1, parts), splitter.MAX_PARTS) if isinstance(parts, int) and not isinstance(parts, bool) else None
     overlap = raw.get("overlap_lines")
@@ -155,18 +155,22 @@ def plan_node(
     settings = settings_of(node)
     names = [uploaded.original_name for uploaded in files]
     unit = settings.unit if settings.unit != "auto" else splitter.detect_unit(names)
-    if unit in ("line", "csv") and len(files) > 1:
+    if unit in ("line", "csv", "json") and len(files) > 1:
         raise SplitError(
             "split_unsupported",
             "줄·행 단위로 나누려면 파일을 1개만 연결하세요. 여러 파일은 '파일 단위'로 나눌 수 있습니다.",
         )
     suffix = Path(names[0]).suffix.lower() if names else ""
-    supported = splitter.CSV_SUFFIXES if unit == "csv" else splitter.LINE_SUFFIXES | splitter.CSV_SUFFIXES
-    if unit is None or (unit in ("line", "csv") and suffix not in supported):
+    supported = {
+        "csv": splitter.CSV_SUFFIXES,
+        "json": splitter.JSON_SUFFIXES,
+        "line": splitter.LINE_SUFFIXES | splitter.CSV_SUFFIXES,
+    }.get(unit, set())
+    if unit is None or (unit != "file" and suffix not in supported):
         raise SplitError(
             "split_unsupported",
             f"'{names[0]}'은(는) 나눌 수 없는 형식입니다. "
-            "줄 단위는 .txt .log .md .jsonl, 행 단위는 .csv 파일만 나눌 수 있습니다.",
+            "줄 단위는 .txt .log .md .jsonl, 행 단위는 .csv, 항목 단위는 .json 파일만 나눌 수 있습니다.",
         )
 
     workers = available_workers(devices, node)

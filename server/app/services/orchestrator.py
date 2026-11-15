@@ -303,7 +303,7 @@ def populate_task_context(db: Session, task: models.TaskRecord) -> None:
 def _split_part_note(node: dict) -> str:
     """조각 블록에게 자신이 원본의 어느 부분을 맡았는지 알려준다."""
     part = node.get("split_part")
-    if not isinstance(part, dict) or part.get("unit") not in ("line", "csv"):
+    if not isinstance(part, dict) or part.get("unit") not in ("line", "csv", "json"):
         return ""
     note = (
         f"[나눠 받은 자료]\n첨부 파일은 원본 '{part.get('source_name')}'의 {part.get('label')}입니다 "

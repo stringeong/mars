@@ -1388,3 +1388,62 @@ class TestSplitFromRunScreen:
         service = create_service(client, auth)
         r = client.post(f"/services/{service['id']}/executions/preview", json={"input_files": {"split": {"ghost": True}}}, headers=auth)
         assert r.status_code == 422
+
+
+class TestRunPieceCountAndJson:
+    """실행 화면에서 조각 수를 직접 정하고(워커 1대여도 여러 조각), JSON 배열을 항목 단위로 나눈다."""
+
+    @pytest.fixture(autouse=True)
+    def uploads(self, tmp_path, monkeypatch):
+        for module in ("app.routers.files", "app.routers.worker", "app.services.split_inputs"):
+            monkeypatch.setattr(f"{module}.UPLOAD_DIR", tmp_path)
+
+    def test_one_worker_can_run_several_pieces_one_after_another(self, client):
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        log = upload(client, auth, "run.log", "".join(f"line {i}\n" for i in range(1, 101)).encode())
+        service = create_service(client, auth)
+        inputs = {"nodes": {"a": [log["id"]]}, "split": {"a": {"enabled": True, "parts": 4}}}
+
+        preview = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": inputs}, headers=auth).json()
+        split = preview["validation"]["splits"][0]
+        assert (split["workers"], split["parts"], split["auto"], split["sizes"]) == (1, 4, False, [25, 25, 25, 25])
+
+        r = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "x", "input_files": inputs}, headers=auth)
+        assert r.status_code == 201, r.text
+        assert r.json()["stages"][0] == ["a__p01", "a__p02", "a__p03", "a__p04"]
+        # 한 워커가 조각을 하나씩 차례로 가져간다
+        names = []
+        for _ in range(4):
+            task = client.post("/worker/tasks/next", headers=key).json()
+            names.append(task["agent_name"])
+            client.post(f"/worker/tasks/{task['task_id']}/result", json={"status": "done", "output": "ok"}, headers=key)
+        assert names == ["에이전트 a #1", "에이전트 a #2", "에이전트 a #3", "에이전트 a #4"]
+
+        # 자동으로 돌려 두면 워커 수(1)와 크기로 정한다
+        auto = {"nodes": {"a": [log["id"]]}, "split": {"a": {"enabled": True, "parts": "auto"}}}
+        preview = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": auto}, headers=auth).json()
+        assert preview["validation"]["splits"][0]["parts"] == 1
+
+    def test_json_upload_is_split_by_items(self, client):
+        import json
+        auth = signup_and_login(client)
+        for name in ("A", "B"):
+            client.post("/worker/heartbeat", headers=register_device(client, auth, name=name))
+        answers = [{"id": i, "answer": f"답안 {i}"} for i in range(1, 7)]
+        source = upload(client, auth, "answers.json", json.dumps(answers, ensure_ascii=False).encode())
+        service = create_service(client, auth)
+        inputs = {"nodes": {"a": [source["id"]]}, "split": {"a": True}}
+        r = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "채점", "input_files": inputs}, headers=auth)
+        assert r.status_code == 201, r.text
+        record = [x for x in r.json()["input_files"] if x["kind"] == "split"][0]
+        assert [(p["label"], p["name"]) for p in record["pieces"]] == [
+            ("1~3번 항목", "answers.part01of02.json"), ("4~6번 항목", "answers.part02of02.json"),
+        ]
+
+    def test_bad_piece_count_is_rejected(self, client):
+        auth = signup_and_login(client)
+        service = create_service(client, auth)
+        r = client.post(f"/services/{service['id']}/executions/preview", json={"input_files": {"split": {"a": {"enabled": True, "parts": 1}}}}, headers=auth)
+        assert r.status_code == 422

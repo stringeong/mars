@@ -147,7 +147,7 @@ class SplitSettings(BaseModel):
 
     enabled: bool = False
     # auto: 파일 하나면 형식에 따라 줄(.txt .log .md .jsonl)·행(.csv), 여러 개면 파일 단위
-    unit: Literal["auto", "line", "csv", "file"] = "auto"
+    unit: Literal["auto", "line", "csv", "json", "file"] = "auto"
     # auto: max(사용 가능한 Worker 수, 전체 글자 수 / 조각 최대 글자 수)
     parts: Literal["auto"] | Annotated[int, Field(ge=2, le=50)] = "auto"
     # 순서가 있는 자료(로그·대화)에서 각 조각 앞에 붙일 직전 조각의 마지막 줄 수
@@ -332,6 +332,13 @@ class CommunityWorkflowOut(BaseModel):
 # ---------- Execution ----------
 
 
+class RunSplit(BaseModel):
+    """실행 화면에서 정한 이번 실행의 분할: 켜기·끄기와 조각 수(자동 또는 직접)."""
+
+    enabled: bool = True
+    parts: Literal["auto"] | Annotated[int, Field(ge=2, le=50)] = "auto"
+
+
 class RunInputs(BaseModel):
     """이번 실행에만 쓰는 입력 파일. 저장된 워크플로우의 기본값을 덮어쓴다."""
 
@@ -339,7 +346,8 @@ class RunInputs(BaseModel):
     # 슬롯 없이 블록에 직접 파일을 붙인 이전 버전 워크플로우용
     nodes: dict[str, list[int]] = Field(default_factory=dict)
     # 블록별로 이번 실행에서만 '파일 나눠서 병렬 실행'을 켜거나 끈다 (실행 화면의 스위치)
-    split: dict[str, bool] = Field(default_factory=dict)
+    # 값이 true/false면 켜기·끄기만, 객체면 조각 수도 정한다
+    split: dict[str, bool | RunSplit] = Field(default_factory=dict)
 
 
 class ExecutionCreate(BaseModel):
