@@ -13,19 +13,35 @@ from agent import executor
 CONFIG = {"ollama_url": "http://ollama.test", "default_model": "기본모델"}
 
 
+@pytest.fixture(autouse=True)
+def forget_model_limits():
+    """모델 한계는 프로세스 동안 기억해 두므로 시험마다 비운다."""
+    executor._MODEL_LIMITS.clear()
+
+
 @pytest.fixture()
 def fake_ollama(monkeypatch):
-    """httpx.post를 가짜로 바꾸고 (호출 기록, 응답 설정)을 돌려준다."""
+    """httpx.post를 가짜로 바꾸고 (대화 요청 기록, 응답 설정)을 돌려준다.
+
+    state["context_length"]: /api/show가 알려줄 모델 한계. 없으면 모른다고 답한다.
+    state["prompt_tokens"]: 입력의 실제 토큰 수. 자르지 말라는 요청이 문맥보다 길면 Ollama처럼 400으로 거절한다.
+    state["shows"]: /api/show를 부른 횟수.
+    """
     calls: list[dict] = []
-    state = {"content": "응답"}
+    state = {"content": "응답", "shows": 0}
 
     def fake_post(url, json=None, timeout=None):
-        calls.append({"url": url, "json": json})
-        return httpx.Response(
-            200,
-            json={"message": {"content": state["content"]}},
-            request=httpx.Request("POST", url),
-        )
+        request = httpx.Request("POST", url)
+        if url.endswith("/api/show"):
+            state["shows"] += 1
+            info = {"qwen3.context_length": state["context_length"]} if state.get("context_length") else {}
+            return httpx.Response(200, json={"model_info": info}, request=request)
+        calls.append({"url": url, "json": dict(json, options=dict(json["options"]))})
+        tokens, num_ctx = state.get("prompt_tokens"), json["options"]["num_ctx"]
+        if tokens and tokens > num_ctx and json.get("truncate") is False:
+            error = f"request ({tokens} tokens) exceeds the available context size ({num_ctx} tokens), try increasing it"
+            return httpx.Response(400, json={"error": error}, request=request)
+        return httpx.Response(200, json={"message": {"content": state["content"]}}, request=request)
 
     monkeypatch.setattr(executor.httpx, "post", fake_post)
     return calls, state
@@ -193,16 +209,90 @@ class TestContextLength:
         monkeypatch.setenv("MARS_MAX_CONTEXT", "16384")
         assert executor.context_tokens([{"role": "user", "content": "x" * 50_000}]) == 16384
 
-    def test_request_sends_num_ctx(self, monkeypatch):
-        calls = []
+    def test_short_prompt_is_not_reported_as_too_long(self, monkeypatch, capsys):
+        # 상한을 가장 낮게 잡아도, 답 쓸 자리 때문에 짧은 입력까지 넘친다고 알리지 않는다
+        monkeypatch.setenv("MARS_MAX_CONTEXT", "8192")
+        assert executor.context_tokens([{"role": "user", "content": "짧은 질문"}]) == 8192
+        assert capsys.readouterr().out == ""
+        executor.context_tokens([{"role": "user", "content": "x" * 9000}])
+        assert "넘을 수 있습니다" in capsys.readouterr().out
 
-        def fake_post(url, json, timeout):
-            calls.append(json)
+    def test_request_sends_num_ctx(self, fake_ollama):
+        calls, state = fake_ollama
+        executor._chat(CONFIG, "qwen3:4b", [{"role": "user", "content": "y" * 20_000}], 0.5)
+        assert calls[0]["json"]["options"]["num_ctx"] == 28672
+
+
+class TestModelLimit:
+    """모델마다 읽을 수 있는 길이가 달라서, Ollama에 모델 한계를 물어 그 안에서 문맥을 정한다."""
+
+    def test_num_ctx_never_exceeds_the_model_limit(self, fake_ollama):
+        calls, state = fake_ollama
+        state["context_length"] = 16384
+        executor._chat(CONFIG, "작은모델", [{"role": "user", "content": "y" * 20_000}], 0.5)
+        assert calls[0]["json"]["options"]["num_ctx"] == 16384
+
+    def test_setting_still_applies_when_the_model_allows_more(self, fake_ollama):
+        calls, state = fake_ollama
+        state["context_length"] = 262_144
+        executor._chat(CONFIG, "큰모델", [{"role": "user", "content": "y" * 50_000}], 0.5)
+        assert calls[0]["json"]["options"]["num_ctx"] == 32768
+
+    def test_limit_is_asked_once_per_model(self, fake_ollama):
+        calls, state = fake_ollama
+        state["context_length"] = 16384
+        for _ in range(3):
+            executor._chat(CONFIG, "작은모델", [{"role": "user", "content": "질문"}], 0.5)
+        assert state["shows"] == 1
+
+    def test_unknown_limit_falls_back_to_the_setting(self, monkeypatch):
+        def fake_post(url, json=None, timeout=None):
+            if url.endswith("/api/show"):
+                raise httpx.ConnectError("꺼져 있음")
             return httpx.Response(200, json={"message": {"content": "ok"}}, request=httpx.Request("POST", url))
 
         monkeypatch.setattr(executor.httpx, "post", fake_post)
-        executor._chat(CONFIG, "qwen3:4b", [{"role": "user", "content": "y" * 20_000}], 0.5)
-        assert calls[0]["options"]["num_ctx"] == 28672
+        assert executor.model_context_limit(CONFIG, "모델") is None
+        assert executor._chat(CONFIG, "모델", [{"role": "user", "content": "질문"}], 0.5) == "ok"
+
+
+class TestContextOverflow:
+    """입력이 문맥보다 길면 Ollama는 말없이 자른다. 자르지 말라고 요청해 넘침을 알아챈다."""
+
+    def test_asks_ollama_not_to_cut_silently(self, fake_ollama):
+        calls, state = fake_ollama
+        executor._chat(CONFIG, "모델", [{"role": "user", "content": "질문"}], 0.5)
+        assert calls[0]["json"]["truncate"] is False
+
+    def test_underestimated_prompt_is_resent_with_enough_context(self, fake_ollama):
+        # 글자 수는 적지만 토큰이 많은 입력: 어림한 9216으로는 모자라고 상한 안에서는 들어간다
+        calls, state = fake_ollama
+        state["prompt_tokens"] = 12_000
+        notes: list[str] = []
+        out = executor._chat(CONFIG, "모델", [{"role": "user", "content": "한" * 900}], 0.5, notes=notes)
+        assert out == "응답"
+        assert [call["json"]["options"]["num_ctx"] for call in calls] == [9216, 20480]
+        assert notes == []
+
+    def test_prompt_over_the_limit_runs_cut_and_leaves_a_note(self, fake_ollama):
+        calls, state = fake_ollama
+        state["prompt_tokens"] = 50_000
+        notes: list[str] = []
+        out = executor._chat(CONFIG, "모델", [{"role": "user", "content": "x" * 40_000}], 0.5, notes=notes)
+        assert out == "응답"
+        assert calls[1]["json"]["options"]["num_ctx"] == 32768 and "truncate" not in calls[1]["json"]
+        assert notes == ["입력이 50,000토큰인데 이 워커는 한 번에 32,768토큰까지만 읽을 수 있어요. 입력 앞부분이 빠진 채 실행됐어요."]
+
+    def test_other_errors_still_fail(self, monkeypatch):
+        def fake_post(url, json=None, timeout=None):
+            status = 200 if url.endswith("/api/show") else 400
+            return httpx.Response(status, json={"error": "model not found"}, request=httpx.Request("POST", url))
+
+        monkeypatch.setattr(executor.httpx, "post", fake_post)
+        notes: list[str] = []
+        with pytest.raises(httpx.HTTPStatusError):
+            executor._chat(CONFIG, "없는모델", [{"role": "user", "content": "질문"}], 0.5, notes=notes)
+        assert notes == []
 
 
 class TestCutFiles:

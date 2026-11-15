@@ -85,31 +85,94 @@ def _max_context_tokens() -> int:
         return 32768
 
 
-def context_tokens(messages: list[dict]) -> int:
+_MODEL_LIMITS: dict[tuple[str, str], int] = {}
+
+
+def model_context_limit(config: dict, model: str) -> int | None:
+    """모델이 한 번에 읽을 수 있는 최대 토큰 수(Ollama /api/show). 알 수 없으면 None.
+
+    모델 한계보다 큰 num_ctx를 보내면 Ollama가 말없이 줄이므로, 보내기 전에 한계를 알아 둔다.
+    """
+    key = (config["ollama_url"], model)
+    if key not in _MODEL_LIMITS:
+        try:
+            resp = httpx.post(f"{config['ollama_url']}/api/show", json={"model": model}, timeout=15)
+            resp.raise_for_status()
+            info = resp.json().get("model_info") or {}
+            limits = [
+                value for name, value in info.items()
+                if name.endswith(".context_length") and isinstance(value, int) and value > 0
+            ]
+        except Exception:
+            limits = []
+        if not limits:
+            return None
+        _MODEL_LIMITS[key] = min(limits)
+    return _MODEL_LIMITS[key]
+
+
+def _context_limit(model_limit: int | None) -> int:
+    """이 요청에 쓸 수 있는 문맥 상한: 기기 설정(MARS_MAX_CONTEXT)과 모델 한계 중 작은 값."""
+    limit = _max_context_tokens()
+    return min(limit, model_limit) if model_limit else limit
+
+
+def _round_up(tokens: int) -> int:
+    return -(-tokens // 1024) * 1024
+
+
+def context_tokens(messages: list[dict], model_limit: int | None = None) -> int:
     """이번 요청에 필요한 문맥 길이(num_ctx).
 
     지정하지 않으면 Ollama 기본값(4096 등)으로 떠서 긴 입력의 앞부분을 말없이 잘라 버린다.
     로그·CSV처럼 숫자가 많은 글은 글자 하나가 토큰 하나 가까이 되므로 글자 수를 그대로 토큰 수로 잡는다.
     """
     estimate = sum(len(str(message.get("content") or "")) for message in messages)
-    needed = estimate + _OUTPUT_RESERVE_TOKENS
-    rounded = -(-needed // 1024) * 1024
-    limit = _max_context_tokens()
-    if rounded > limit:
-        print(f"  입력이 커서 문맥 상한({limit:,}토큰)을 넘을 수 있습니다. 앞부분이 잘릴 수 있어요: 약 {estimate:,}자")
+    rounded = _round_up(estimate + _OUTPUT_RESERVE_TOKENS)
+    limit = _context_limit(model_limit)
+    if estimate > limit:
+        print(f"  입력이 커서 문맥 상한({limit:,}토큰)을 넘을 수 있습니다: 약 {estimate:,}자")
     return min(max(_MIN_CONTEXT_TOKENS, rounded), limit)
 
 
-def _chat(config: dict, model: str, messages: list[dict], temperature: float, response_format: str | None = None) -> str:
+_OVERFLOW = re.compile(r"request \((\d+) tokens\) exceeds the available context size")
+
+
+def _chat(
+    config: dict, model: str, messages: list[dict], temperature: float,
+    response_format: str | None = None, notes: list[str] | None = None,
+) -> str:
+    """Ollama에 한 번 묻는다. 입력이 문맥보다 길어 잘린 채 실행되면 notes에 안내를 남긴다."""
+    model_limit = model_context_limit(config, model)
+    num_ctx = context_tokens(messages, model_limit)
     payload = {
         "model": model,
         "messages": messages,
         "stream": False,
-        "options": {"temperature": temperature, "num_predict": _max_output_tokens(), "num_ctx": context_tokens(messages)},
+        # Ollama는 문맥을 넘는 입력을 말없이 절반으로 잘라 버린다. 자르지 말고 거절하게 해서 넘침을 알아챈다
+        "truncate": False,
+        "options": {"temperature": temperature, "num_predict": _max_output_tokens(), "num_ctx": num_ctx},
     }
     if response_format:
         payload["format"] = response_format
-    resp = httpx.post(f"{config['ollama_url']}/api/chat", json=payload, timeout=300)
+    url = f"{config['ollama_url']}/api/chat"
+    resp = httpx.post(url, json=payload, timeout=300)
+    if resp.status_code == 400:
+        # 거절 사유에 실제 토큰 수가 들어 있다. 글자 수 어림이 모자랐던 것이면 문맥을 늘려 다시 보내고,
+        # 상한으로도 모자라면 예전처럼 잘린 채로 실행하되 그 사실을 남긴다
+        match = _OVERFLOW.search(resp.text)
+        tokens = int(match.group(1)) if match else None
+        if tokens is not None:
+            num_ctx = min(_round_up(tokens + _OUTPUT_RESERVE_TOKENS), _context_limit(model_limit))
+            payload["options"]["num_ctx"] = num_ctx
+        del payload["truncate"]
+        resp = httpx.post(url, json=payload, timeout=300)
+        if resp.status_code == 200 and (tokens is None or tokens > num_ctx):
+            size = f"입력이 {tokens:,}토큰인데" if tokens else "입력이 너무 길어서,"
+            note = f"{size} 이 워커는 한 번에 {num_ctx:,}토큰까지만 읽을 수 있어요. 입력 앞부분이 빠진 채 실행됐어요."
+            print(f"  [WARN] {note}")
+            if notes is not None:
+                notes.append(note)
     resp.raise_for_status()
     content = resp.json()["message"]["content"]
     # qwen3 등 reasoning 모델의 <think> 블록 제거
@@ -249,8 +312,8 @@ def _build_messages(task: dict, config: dict, notes: list[str] | None = None) ->
 def run_task(task: dict, config: dict, notes: list[str] | None = None) -> str:
     """작업을 실행하고 출력 텍스트를 반환한다. 실패 시 예외.
 
-    notes를 주면 입력이 빠진 채 실행된 사정(파일 잘림)을 사람이 읽을 문장으로 담아 준다.
+    notes를 주면 입력이 빠진 채 실행된 사정(파일 잘림, 문맥 넘침)을 사람이 읽을 문장으로 담아 준다.
     """
     model = task.get("model") or config["default_model"]
     messages = _build_messages(task, config, notes)
-    return _chat(config, model, messages, temperature=0.5)
+    return _chat(config, model, messages, temperature=0.5, notes=notes)
