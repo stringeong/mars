@@ -1447,3 +1447,31 @@ body.canvas-fullscreen { overflow: hidden; }
 .mk-server-inline code { padding: 8px 12px; border-radius: 8px; background: var(--mk-soft); font-size: 13px; }
 .mk-server-inline .mk-copy { position: static; padding: 7px 12px; border-color: var(--mk-ink); background: var(--mk-ink); color: #fff; }
 .mk-server-inline .mk-copy:hover { background: #000; }
+
+
+/* 실행 화면: 파일 나눠서 병렬 실행 계획 */
+.split-plan { display: grid; gap: 12px; margin-top: 16px; padding: 16px; border: 1px solid #cfe9db; border-radius: 12px; background: #f6fcf9; }
+.split-plan-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; color: #065f46; }
+.split-plan-head small { color: var(--muted); font-size: 12px; }
+.split-plan-title { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; font-size: 13px; }
+.split-plan-title span { color: var(--muted); font-size: 12px; }
+.split-plan-summary { margin: 6px 0; color: #065f46; font-size: 14px; font-weight: 600; }
+.split-plan-summary.muted { color: var(--muted); font-weight: 400; }
+.split-plan-flow { display: grid; grid-template-columns: minmax(120px, 170px) auto minmax(0, 1fr); align-items: center; gap: 10px; }
+.split-plan-flow > i { color: var(--muted); font-size: 12px; font-style: normal; white-space: nowrap; }
+.split-plan-file { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.split-plan-file b, .split-plan-piece b { display: block; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.split-plan-file small, .split-plan-piece small { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.split-plan-pieces { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.split-plan-piece { padding: 8px 12px; border: 1px solid #b7e1cc; border-radius: 10px; background: #fff; min-width: 0; }
+.split-plan-note { display: block; margin-top: 8px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.split-plan-note a, .split-plan-hint a { color: var(--text); font-weight: 600; }
+.split-plan-issues { margin: 6px 0 0; padding-left: 18px; color: #b91c1c; font-size: 13px; }
+.split-plan-hint { margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: #fafaf9; color: var(--muted); font-size: 12px; }
+@media (max-width: 760px) { .split-plan-flow { grid-template-columns: 1fr; } .split-plan-flow > i { white-space: normal; } }
+
+.run-split-toggle { display: flex; gap: 10px; align-items: flex-start; margin: 8px 0 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fafaf9; cursor: pointer; }
+.run-split-toggle.on { border-color: #b7e1cc; background: #f6fcf9; }
+.run-split-toggle input { width: auto; margin-top: 3px; }
+.run-split-toggle b { display: block; font-size: 13px; }
+.run-split-toggle small { display: block; margin-top: 2px; color: var(--muted); font-size: 12px; line-height: 1.45; }
