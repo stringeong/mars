@@ -165,6 +165,16 @@ class TestBuildMessages:
         user = executor._build_messages(task, CONFIG)[1]["content"]
         assert "로컬 파일" not in user
 
+    def test_uploaded_file_reached_through_a_link_is_included_once(self, folder, tmp_path):
+        # macOS 임시 폴더처럼 올린 파일의 경로가 심볼릭 링크를 거치는 경우
+        link = tmp_path / "link"
+        link.symlink_to(folder, target_is_directory=True)
+        (folder / "12_notes.txt").write_text("한 번만 들어가야 하는 내용")
+        task = {"role_prompt": "역할", "directory_paths": [str(link)], "uploaded_file_paths": [str(link / "12_notes.txt")]}
+        user = executor._build_messages(task, CONFIG)[1]["content"]
+        assert user.count("한 번만 들어가야 하는 내용") == 1
+        assert user.count("(direct upload)") == 1
+
 
 
 class TestContextLength:

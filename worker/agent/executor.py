@@ -3,6 +3,7 @@
 import json
 import os
 import re
+from pathlib import Path
 
 import httpx
 
@@ -28,8 +29,13 @@ def _directory_paths(task: dict) -> list[str]:
 
 
 def _uploaded_file_paths(task: dict) -> list[str]:
-    """Paths downloaded from the file vault for this specific agent."""
-    return [str(path) for path in task.get("uploaded_file_paths") or []]
+    """Paths downloaded from the file vault for this specific agent.
+
+    sandbox.list_files가 돌려주는 경로와 같은 모양(심볼릭 링크를 푼 절대 경로)으로 맞춘다.
+    macOS는 임시 폴더가 /var -> /private/var 링크라서, 맞추지 않으면 같은 파일이 '올린 파일'과
+    '폴더에서 찾은 파일'로 두 번 들어간다.
+    """
+    return [str(Path(str(path)).expanduser().resolve()) for path in task.get("uploaded_file_paths") or []]
 
 
 def _chunk_document(path: str, content: str) -> list[str]:
