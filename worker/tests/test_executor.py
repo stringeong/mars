@@ -203,3 +203,52 @@ class TestContextLength:
         monkeypatch.setattr(executor.httpx, "post", fake_post)
         executor._chat(CONFIG, "qwen3:4b", [{"role": "user", "content": "y" * 20_000}], 0.5)
         assert calls[0]["options"]["num_ctx"] == 28672
+
+
+class TestCutFiles:
+    """파일을 끝까지 넣지 못하면 모델(프롬프트)과 사용자(실행 기록) 양쪽에 알린다."""
+
+    @pytest.fixture(autouse=True)
+    def keep_all_files(self, monkeypatch):
+        monkeypatch.setattr(executor, "_select_relevant_files", lambda task, files, config: files)
+
+    def _build(self, folder, **task):
+        notes: list[str] = []
+        task = {"role_prompt": "역할", "directory_paths": [str(folder)], **task}
+        return executor._build_messages(task, CONFIG, notes)[1]["content"], notes
+
+    def test_short_file_is_whole_and_leaves_no_note(self, folder):
+        (folder / "small.txt").write_text("가" * 9000)
+        user, notes = self._build(folder)
+        assert notes == [] and "생략" not in user
+        assert "(part 3/3)" in user
+
+    def test_long_file_is_marked_in_the_prompt_and_noted(self, folder):
+        (folder / "big.log").write_text("가" * 45_000)
+        user, notes = self._build(folder)
+        assert user.count("가") == 30_000
+        assert "[여기까지만 포함됨: 전체 45,000자 중 앞 30,000자. 이후 15,000자는 생략됨]" in user
+        assert notes == ["big.log: 전체 45,000자 중 앞 30,000자만 읽었어요. 뒤 15,000자는 빠졌어요."]
+
+    def test_file_larger_than_the_read_cap_is_still_counted_exactly(self, folder):
+        (folder / "huge.log").write_text("x" * 250_000)
+        user, notes = self._build(folder)
+        assert notes == ["huge.log: 전체 250,000자 중 앞 30,000자만 읽었어요. 뒤 220,000자는 빠졌어요."]
+
+    def test_uploaded_file_is_named_without_the_staging_prefix(self, folder):
+        path = folder / "12_BGL_2k.log"
+        path.write_text("x" * 31_000)
+        user, notes = self._build(folder, uploaded_file_paths=[str(path)])
+        assert notes == ["BGL_2k.log: 전체 31,000자 중 앞 30,000자만 읽었어요. 뒤 1,000자는 빠졌어요."]
+
+    def test_files_over_the_count_limit_are_noted(self, folder):
+        for index in range(executor.FILE_CONTEXT_LIMIT + 2):
+            (folder / f"f{index:02}.txt").write_text("내용")
+        user, notes = self._build(folder)
+        assert notes == ["파일 12개 중 10개만 읽었어요. 빠진 파일: f10.txt, f11.txt"]
+
+    def test_run_task_collects_notes(self, folder, fake_ollama):
+        (folder / "big.log").write_text("x" * 31_000)
+        notes: list[str] = []
+        executor.run_task({"role_prompt": "역할", "directory_paths": [str(folder)]}, CONFIG, notes)
+        assert len(notes) == 1 and notes[0].startswith("big.log: 전체 31,000자")

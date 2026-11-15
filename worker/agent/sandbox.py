@@ -3,9 +3,11 @@
 서버가 어떤 경로를 지시하더라도 여기서 검증을 통과하지 못하면 접근을 거부한다.
 """
 
+import codecs
 from pathlib import Path
 
 MAX_FILE_BYTES = 200_000  # 파일당 읽기 상한 (프롬프트 폭주 방지)
+MAX_COUNT_BYTES = 200_000_000  # 전체 글자 수를 세어 줄 파일 크기 상한
 MAX_PDF_BYTES = 20_000_000  # PDF 파싱 전 파일 크기 상한
 TEXT_EXTENSIONS = {
     ".txt", ".md", ".rst", ".csv", ".tsv", ".json", ".jsonl", ".xml",
@@ -157,6 +159,31 @@ def read_file(path: str, permitted_roots: list[str]) -> str:
             raise SandboxError(f"PowerPoint 문서를 읽을 수 없습니다: {path}") from exc
     data = p.read_bytes()[:MAX_FILE_BYTES]
     return data.decode("utf-8", errors="replace")
+
+
+def full_length(path: str, content: str) -> tuple[int, bool]:
+    """read_file이 돌려준 content의 원본 전체 글자 수와, 그 값이 정확한지를 돌려준다.
+
+    read_file은 MAX_FILE_BYTES에서 읽기를 멈추므로 content 길이만으로는 원본 크기를 알 수 없다.
+    일반 텍스트는 파일을 끝까지 훑어 정확히 세고, PDF·문서는 추출을 다시 하지 않고 '이 값 이상'으로만 답한다.
+    """
+    p = Path(path).expanduser().resolve()
+    if p.suffix.lower() in DOCUMENT_EXTENSIONS:
+        return len(content), len(content) < MAX_FILE_BYTES
+    try:
+        size = p.stat().st_size
+        if size <= MAX_FILE_BYTES:
+            return len(content), True
+        if size > MAX_COUNT_BYTES:
+            return len(content), False
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        total = 0
+        with p.open("rb") as source:
+            while chunk := source.read(1 << 20):
+                total += len(decoder.decode(chunk))
+        return total + len(decoder.decode(b"", final=True)), True
+    except OSError:
+        return len(content), False
 
 
 def _document_content(parts: list[str], path: str) -> str:

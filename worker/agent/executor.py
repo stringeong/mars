@@ -38,14 +38,38 @@ def _uploaded_file_paths(task: dict) -> list[str]:
     return [str(Path(str(path)).expanduser().resolve()) for path in task.get("uploaded_file_paths") or []]
 
 
-def _chunk_document(path: str, content: str) -> list[str]:
+def _chunk_document(path: str, content: str, cut_marker: str = "") -> list[str]:
+    """파일 내용을 구간으로 나눈다. 상한에서 잘렸으면 마지막 구간 끝에 cut_marker를 붙여 모델도 알게 한다."""
     content = content[:FILE_CONTEXT_CHARS]
-    total = max(1, (len(content) + FILE_CHUNK_CHARS - 1) / FILE_CHUNK_CHARS)
-    return [
+    total = max(1, -(-len(content) // FILE_CHUNK_CHARS))
+    chunks = [
         f"### {path} (part {index + 1}/{total})\n"
         + content[start : start + FILE_CHUNK_CHARS]
         for index, start in enumerate(range(0, len(content), FILE_CHUNK_CHARS))
     ]
+    if cut_marker and chunks:
+        chunks[-1] += f"\n{cut_marker}"
+    return chunks
+
+
+def _display_name(path: str, uploaded: set[str]) -> str:
+    """사용자에게 보여줄 파일 이름. 올린 파일은 내려받을 때 붙인 '파일id_'를 뗀다."""
+    name = Path(path).name
+    return re.sub(r"^\d+_", "", name) if path in uploaded else name
+
+
+def _cut_texts(name: str, total: int, exact: bool) -> tuple[str, str]:
+    """파일이 상한에서 잘렸을 때 (프롬프트에 넣을 표시, 실행 기록에 남길 안내)."""
+    used = FILE_CONTEXT_CHARS
+    if exact:
+        return (
+            f"[여기까지만 포함됨: 전체 {total:,}자 중 앞 {used:,}자. 이후 {total - used:,}자는 생략됨]",
+            f"{name}: 전체 {total:,}자 중 앞 {used:,}자만 읽었어요. 뒤 {total - used:,}자는 빠졌어요.",
+        )
+    return (
+        f"[여기까지만 포함됨: 전체 {total:,}자 이상 중 앞 {used:,}자. 이후는 생략됨]",
+        f"{name}: {total:,}자가 넘는 파일이라 앞 {used:,}자만 읽었어요. 나머지는 빠졌어요.",
+    )
 
 
 # 답을 쓰는 데 남겨 둘 토큰. reasoning 모델은 생각하는 과정도 여기에 쓴다
@@ -159,7 +183,9 @@ def _select_relevant_files(task: dict, files: list[str], config: dict) -> list[s
         return files
 
 
-def _build_messages(task: dict, config: dict) -> list[dict]:
+def _build_messages(task: dict, config: dict, notes: list[str] | None = None) -> list[dict]:
+    """프롬프트를 조립한다. 파일을 끝까지 넣지 못했으면 그 사실을 프롬프트와 notes 양쪽에 남긴다."""
+    notes = notes if notes is not None else []
     system = task.get("role_prompt") or "당신은 유능한 AI 어시스턴트입니다."
     parts: list[str] = []
 
@@ -180,6 +206,13 @@ def _build_messages(task: dict, config: dict) -> list[dict]:
         )
         ordered_files = list(dict.fromkeys([*uploaded, *relevant_shared]))
         selected_files = ordered_files[:FILE_CONTEXT_LIMIT]
+        dropped = ordered_files[FILE_CONTEXT_LIMIT:]
+        if dropped:
+            names = ", ".join(_display_name(path, uploaded_set) for path in dropped[:5])
+            more = f" 외 {len(dropped) - 5}개" if len(dropped) > 5 else ""
+            notes.append(
+                f"파일 {len(ordered_files)}개 중 {FILE_CONTEXT_LIMIT}개만 읽었어요. 빠진 파일: {names}{more}"
+            )
         if selected_files:
             listing = "\n".join(
                 f"- {path}{' (direct upload)' if path in uploaded_set else ''}"
@@ -193,8 +226,14 @@ def _build_messages(task: dict, config: dict) -> list[dict]:
                     content = sandbox.read_file(path, folders)
                 except sandbox.SandboxError as exc:
                     errors.append(f"- {path}: {exc}")
+                    notes.append(f"{_display_name(path, uploaded_set)}: 읽지 못했어요. {exc}")
                     continue
-                snippets.extend(_chunk_document(path, content))
+                cut_marker = ""
+                if len(content) > FILE_CONTEXT_CHARS:
+                    total, exact = sandbox.full_length(path, content)
+                    cut_marker, note = _cut_texts(_display_name(path, uploaded_set), total, exact)
+                    notes.append(note)
+                snippets.extend(_chunk_document(path, content, cut_marker))
             if snippets:
                 parts.append("[파일 내용]\n" + "\n\n".join(snippets))
             if errors:
@@ -207,8 +246,11 @@ def _build_messages(task: dict, config: dict) -> list[dict]:
     ]
 
 
-def run_task(task: dict, config: dict) -> str:
-    """작업을 실행하고 출력 텍스트를 반환한다. 실패 시 예외."""
+def run_task(task: dict, config: dict, notes: list[str] | None = None) -> str:
+    """작업을 실행하고 출력 텍스트를 반환한다. 실패 시 예외.
+
+    notes를 주면 입력이 빠진 채 실행된 사정(파일 잘림)을 사람이 읽을 문장으로 담아 준다.
+    """
     model = task.get("model") or config["default_model"]
-    messages = _build_messages(task, config)
+    messages = _build_messages(task, config, notes)
     return _chat(config, model, messages, temperature=0.5)

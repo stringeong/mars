@@ -362,6 +362,7 @@ def process_execution_task(server: str, headers: dict, config: dict, task: dict)
     )
     print(f"[RECEIVED] 작업 수신: #{task['task_id']} {task['agent_name']}")
     staging_dir = None
+    notes: list[str] = []
     watch = OverloadWatch(
         task["task_id"],
         read_state=runtime_state.read,
@@ -371,10 +372,13 @@ def process_execution_task(server: str, headers: dict, config: dict, task: dict)
     try:
         with heartbeat_while_running(server, headers, watch=watch):
             staging_dir = stage_uploaded_files(server, headers, task)
-            output = executor.run_task(task, config)
-        result = {"status": "done", "output": output, "error": ""}
+            output = executor.run_task(task, config, notes)
+        # notice: 입력 일부가 빠진 채 끝났으면 그 사정. 완료로 보고하되 사용자가 알 수 있게 함께 보낸다
+        result = {"status": "done", "output": output, "error": "", "notice": "\n".join(notes)}
         if not watch.released:
             print(f"[DONE] 작업 완료: #{task['task_id']} ({len(output)}자)")
+            for note in notes:
+                print(f"[NOTICE] #{task['task_id']} {note}")
     except Exception as exc:  # LLM 실패 등 -> 서버에 실패 보고
         result = {"status": "failed", "output": "", "error": str(exc)}
         print(f"[ERROR] 작업 실패: #{task['task_id']} - {exc}")

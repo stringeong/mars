@@ -229,7 +229,7 @@ class TestHeartbeatAndRelease:
     def test_released_task_result_is_not_submitted(self, monkeypatch):
         calls = self._respond(monkeypatch, 200, {"ok": True, "paused_until": "2026-11-15T00:05:00Z"})
 
-        def run_and_release(task, config):
+        def run_and_release(task, config, notes=None):
             # 실행 도중 과부하로 넘긴 상황
             state["watch"].released = True
             return "늦게 나온 결과"
@@ -246,6 +246,19 @@ class TestHeartbeatAndRelease:
         main.process_execution_task("http://server.test", {}, {}, {"task_id": 9, "execution_id": 1, "agent_name": "분석"})
         assert not any(url.endswith("/result") for url, _ in calls)
         assert runtime_state.read()["status"] == "idle"
+
+    def test_finished_task_reports_what_was_left_out(self, monkeypatch):
+        calls = self._respond(monkeypatch, 200, {"ok": True})
+
+        def run_with_cut_input(task, config, notes=None):
+            notes.append("big.log: 전체 45,000자 중 앞 30,000자만 읽었어요. 뒤 15,000자는 빠졌어요.")
+            return "결과"
+
+        monkeypatch.setattr(main.executor, "run_task", run_with_cut_input)
+        main.process_execution_task("http://server.test", {}, {}, {"task_id": 9, "execution_id": 1, "agent_name": "분석"})
+        result = next(kwargs["json"] for url, kwargs in calls if url.endswith("/tasks/9/result"))
+        assert result["status"] == "done" and result["output"] == "결과"
+        assert result["notice"] == "big.log: 전체 45,000자 중 앞 30,000자만 읽었어요. 뒤 15,000자는 빠졌어요."
 
     def test_release_calls_the_server_and_returns_pause_time(self, monkeypatch):
         calls = self._respond(monkeypatch, 200, {"ok": True, "paused_until": "2026-11-15T00:05:00Z"})
