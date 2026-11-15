@@ -9,6 +9,15 @@ import { executionStatusLabel, generationLabel, shortDateTime, TASK_STATUS, task
 
 function statusLabel(status: string) { return executionStatusLabel(status) }
 
+function approvalSources(execution: Execution, approval: Task) {
+  const sourceIds = new Set(
+    (execution.edges ?? [])
+      .filter((edge) => edge.target === approval.node_id)
+      .map((edge) => edge.source),
+  )
+  return execution.tasks.filter((task) => sourceIds.has(task.node_id))
+}
+
 export default function ExecutionPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -48,8 +57,8 @@ export default function ExecutionPage() {
   function openRetry(task: Task) {
     // 검토 작업을 다시 실행할 때는 안내문이 아니라 선행 모델 블록의
     // 프롬프트와 모델을 편집한다.
-    const source = task.status === "waiting_approval"
-      ? execution?.tasks.find((item) => item.node_id === task.approval_source_node_id)
+    const source = task.status === "waiting_approval" && execution
+      ? approvalSources(execution, task)[0]
       : task
     setRetryTask(task)
     setRetryPrompt(source?.role_prompt ?? "")
@@ -119,11 +128,11 @@ export default function ExecutionPage() {
       </header>
       {error && <div className="error">{error}</div>}
       {waitingApprovals.map((approval) => {
-        const source = execution.tasks.find((task) => task.node_id === approval.approval_source_node_id)
+        const sources = approvalSources(execution, approval)
         return <section className="result-section failure-section" key={approval.id}>
           <span className="eyebrow">USER REVIEW REQUIRED</span><h2>{approval.agent_name}</h2>
           <p>{approval.role_prompt || '이 결과를 확인한 뒤 다음 단계 진행을 선택하세요.'}</p>
-          {source?.output && <article className="result-box">{source.output}</article>}
+          {sources.map((source) => source.output && <article className="result-box" key={source.id}>{sources.length > 1 && <strong>{source.agent_name}</strong>}{source.output}</article>)}
           <div className="result-actions"><button className="btn" disabled={actionBusy} onClick={() => approve(approval)}>승인하고 계속</button><button className="btn ghost" disabled={actionBusy} onClick={() => openRetry(approval)}>수정 후 다시 실행</button></div>
         </section>
       })}

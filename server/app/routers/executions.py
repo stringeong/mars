@@ -308,14 +308,16 @@ def retry_approval_source(
     if approval is None:
         raise HTTPException(404, "검토 블록을 찾을 수 없습니다.")
     node = next((item for item in (execution.graph_snapshot or {}).get("nodes", []) if item.get("id") == approval.node_id), {})
-    source_id = node.get("source_node_id")
-    source = next((item for item in execution.tasks if item.node_id == source_id), None)
-    if node.get("type") != "approval" or source is None:
+    source_ids = dag.parents_of(execution.graph_snapshot or {}).get(approval.node_id, [])
+    tasks_by_node = {item.node_id: item for item in execution.tasks}
+    sources = [tasks_by_node[source_id] for source_id in source_ids if source_id in tasks_by_node]
+    if node.get("type") != "approval" or not sources:
         raise HTTPException(409, "다시 실행할 선행 블록을 찾을 수 없습니다.")
     if approval.status != "waiting_approval":
         raise HTTPException(409, "승인 대기 중인 검토 블록만 다시 실행할 수 있습니다.")
     try:
-        orchestrator.retry_task(db, execution, source, role_prompt=body.role_prompt, model=body.model)
+        for source in sources:
+            orchestrator.retry_task(db, execution, source, role_prompt=body.role_prompt, model=body.model)
     except ValueError as exc:
         raise HTTPException(409, str(exc))
     db.commit()

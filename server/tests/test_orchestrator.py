@@ -391,6 +391,22 @@ class TestApprovalAndRetry:
         assert tasks["a__approval"].status == "done"
         assert tasks["c"].status == "ready"
 
+    def test_approval_passes_source_output_to_next_task(self, db, make_user, make_execution):
+        graph = graph_of(["a", "c"], [("a", "c")])
+        graph["nodes"][0]["approval_required"] = True
+        execution = make_execution(make_user(), dag.materialize_approval_nodes(graph))
+        orchestrator.create_tasks_for_execution(db, execution)
+        tasks = tasks_by_node(db, execution)
+        tasks["a"].status = "done"
+        tasks["a"].output = "검토할 실제 결과"
+        db.flush()
+
+        orchestrator.approve_task(db, execution, tasks["a__approval"])
+        orchestrator.populate_task_context(db, tasks["c"])
+
+        assert "검토할 실제 결과" in tasks["c"].input_context
+        assert "사용자가 결과를 승인했습니다." not in tasks["c"].input_context
+
     def test_retry_resets_only_selected_branch_and_allows_model_change(self, db, make_user, make_execution):
         execution = make_execution(make_user(), LINEAR)
         orchestrator.create_tasks_for_execution(db, execution)

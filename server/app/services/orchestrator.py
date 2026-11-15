@@ -323,6 +323,28 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
     return task
 
 
+def _result_parent_ids(graph: dict, parent_ids: list[str]) -> list[str]:
+    """승인 작업을 건너뛰고 실제 결과를 만든 선행 작업을 찾는다."""
+    nodes = {node.get("id"): node for node in graph.get("nodes", [])}
+    parents_by_node = dag.parents_of(graph)
+    result: list[str] = []
+    seen: set[str] = set()
+
+    def include(node_id: str) -> None:
+        if node_id in seen:
+            return
+        seen.add(node_id)
+        if _is_approval_node(nodes.get(node_id, {})):
+            for source_id in parents_by_node.get(node_id, []):
+                include(source_id)
+            return
+        result.append(node_id)
+
+    for parent_id in parent_ids:
+        include(parent_id)
+    return result
+
+
 def populate_task_context(db: Session, task: models.TaskRecord) -> None:
     """Build prompt context from the run prompt and completed parent outputs."""
     execution = db.get(models.Execution, task.execution_id)
@@ -345,8 +367,9 @@ def populate_task_context(db: Session, task: models.TaskRecord) -> None:
         parts.append(part_note)
     if parents:
         nodes = {item.get("id"): item for item in (execution.graph_snapshot or {}).get("nodes", [])}
-        parent_tasks = {t.node_id: t for t in db.query(models.TaskRecord).filter(models.TaskRecord.execution_id == execution.id, models.TaskRecord.node_id.in_(parents)).all()}
-        for parent_id in parents:
+        result_parents = _result_parent_ids(execution.graph_snapshot or {}, parents)
+        parent_tasks = {t.node_id: t for t in db.query(models.TaskRecord).filter(models.TaskRecord.execution_id == execution.id, models.TaskRecord.node_id.in_(result_parents)).all()}
+        for parent_id in result_parents:
             parent = parent_tasks.get(parent_id)
             if parent and parent.output:
                 # 나눠서 실행한 조각의 결과에는 원본에서 맡은 범위를 함께 적는다

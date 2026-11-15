@@ -24,6 +24,7 @@ def load_module(name: str, filename: str):
 
 splitter = load_module("split_log_chunks", "split_log_chunks.py")
 grader = load_module("grade_bgl_predictions", "grade_bgl_predictions.py")
+preparer = load_module("prepare_bgl_unlabeled", "prepare_bgl_unlabeled.py")
 
 
 class SplitLogTests(unittest.TestCase):
@@ -43,6 +44,28 @@ class SplitLogTests(unittest.TestCase):
             self.assertEqual(manifest["chunks"][2]["line_count"], 5)
             last_chunk = root / "chunks" / manifest["chunks"][2]["file"]
             self.assertEqual(len(last_chunk.read_text().splitlines()), 5)
+
+
+class PrepareBglTests(unittest.TestCase):
+    def test_removes_only_the_leading_label_and_preserves_lines(self) -> None:
+        with TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            source = root / "BGL_2k.log"
+            source.write_text(
+                "- 1117838570 RAS KERNEL INFO cache corrected\n"
+                "APPREAD 1117838571 RAS KERNEL FATAL application error\n\n",
+                encoding="utf-8",
+            )
+            output = root / "BGL_2k_input_unlabeled.log"
+
+            line_count = preparer.remove_bgl_labels(source, output)
+
+            self.assertEqual(line_count, 3)
+            self.assertEqual(
+                output.read_text(encoding="utf-8"),
+                "1117838570 RAS KERNEL INFO cache corrected\n"
+                "1117838571 RAS KERNEL FATAL application error\n\n",
+            )
 
 
 class GradePredictionsTests(unittest.TestCase):

@@ -1204,6 +1204,41 @@ class TestFileSplit:
         again = client.post("/worker/tasks/next", headers=second).json()
         assert again["task_id"] == lost["task_id"] and again["agent_name"] == "에이전트 a #1"
 
+    def test_split_approval_shows_all_pieces_and_retries_them_together(self, client):
+        auth = signup_and_login(client)
+        first, second = self._workers(client, auth, 2)
+        source = upload(client, auth, "review.log", b"one\ntwo\nthree\nfour\n")
+        service = self._split_service(client, auth, [source["id"]])
+        graph = editable_graph(service)
+        graph["nodes"][0]["approval_required"] = True
+        response = client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
+        assert response.status_code == 200, response.text
+        execution = self._start(client, auth, response.json())
+
+        first_piece = client.post("/worker/tasks/next", headers=first).json()
+        second_piece = client.post("/worker/tasks/next", headers=second).json()
+        self._finish(client, first, first_piece, "첫 번째 결과")
+        self._finish(client, second, second_piece, "두 번째 결과")
+
+        body = client.get(f"/executions/{execution['id']}", headers=auth).json()
+        approval = next(task for task in body["tasks"] if task["node_id"] == "a__approval")
+        source_ids = {edge["source"] for edge in body["edges"] if edge["target"] == approval["node_id"]}
+        assert source_ids == {"a__p01", "a__p02"}
+        assert {task["output"] for task in body["tasks"] if task["node_id"] in source_ids} == {"첫 번째 결과", "두 번째 결과"}
+
+        retried = client.post(
+            f"/executions/{execution['id']}/approvals/{approval['id']}/retry-source",
+            json={"role_prompt": "수정된 지시", "model": "gpt-4.1-mini"},
+            headers=auth,
+        )
+        assert retried.status_code == 200, retried.text
+        retried_tasks = {task["node_id"]: task for task in retried.json()["tasks"]}
+        for node_id in source_ids:
+            assert retried_tasks[node_id]["status"] == "ready"
+            assert retried_tasks[node_id]["role_prompt"] == "수정된 지시"
+            assert retried_tasks[node_id]["model"] == "gpt-4.1-mini"
+        assert retried_tasks["a__approval"]["status"] == "blocked"
+
     def test_split_problems_are_reported_before_running(self, client):
         auth = signup_and_login(client)
         pdf = upload(client, auth, "report.pdf", b"%PDF")
@@ -1512,4 +1547,3 @@ class TestCutInputs:
 
         tasks = client.get(f"/executions/{execution['id']}", headers=auth).json()["tasks"]
         assert [(item["status"], item["notice"]) for item in tasks[:2]] == [("done", notice), ("done", None)]
-
