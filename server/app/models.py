@@ -355,6 +355,8 @@ class TaskRecord(Base):
     input_context: Mapped[str] = mapped_column(Text, default="")
     output: Mapped[str | None] = mapped_column(Text, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # 완료했지만 입력 일부가 빠진 채 실행된 사정(파일 잘림, 모델 문맥 넘침). 한 줄에 하나씩
+    notice: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

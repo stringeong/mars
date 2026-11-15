@@ -409,6 +409,8 @@ class TaskOut(BaseModel):
     assigned_device_id: int | None
     output: str | None
     error: str | None
+    # 입력 일부가 빠진 채 완료됐을 때의 안내 (한 줄에 하나씩)
+    notice: str | None = None
     started_at: UTCDateTime | None
     finished_at: UTCDateTime | None
     # 실행 타임라인용: DAG 깊이(0부터), 배정 워커 이름, 실행 위치
@@ -486,3 +488,5 @@ class WorkerTaskResult(BaseModel):
     status: str = Field(pattern="^(done|failed)$")
     output: str = ""
     error: str = ""
+    # 완료했지만 입력 일부가 빠졌을 때 Worker가 알려주는 사정 (구버전 Worker는 보내지 않는다)
+    notice: str = Field("", max_length=4000)

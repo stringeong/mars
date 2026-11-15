@@ -398,6 +398,7 @@ class TestApprovalAndRetry:
         for task in tasks.values():
             task.status = "done"
             task.output = task.node_id + " 결과"
+            task.notice = task.node_id + " 입력 일부가 빠졌어요."
         execution.status = "completed"
         execution.result = "이전 결과"
 
@@ -405,6 +406,9 @@ class TestApprovalAndRetry:
 
         assert tasks["a"].status == "done"
         assert tasks["a"].output == "a 결과"
+        # 다시 실행하는 블록의 지난 안내는 지우고, 그대로 둔 블록의 안내는 남긴다
+        assert tasks["a"].notice == "a 입력 일부가 빠졌어요."
+        assert tasks["b"].notice is None and tasks["c"].notice is None
         assert tasks["b"].status == "ready"
         assert tasks["b"].output is None
         assert tasks["b"].role_prompt == "새 지시"

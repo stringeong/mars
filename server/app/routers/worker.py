@@ -376,6 +376,6 @@ def submit_result(
     if task.status != "running":
         raise HTTPException(409, "이미 종료된 작업입니다.")
     device.last_heartbeat = models.utcnow()
-    orchestrator.complete_task(db, task, body.status, body.output, body.error)
+    orchestrator.complete_task(db, task, body.status, body.output, body.error, notice=body.notice)
     db.commit()
     return {"ok": True}

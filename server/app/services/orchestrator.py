@@ -317,11 +317,12 @@ def _split_part_note(node: dict) -> str:
 
 
 def complete_task(
-    db: Session, task: models.TaskRecord, status: str, output: str, error: str
+    db: Session, task: models.TaskRecord, status: str, output: str, error: str, notice: str = ""
 ) -> None:
     task.status = status
     task.output = output or None
     task.error = error or None
+    task.notice = notice.strip() or None
     task.finished_at = models.utcnow()
 
     execution = db.get(models.Execution, task.execution_id)
@@ -408,6 +409,7 @@ def retry_task(
         affected.status = "blocked"
         affected.output = None
         affected.error = None
+        affected.notice = None
         affected.input_context = ""
         affected.assigned_device_id = None
         affected.started_at = None

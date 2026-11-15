@@ -1447,3 +1447,31 @@ class TestRunPieceCountAndJson:
         service = create_service(client, auth)
         r = client.post(f"/services/{service['id']}/executions/preview", json={"input_files": {"split": {"a": {"enabled": True, "parts": 1}}}}, headers=auth)
         assert r.status_code == 422
+
+
+class TestCutInputs:
+    """파일이 길어 뒷부분이 빠질 때: 실행 전에 경고하고, 실행 뒤에는 작업 기록에 남긴다."""
+
+    @pytest.fixture(autouse=True)
+    def uploads(self, tmp_path, monkeypatch):
+        for module in ("app.routers.files", "app.routers.worker", "app.services.split_inputs", "app.services.file_context"):
+            monkeypatch.setattr(f"{module}.UPLOAD_DIR", tmp_path)
+
+    def test_worker_notice_is_kept_on_the_task(self, client):
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        service = create_service(client, auth)
+        execution = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "x"}, headers=auth).json()
+
+        notice = "big.log: 전체 45,000자 중 앞 30,000자만 읽었어요. 뒤 15,000자는 빠졌어요."
+        task = client.post("/worker/tasks/next", headers=key).json()
+        r = client.post(f"/worker/tasks/{task['task_id']}/result", json={"status": "done", "output": "ok", "notice": notice}, headers=key)
+        assert r.status_code == 200, r.text
+        # 구버전 Worker는 notice를 보내지 않는다
+        task = client.post("/worker/tasks/next", headers=key).json()
+        client.post(f"/worker/tasks/{task['task_id']}/result", json={"status": "done", "output": "ok"}, headers=key)
+
+        tasks = client.get(f"/executions/{execution['id']}", headers=auth).json()["tasks"]
+        assert [(item["status"], item["notice"]) for item in tasks[:2]] == [("done", notice), ("done", None)]
+
