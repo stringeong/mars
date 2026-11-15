@@ -338,6 +338,8 @@ class RunInputs(BaseModel):
     slots: dict[str, list[int]] = Field(default_factory=dict)
     # 슬롯 없이 블록에 직접 파일을 붙인 이전 버전 워크플로우용
     nodes: dict[str, list[int]] = Field(default_factory=dict)
+    # 블록별로 이번 실행에서만 '파일 나눠서 병렬 실행'을 켜거나 끈다 (실행 화면의 스위치)
+    split: dict[str, bool] = Field(default_factory=dict)
 
 
 class ExecutionCreate(BaseModel):

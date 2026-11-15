@@ -1337,3 +1337,54 @@ class TestWorkerLoadAndAccount:
         # 웹에서 기기를 지우면 하트비트가 401로 실패해 Worker가 다시 로그인하게 된다
         assert client.delete(f"/devices/{device['id']}", headers=auth).status_code == 204
         assert client.post("/worker/heartbeat", headers=key).status_code == 401
+
+
+class TestSplitFromRunScreen:
+    """실행 화면에서 이번 실행에만 분할을 켜고 끈다. 저장된 워크플로우는 바뀌지 않는다."""
+
+    @pytest.fixture(autouse=True)
+    def uploads(self, tmp_path, monkeypatch):
+        for module in ("app.routers.files", "app.routers.worker", "app.services.split_inputs"):
+            monkeypatch.setattr(f"{module}.UPLOAD_DIR", tmp_path)
+
+    def test_turning_split_on_for_one_run(self, client):
+        auth = signup_and_login(client)
+        for name in ("A", "B"):
+            client.post("/worker/heartbeat", headers=register_device(client, auth, name=name))
+        log = upload(client, auth, "big.log", "".join(f"line {i}\n" for i in range(1, 1001)).encode())
+        service = create_service(client, auth)
+        inputs = {"nodes": {"a": [log["id"]]}, "split": {"a": True}}
+
+        preview = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": inputs}, headers=auth).json()
+        assert [(s["node_id"], s["parts"], s["sizes"]) for s in preview["validation"]["splits"]] == [("a", 2, [500, 500])]
+
+        execution = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "x", "input_files": inputs}, headers=auth)
+        assert execution.status_code == 201, execution.text
+        assert execution.json()["stages"][0] == ["a__p01", "a__p02"]
+        saved = client.get(f"/services/{service['id']}", headers=auth).json()
+        assert not (saved["graph"]["nodes"][0].get("split") or {}).get("enabled")
+
+        # 끄면 나누지 않는다
+        off = {"nodes": {"a": [log["id"]]}, "split": {"a": False}}
+        preview = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": off}, headers=auth).json()
+        assert preview["validation"]["splits"] == []
+
+    def test_turning_off_keeps_saved_split_settings_for_later(self, client):
+        auth = signup_and_login(client)
+        client.post("/worker/heartbeat", headers=register_device(client, auth))
+        log = upload(client, auth, "big.log", b"a\nb\nc\nd\n")
+        service = create_service(client, auth)
+        graph = editable_graph(service)
+        graph["nodes"][0].update(uploaded_file_ids=[log["id"]], split={"enabled": True, "parts": 4})
+        client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
+        on = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": {"split": {"a": True}}}, headers=auth).json()
+        # 편집 화면에서 정한 조각 수(4)를 그대로 쓴다
+        assert on["validation"]["splits"][0]["parts"] == 4
+        off = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": {"split": {"a": False}}}, headers=auth).json()
+        assert off["validation"]["splits"] == []
+
+    def test_unknown_block_is_rejected(self, client):
+        auth = signup_and_login(client)
+        service = create_service(client, auth)
+        r = client.post(f"/services/{service['id']}/executions/preview", json={"input_files": {"split": {"ghost": True}}}, headers=auth)
+        assert r.status_code == 422

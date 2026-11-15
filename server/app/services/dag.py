@@ -386,10 +386,13 @@ def apply_run_inputs(
     graph: dict,
     slots: dict[str, list[int]] | None = None,
     nodes: dict[str, list[int]] | None = None,
+    split: dict[str, bool] | None = None,
 ) -> dict:
     """이번 실행에만 쓰는 입력 파일을 반영한 그래프 복사본. 저장된 워크플로우는 바뀌지 않는다.
 
     slots는 슬롯별, nodes는 슬롯 없이 블록에 직접 붙은 파일(이전 버전 워크플로우)을 덮어쓴다.
+    split은 블록별로 이번 실행에서 '파일 나눠서 병렬 실행'을 켜거나 끈다. 편집 화면에서 정한
+    나누는 방식(단위·조각 수·겹침)이 있으면 그대로 쓰고, 없으면 자동으로 나눈다.
     """
     applied = copy.deepcopy(graph)
     slot_map = {slot.get("id"): slot for slot in applied.get("input_slots") or []}
@@ -402,6 +405,11 @@ def apply_run_inputs(
         if node_id not in agent_map:
             raise DagError(f"존재하지 않는 블록입니다: {node_id}")
         agent_map[node_id]["uploaded_file_ids"] = list(dict.fromkeys(file_ids))
+    for node_id, enabled in (split or {}).items():
+        if node_id not in agent_map:
+            raise DagError(f"존재하지 않는 블록입니다: {node_id}")
+        node = agent_map[node_id]
+        node["split"] = {**(node.get("split") if isinstance(node.get("split"), dict) else {}), "enabled": bool(enabled)}
     return applied
 
 
