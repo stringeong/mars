@@ -86,6 +86,30 @@ def test_cloud_file_context_contains_extracted_text(db, make_user, tmp_path, mon
     assert "private attachment contents" in context
 
 
+def test_cloud_file_longer_than_the_limit_is_marked_and_noted(db, make_user, tmp_path, monkeypatch):
+    from app import models
+    from app.services import file_context
+
+    monkeypatch.setattr(file_context, "UPLOAD_DIR", tmp_path)
+    user = make_user()
+    path = tmp_path / "stored-long.txt"
+    path.write_text("가" * 40_000, encoding="utf-8")
+    uploaded = models.UploadedFile(
+        user_id=user.id, original_name="회의록.txt", stored_name=path.name,
+        content_type="text/plain", size_bytes=path.stat().st_size,
+    )
+    db.add(uploaded)
+    db.flush()
+
+    notes: list[str] = []
+    context = file_context.cloud_file_context(db, user.id, {"uploaded_file_ids": [uploaded.id]}, notes)
+
+    # 바이트가 아니라 글자 수로 자른다: 한글도 30,000자까지 들어간다
+    assert context.count("가") == 30_000
+    assert context.endswith("[여기까지만 포함됨: 전체 40,000자 중 앞 30,000자. 이후 10,000자는 생략됨]")
+    assert notes == ["회의록.txt: 전체 40,000자 중 앞 30,000자만 읽었어요. 뒤 10,000자는 빠졌어요."]
+
+
 def test_stale_cloud_task_returns_to_ready(db, make_user, make_execution, monkeypatch):
     from datetime import timedelta
     from app import models

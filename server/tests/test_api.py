@@ -1457,6 +1457,44 @@ class TestCutInputs:
         for module in ("app.routers.files", "app.routers.worker", "app.services.split_inputs", "app.services.file_context"):
             monkeypatch.setattr(f"{module}.UPLOAD_DIR", tmp_path)
 
+    LONG = "".join(f"{i:05} {'x' * 23}\n" for i in range(1, 1501))  # 30자 × 1,500줄 = 45,000자
+
+    def _cut_warnings(self, client, auth, service, inputs):
+        r = client.post(f"/services/{service['id']}/executions/preview", json={"run_prompt": "x", "input_files": inputs}, headers=auth)
+        assert r.status_code == 200, r.text
+        return [issue for issue in r.json()["validation"]["warnings"] if issue["code"] == "input_cut"]
+
+    def test_long_file_is_warned_before_running(self, client):
+        auth = signup_and_login(client)
+        client.post("/worker/heartbeat", headers=register_device(client, auth))
+        log = upload(client, auth, "big.log", self.LONG.encode())
+        service = create_service(client, auth)
+        whole = {"nodes": {"a": [log["id"]]}, "split": {"a": False}}
+
+        warnings = self._cut_warnings(client, auth, service, whole)
+        assert [issue["node_ids"] for issue in warnings] == [["a"]]
+        assert warnings[0]["message"] == (
+            "'에이전트 a' 블록의 'big.log' 파일은 45,000자라서 앞 30,000자만 읽어요. 뒤 15,000자는 빠져요."
+            " 끝까지 읽게 하려면 '파일 나눠서 병렬 실행'을 켜세요."
+        )
+        # 경고를 확인해야 실행된다
+        blocked = client.post(f"/services/{service['id']}/executions", json={"run_prompt": "x", "input_files": whole}, headers=auth)
+        assert blocked.status_code == 409
+        confirmed = client.post(
+            f"/services/{service['id']}/executions",
+            json={"run_prompt": "x", "input_files": whole, "acknowledge_warnings": True}, headers=auth,
+        )
+        assert confirmed.status_code == 201, confirmed.text
+
+    def test_no_warning_when_the_file_fits_or_is_split(self, client):
+        auth = signup_and_login(client)
+        client.post("/worker/heartbeat", headers=register_device(client, auth))
+        service = create_service(client, auth)
+        small = upload(client, auth, "small.log", self.LONG[:20_000].encode())
+        assert self._cut_warnings(client, auth, service, {"nodes": {"a": [small["id"]]}, "split": {"a": False}}) == []
+        log = upload(client, auth, "big.log", self.LONG.encode())
+        assert self._cut_warnings(client, auth, service, {"nodes": {"a": [log["id"]]}, "split": {"a": True}}) == []
+
     def test_worker_notice_is_kept_on_the_task(self, client):
         auth = signup_and_login(client)
         key = register_device(client, auth)

@@ -7,6 +7,7 @@
 """
 
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
@@ -168,8 +169,63 @@ def inspect_graph_for_user(db: Session, user_id: int, graph: dict, run_prompt: s
     if split_plans is None:
         split_plans = split_inputs.plan_graph(db, user_id, graph)
     result = dag.inspect_graph(graph, run_prompt=run_prompt, has_model=has_model, split_problem=split_plans.problem)
+    result["warnings"] += _cut_input_warnings(db, user_id, graph, split_plans)
     result["splits"] = split_plans.summaries()
     return result
+
+
+def _cut_input_warnings(db: Session, user_id: int, graph: dict, split_plans) -> list[dict]:
+    """블록이 읽을 업로드 파일이 한 번에 읽는 상한보다 길면, 실행 전에 뒷부분이 빠진다고 알린다.
+
+    Worker와 클라우드 블록 모두 파일 하나에서 file_context.MAX_FILE_CHARS자까지만 읽는다.
+    줄·행 단위로 나눠 실행하는 블록은 조각이 상한 안에 들어오게 나누므로 해당하지 않는다.
+    """
+    from . import file_context, splitter
+    from .transfers import is_cloud_node
+
+    targets = []
+    for node in dag._agent_nodes(graph):
+        plan = split_plans.plans.get(node["id"])
+        if node["id"] in split_plans.errors or (plan and plan.unit != "file"):
+            continue
+        file_ids = dag.input_sources(graph, node)[0]
+        if file_ids:
+            targets.append((node, file_ids))
+    if not targets:
+        return []
+    wanted = {file_id for _, file_ids in targets for file_id in file_ids}
+    uploads = {
+        uploaded.id: uploaded
+        for uploaded in db.query(models.UploadedFile)
+        .filter(models.UploadedFile.user_id == user_id, models.UploadedFile.id.in_(wanted))
+        .all()
+    }
+    warnings = []
+    for node, file_ids in targets:
+        for uploaded in (uploads[file_id] for file_id in file_ids if file_id in uploads):
+            splittable = Path(uploaded.original_name).suffix.lower() in splitter.TEXT_SUFFIXES
+            # 텍스트 파일은 글자 수가 바이트 수를 넘지 못하므로 작은 파일은 읽어 보지 않아도 된다
+            if splittable and uploaded.size_bytes <= file_context.MAX_FILE_CHARS:
+                continue
+            text = file_context.measure_upload(uploaded)
+            if text is None or not text.cut:
+                continue
+            size = f"{text.total:,}자" if text.exact else f"{text.total:,}자가 넘는 길이"
+            rest = f" 뒤 {text.total - len(text.text):,}자는 빠져요." if text.exact else " 나머지는 빠져요."
+            hint = (
+                " 끝까지 읽게 하려면 '파일 나눠서 병렬 실행'을 켜세요."
+                if splittable and len(file_ids) == 1 and not is_cloud_node(node) else ""
+            )
+            warnings.append({
+                "code": "input_cut",
+                "severity": "warning",
+                "message": (
+                    f"'{node.get('name') or node['id']}' 블록의 '{uploaded.original_name}' 파일은 {size}라서 "
+                    f"앞 {len(text.text):,}자만 읽어요.{rest}{hint}"
+                ),
+                "node_ids": [node["id"]],
+            })
+    return warnings
 
 
 def reclaim_stale_tasks(db: Session, user_id: int) -> None:

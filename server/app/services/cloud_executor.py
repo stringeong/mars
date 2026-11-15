@@ -144,8 +144,9 @@ def process_one_ready_cloud_task(db: Session) -> bool:
     if model.startswith(provider + ":"):
         model = model.split(":", 1)[1]
     user_message = task.input_context or execution.run_prompt
+    notes: list[str] = []
     try:
-        attached = cloud_file_context(db, execution.user_id, node)
+        attached = cloud_file_context(db, execution.user_id, node, notes)
         if attached:
             user_message = f"{user_message}\n\n{attached}"
         output, usage = _call(
@@ -165,7 +166,7 @@ def process_one_ready_cloud_task(db: Session) -> bool:
             output_tokens=usage.get("output_tokens", 0),
             cached_tokens=usage.get("cached_tokens", 0),
         ))
-        orchestrator.complete_task(db, task, "done", output, "")
+        orchestrator.complete_task(db, task, "done", output, "", notice="\n".join(notes))
     except Exception as exc:
         orchestrator.complete_task(
             db, task, "failed", "", f"클라우드 LLM 호출 실패: {type(exc).__name__}"

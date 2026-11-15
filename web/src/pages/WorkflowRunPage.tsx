@@ -2,7 +2,7 @@ import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 're
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import ValidationPanel from '../components/ValidationPanel'
-import { AgentNode, Execution, ExecutionListItem, RunInputRecord, Service, SplitPreview, UploadedFile, ValidationResult, WorkflowNode } from '../types'
+import { AgentNode, Execution, ExecutionListItem, RunInputRecord, Service, SplitPreview, UploadedFile, ValidationIssue, ValidationResult, WorkflowNode } from '../types'
 import { generationLabel, onServiceRenamed, splitPreviewText } from '../workflow'
 
 type Transfer = { node_id: string; node_name: string; provider: string; type: 'user_input' | 'derived_text' | 'file_text'; file_ids?: number[]; sources?: string[] }
@@ -35,7 +35,8 @@ export default function WorkflowRunPage() {
   const [preview, setPreview] = useState<Preview | null>(null)
   const [validation, setValidation] = useState<ValidationResult | null>(null)
   // 파일 나눠서 병렬 실행: 지금 올린 파일과 사용 가능한 워커 수로 정한 분할 계획 (실행 전에 미리 보여준다)
-  const [plan, setPlan] = useState<{ splits: SplitPreview[]; issues: string[]; loading: boolean }>({ splits: [], issues: [], loading: false })
+  // cuts: 파일이 길어 뒷부분이 빠질 입력 (나누지 않고 실행할 때). 실행을 누르기 전에 파일 아래에 미리 알린다
+  const [plan, setPlan] = useState<{ splits: SplitPreview[]; issues: string[]; cuts: ValidationIssue[]; loading: boolean }>({ splits: [], issues: [], cuts: [], loading: false })
   // 실행 화면에서 사용자가 직접 켜거나 끈 '나눠서 병렬 실행' (입력 칸별). 없으면 기본 규칙을 따른다
   const [splitChoice, setSplitChoice] = useState<Record<string, boolean>>({})
   // 조각 수: 고르지 않으면 편집 화면 설정(없으면 자동), 고르면 이번 실행에만 그 값
@@ -104,8 +105,9 @@ export default function WorkflowRunPage() {
   const splitIdSet = new Set(entries.filter(splitOn).flatMap((entry) => entry.blockIds))
   const splitBlocks = (service?.graph.nodes ?? []).filter(isAgent).filter((agent) => splitIdSet.has(agent.id))
   const inputsKey = JSON.stringify(inputs) + JSON.stringify([...splitIdSet].sort()) + JSON.stringify(splitParts)
+  const hasFiles = entries.some((entry) => selected(entry).length > 0)
   useEffect(() => {
-    if (!service || !splitBlocks.length) { setPlan({ splits: [], issues: [], loading: false }); return }
+    if (!service || (!splitBlocks.length && !hasFiles)) { setPlan({ splits: [], issues: [], cuts: [], loading: false }); return }
     let cancelled = false
     setPlan((current) => ({ ...current, loading: true }))
     const timer = window.setTimeout(async () => {
@@ -116,9 +118,10 @@ export default function WorkflowRunPage() {
         const issues = [...result.validation.errors, ...result.validation.warnings]
           .filter((issue) => issue.code.startsWith('split_') || (issue.code === 'missing_file' && issue.node_ids.some((nodeId) => splitIds.has(nodeId))))
           .map((issue) => issue.message)
-        setPlan({ splits: result.validation.splits ?? [], issues, loading: false })
+        const cuts = result.validation.warnings.filter((issue) => issue.code === 'input_cut')
+        setPlan({ splits: result.validation.splits ?? [], issues, cuts, loading: false })
       } catch {
-        if (!cancelled) setPlan({ splits: [], issues: [], loading: false })
+        if (!cancelled) setPlan({ splits: [], issues: [], cuts: [], loading: false })
       }
     }, 350)
     return () => { cancelled = true; window.clearTimeout(timer) }
@@ -292,6 +295,7 @@ export default function WorkflowRunPage() {
                 {entry.directories.map((directoryId) => <span className="source-chip directory" key={`d${directoryId}`}><span>등록한 폴더 #{directoryId}</span><small>그 PC에서만 읽음</small></span>)}
                 {!current.length && !entry.directories.length && <span className="muted">파일 없음</span>}
               </div>
+              {plan.cuts.filter((issue) => issue.node_ids.some((nodeId) => entry.blockIds.includes(nodeId))).map((issue) => <p className="run-entry-cut" role="status" key={issue.message}>{issue.message.replace(/^'[^']*'\s*블록의\s*/, '')}</p>)}
               <div className="slot-actions">
                 <button type="button" className="btn sm" disabled={loading} onClick={() => startUpload(entry)}>파일 올리기</button>
                 <select value="" onChange={(event) => event.target.value && setSelected(entry, [...current, Number(event.target.value)])}>
