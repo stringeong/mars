@@ -20,6 +20,11 @@ def _edge_relation(edge: dict) -> str:
     return edge.get("relation", "workflow")
 
 
+def _is_workflow_node(node: dict) -> bool:
+    """실행 순서에 참여하는 모델 블록 또는 사용자 승인 블록."""
+    return _node_type(node) in {"agent", "approval"}
+
+
 def validate_graph(graph: dict) -> list[str]:
     """그래프를 검증하고 에이전트 노드의 위상 정렬 결과를 반환한다."""
 
@@ -51,8 +56,10 @@ def validate_graph(graph: dict) -> list[str]:
     if not agent_nodes:
         raise DagError("워크플로우에 에이전트가 하나도 없습니다.")
 
-    agent_ids = [node["id"] for node in agent_nodes]
-    agent_id_set = set(agent_ids)
+    agent_id_set = {node["id"] for node in agent_nodes}
+    workflow_nodes = [node for node in all_nodes if _is_workflow_node(node)]
+    workflow_ids = [node["id"] for node in workflow_nodes]
+    workflow_id_set = set(workflow_ids)
 
     directory_ids = {
         node["id"]
@@ -92,7 +99,7 @@ def validate_graph(graph: dict) -> list[str]:
         source = edge["source"]
         target = edge["target"]
 
-        if source not in agent_id_set or target not in agent_id_set:
+        if source not in workflow_id_set or target not in workflow_id_set:
             raise DagError(
                 "workflow 연결은 에이전트끼리만 연결할 수 있습니다: "
                 f"{source} -> {target}"
@@ -117,8 +124,8 @@ def validate_graph(graph: dict) -> list[str]:
 
     # workflow 간선만 이용해 위상 정렬
     indegree: dict[str, int] = {
-        agent_id: 0
-        for agent_id in agent_ids
+        workflow_id: 0
+        for workflow_id in workflow_ids
     }
 
     adjacency: dict[str, list[str]] = defaultdict(list)
@@ -138,9 +145,9 @@ def validate_graph(graph: dict) -> list[str]:
         indegree[target] += 1
 
     queue = deque(
-        agent_id
-        for agent_id in agent_ids
-        if indegree[agent_id] == 0
+        workflow_id
+        for workflow_id in workflow_ids
+        if indegree[workflow_id] == 0
     )
 
     order: list[str] = []
@@ -155,7 +162,7 @@ def validate_graph(graph: dict) -> list[str]:
             if indegree[next_id] == 0:
                 queue.append(next_id)
 
-    if len(order) != len(agent_ids):
+    if len(order) != len(workflow_ids):
         raise DagError(
             "에이전트 실행 흐름에서 순환 구조가 감지되었습니다. "
             "연결을 수정해 주세요."
@@ -170,7 +177,7 @@ def parents_of(graph: dict) -> dict[str, list[str]]:
     agent_ids = {
         node["id"]
         for node in graph.get("nodes", [])
-        if node.get("type", "agent") == "agent"
+        if _is_workflow_node(node)
     }
 
     parents: dict[str, list[str]] = {
@@ -196,25 +203,34 @@ def parents_of(graph: dict) -> dict[str, list[str]]:
 
 
 def terminal_nodes(graph: dict) -> list[str]:
-    """나가는 workflow 간선이 없는 에이전트 노드."""
+    """다른 에이전트로 이어지지 않는 마지막 에이전트 노드.
 
-    agent_nodes = [
-        node
-        for node in graph.get("nodes", [])
-        if node.get("type", "agent") == "agent"
-    ]
+    실행 스냅샷에는 에이전트와 다음 에이전트 사이에 approval 노드가
+    들어갈 수 있으므로, 사람 승인 노드는 투명하게 건너뛴다.
+    """
+    nodes = {node.get("id"): node for node in graph.get("nodes", [])}
+    agent_ids = [node["id"] for node in nodes.values() if _node_type(node) == "agent"]
+    children: dict[str, list[str]] = defaultdict(list)
+    for edge in graph.get("edges", []):
+        if _edge_relation(edge) == "workflow":
+            children[edge.get("source")].append(edge.get("target"))
 
-    workflow_sources = {
-        edge["source"]
-        for edge in graph.get("edges", [])
-        if edge.get("relation", "workflow") == "workflow"
-    }
+    def reaches_agent(node_id: str) -> bool:
+        pending = list(children.get(node_id, []))
+        seen: set[str] = set()
+        while pending:
+            current = pending.pop()
+            if current in seen:
+                continue
+            seen.add(current)
+            current_node = nodes.get(current, {})
+            if _node_type(current_node) == "agent":
+                return True
+            if _node_type(current_node) == "approval":
+                pending.extend(children.get(current, []))
+        return False
 
-    return [
-        node["id"]
-        for node in agent_nodes
-        if node["id"] not in workflow_sources
-    ]
+    return [node_id for node_id in agent_ids if not reaches_agent(node_id)]
 
 
 # directory_ids_by_agent : 각 에이전트에 연결된 SharedDirectory ID 목록을 반환
@@ -263,9 +279,13 @@ def _agent_nodes(graph: dict) -> list[dict]:
     return [node for node in graph.get("nodes", []) if _node_type(node) == "agent"]
 
 
+def _workflow_nodes(graph: dict) -> list[dict]:
+    return [node for node in graph.get("nodes", []) if _is_workflow_node(node)]
+
+
 def _workflow_pairs(graph: dict) -> set[tuple[str, str]]:
     """에이전트끼리의 workflow 간선. 자기 자신으로의 연결도 순환으로 보기 위해 남긴다."""
-    agent_ids = {node["id"] for node in _agent_nodes(graph)}
+    agent_ids = {node["id"] for node in _workflow_nodes(graph)}
     return {
         (edge["source"], edge["target"])
         for edge in graph.get("edges", [])
@@ -277,7 +297,7 @@ def _workflow_pairs(graph: dict) -> set[tuple[str, str]]:
 
 def _levels(graph: dict) -> dict[str, int]:
     """순환에 걸리지 않은 에이전트의 깊이(가장 긴 선행 경로의 길이)."""
-    agent_ids = [node["id"] for node in _agent_nodes(graph)]
+    agent_ids = [node["id"] for node in _workflow_nodes(graph)]
     indegree = {agent_id: 0 for agent_id in agent_ids}
     children: dict[str, list[str]] = defaultdict(list)
     for source, target in _workflow_pairs(graph):
@@ -302,7 +322,7 @@ def stages(graph: dict) -> list[list[str]]:
     """DAG 깊이별 에이전트 묶음. 같은 단계의 블록은 동시에 실행될 수 있다."""
     levels = _levels(graph)
     grouped: dict[int, list[str]] = defaultdict(list)
-    for node in _agent_nodes(graph):
+    for node in _workflow_nodes(graph):
         if node["id"] in levels:
             grouped[levels[node["id"]]].append(node["id"])
     return [grouped[level] for level in sorted(grouped)]
@@ -311,7 +331,7 @@ def stages(graph: dict) -> list[list[str]]:
 def cycle_node_ids(graph: dict) -> list[str]:
     """순환에 걸린 에이전트. 순환 뒤에만 있는 블록은 제외한다."""
     levels = _levels(graph)
-    remaining = {node["id"] for node in _agent_nodes(graph)} - set(levels)
+    remaining = {node["id"] for node in _workflow_nodes(graph)} - set(levels)
     pairs = {(s, t) for s, t in _workflow_pairs(graph) if s in remaining and t in remaining}
     # 남은 부분 그래프에서 나가는 간선이 없는 블록을 반복해서 걷어내면 순환만 남는다
     while True:
@@ -320,7 +340,7 @@ def cycle_node_ids(graph: dict) -> list[str]:
             break
         remaining -= sinks
         pairs = {(s, t) for s, t in pairs if t not in sinks}
-    return [node["id"] for node in _agent_nodes(graph) if node["id"] in remaining]
+    return [node["id"] for node in _workflow_nodes(graph) if node["id"] in remaining]
 
 
 def final_node_ids(graph: dict) -> list[str]:
@@ -403,6 +423,38 @@ def apply_run_inputs(
             raise DagError(f"존재하지 않는 블록입니다: {node_id}")
         agent_map[node_id]["uploaded_file_ids"] = list(dict.fromkeys(file_ids))
     return applied
+
+
+def materialize_approval_nodes(graph: dict) -> dict:
+    """승인 설정이 있는 에이전트 뒤에 사람 전용 approval 작업을 넣는다.
+
+    저장된 서비스 그래프는 그대로 두고, 실행 스냅샷에만 실제 승인 노드를 만든다.
+    """
+    result = copy.deepcopy(graph)
+    nodes = result.get("nodes", [])
+    edges = result.get("edges", [])
+    used_ids = {node.get("id") for node in nodes}
+    added = []
+    for agent in list(_agent_nodes(result)):
+        if not agent.get("approval_required"):
+            continue
+        approval_id = f'{agent["id"]}__approval'
+        if approval_id in used_ids:
+            continue
+        used_ids.add(approval_id)
+        for edge in edges:
+            if _edge_relation(edge) == "workflow" and edge.get("source") == agent["id"]:
+                edge["source"] = approval_id
+        edges.append({"source": agent["id"], "target": approval_id, "relation": "workflow"})
+        added.append({
+            "id": approval_id,
+            "type": "approval",
+            "name": f'{agent.get("name", agent["id"])} 결과 확인',
+            "message": agent.get("approval_message") or "결과를 확인한 뒤 다음 단계 진행을 승인하세요.",
+            "source_node_id": agent["id"],
+        })
+    nodes.extend(added)
+    return result
 
 
 def expand_input_slots(graph: dict) -> dict:

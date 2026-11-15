@@ -606,6 +606,11 @@ export default function ServiceDetailPage() {
           <FlagToggle label="최종 블록 (출력이 실행 결과가 됨)" checked={!!selectedAgent.final} explanation={flagReasons[selectedAgent.id]?.final} onChange={setFinal} onReset={() => changeFlags({ final_manual: false })} />
           <FlagToggle label="사용자 파일 필요" checked={!!selectedAgent.needs_file} explanation={flagReasons[selectedAgent.id]?.needsFile} onChange={setNeedsFile} onReset={() => changeFlags({ needs_file_manual: false })} />
           <div className="text-input-setting">
+            <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.approval_required} onChange={(event) => updateAgent({ approval_required: event.target.checked })} />이 블록 결과를 사용자 검토 후 다음 단계로 전달</label>
+            <small className="flag-reason">승인 대기 중에도 다른 병렬 분기는 계속 실행됩니다.</small>
+            {selectedAgent.approval_required && <textarea rows={2} value={selectedAgent.approval_message ?? ''} onChange={(event) => updateAgent({ approval_message: event.target.value })} placeholder="검토할 기준 또는 안내 문구 (선택)" />}
+          </div>
+          <div className="text-input-setting">
             <label className="toggle-row"><input type="checkbox" checked={!!selectedAgent.text_input_enabled} onChange={(event) => updateAgent({ text_input_enabled: event.target.checked })} />텍스트 데이터 입력</label>
             <small className="flag-reason">활성화하면 내용이 비어 있어도 이 블록을 실행할 수 있습니다.</small>
             {selectedAgent.text_input_enabled && <textarea rows={4} value={selectedAgent.text_input ?? ''} onChange={(event) => updateAgent({ text_input: event.target.value })} placeholder="이 블록에 전달할 텍스트 데이터를 입력하세요. (선택)" />}

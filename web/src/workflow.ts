@@ -74,6 +74,7 @@ export function applyAutoFlags(agents: AgentNode[], edges: { source: string; tar
 export const TASK_STATUS: Record<string, { label: string; icon: string }> = {
   blocked: { label: '선행 대기', icon: '⏸' },
   ready: { label: '워커 대기', icon: '◷' },
+  waiting_approval: { label: '승인 대기', icon: '✋' },
   running: { label: '실행 중', icon: '▶' },
   done: { label: '완료', icon: '✓' },
   failed: { label: '실패', icon: '✕' },
@@ -103,6 +104,7 @@ export function taskDuration(task: Task, now: number) {
 }
 
 export function taskWorkerLabel(task: Task) {
+  if (task.executor === 'manual') return '사용자 확인'
   if (task.executor === 'cloud') return `클라우드 · ${PROVIDER_LABELS[task.provider ?? ''] ?? task.provider ?? '외부 API'}`
   if (task.assigned_device_id) return task.assigned_device_name ?? `삭제된 워커 #${task.assigned_device_id}`
   return task.status === 'blocked' ? '배정 전' : '배정 대기'

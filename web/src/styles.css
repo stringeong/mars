@@ -464,6 +464,7 @@ tr.clickable:hover { background: #f8fafc; }
 .task-status i { font-style: normal; }
 .task-status.blocked { border-color: #cbd5e1; background: #f1f5f9; color: #475569; }
 .task-status.ready { border-color: #fcd34d; background: #fffbeb; color: #92400e; }
+.task-status.waiting_approval { border-color: #c4b5fd; background: #f5f3ff; color: #6d28d9; }
 .task-status.running { border-color: #93c5fd; background: #eff6ff; color: #1e40af; }
 .task-status.done { border-color: #86efac; background: #f0fdf4; color: #166534; }
 .task-status.failed { border-color: #fca5a5; background: #fef2f2; color: #991b1b; }
@@ -478,6 +479,7 @@ tr.clickable:hover { background: #f8fafc; }
 .stage-label span { color: var(--muted); font-size: 11px; }
 .stage-task { display: grid; gap: 7px; width: 220px; padding: 10px 12px; border: 1px solid #e4e7ee; border-left: 4px solid #cbd5e1; border-radius: 10px; background: #fff; box-shadow: 0 2px 8px rgba(25, 33, 61, .05); font-size: 12px; }
 .stage-task.ready { border-left-color: #f59e0b; }
+.stage-task.waiting_approval { border-left-color: #7c3aed; }
 .stage-task.running { border-left-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
 .stage-task.done { border-left-color: #16a34a; }
 .stage-task.failed { border-left-color: #dc2626; }

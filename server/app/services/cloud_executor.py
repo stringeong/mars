@@ -138,7 +138,9 @@ def process_one_ready_cloud_task(db: Session) -> bool:
         return True
 
     orchestrator.populate_task_context(db, task)
-    model = str(node.get("model") or credential.default_model)
+    # 재실행에서 사용자가 고른 모델은 TaskRecord에 보관된다. 그래프 스냅샷보다
+    # 작업 값을 우선해야 실제 클라우드 호출에도 변경이 반영된다.
+    model = str(task.model or node.get("model") or credential.default_model)
     if model.startswith(provider + ":"):
         model = model.split(":", 1)[1]
     user_message = task.input_context or execution.run_prompt

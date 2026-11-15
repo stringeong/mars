@@ -7,7 +7,7 @@ from datetime import timedelta
 
 from app import models
 from app.config import HEARTBEAT_TIMEOUT_SEC
-from app.services import orchestrator
+from app.services import dag, orchestrator
 from tests.conftest import DIAMOND, LINEAR, graph_of
 
 
@@ -368,6 +368,51 @@ class TestCompleteTask:
         orchestrator.complete_task(db, tasks["a"], "failed", "", "")
 
         assert "알 수 없는 오류" in execution.error
+
+
+class TestApprovalAndRetry:
+    def test_approval_waits_only_its_branch(self, db, make_user, make_execution):
+        graph = graph_of(["a", "b", "c"], [("a", "c")])
+        graph["nodes"][0]["approval_required"] = True
+        execution = make_execution(make_user(), dag.materialize_approval_nodes(graph))
+        orchestrator.create_tasks_for_execution(db, execution)
+        tasks = tasks_by_node(db, execution)
+
+        tasks["a"].status = "running"
+        orchestrator.complete_task(db, tasks["a"], "done", "a 결과", "")
+
+        assert tasks["a__approval"].status == "waiting_approval"
+        assert tasks["b"].status == "ready"
+        assert tasks["c"].status == "blocked"
+        assert execution.status == "running"
+
+        orchestrator.approve_task(db, execution, tasks["a__approval"])
+
+        assert tasks["a__approval"].status == "done"
+        assert tasks["c"].status == "ready"
+
+    def test_retry_resets_only_selected_branch_and_allows_model_change(self, db, make_user, make_execution):
+        execution = make_execution(make_user(), LINEAR)
+        orchestrator.create_tasks_for_execution(db, execution)
+        tasks = tasks_by_node(db, execution)
+        for task in tasks.values():
+            task.status = "done"
+            task.output = task.node_id + " 결과"
+        execution.status = "completed"
+        execution.result = "이전 결과"
+
+        orchestrator.retry_task(db, execution, tasks["b"], role_prompt="새 지시", model="qwen3:8b")
+
+        assert tasks["a"].status == "done"
+        assert tasks["a"].output == "a 결과"
+        assert tasks["b"].status == "ready"
+        assert tasks["b"].output is None
+        assert tasks["b"].role_prompt == "새 지시"
+        assert tasks["b"].model == "qwen3:8b"
+        assert tasks["c"].status == "blocked"
+        assert tasks["c"].output is None
+        assert execution.status == "running"
+        assert execution.result is None
 
 
 class TestCancelExecution:

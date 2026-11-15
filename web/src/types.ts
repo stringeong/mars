@@ -19,6 +19,8 @@ export interface AgentNode {
   needs_file_hint?: boolean
   final_manual?: boolean
   needs_file_manual?: boolean
+  approval_required?: boolean
+  approval_message?: string
   position?: { x: number; y: number } | null
 }
 
@@ -234,8 +236,11 @@ export interface Task {
   finished_at: string | null
   depth?: number | null
   assigned_device_name?: string | null
-  executor?: 'local' | 'cloud'
+  executor?: 'local' | 'cloud' | 'manual'
   provider?: string | null
+  role_prompt?: string
+  model?: string
+  approval_source_node_id?: string | null
 }
 
 export interface Execution {

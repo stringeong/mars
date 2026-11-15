@@ -15,6 +15,14 @@ from ..config import HEARTBEAT_TIMEOUT_SEC
 from . import dag, directory_access
 
 
+def _node_for(graph: dict, node_id: str) -> dict:
+    return next((node for node in graph.get("nodes", []) if node.get("id") == node_id), {})
+
+
+def _is_approval_node(node: dict) -> bool:
+    return node.get("type") == "approval"
+
+
 def create_tasks_for_execution(db: Session, execution: models.Execution) -> None:
     graph = execution.graph_snapshot
     parents = dag.parents_of(graph)
@@ -22,32 +30,25 @@ def create_tasks_for_execution(db: Session, execution: models.Execution) -> None
         db, execution.user_id, graph
     )
     for node in graph.get("nodes", []):
-
-        if node.get("type", "agent") != "agent":
+        if node.get("type", "agent") not in {"agent", "approval"}:
             continue
-
-        status = (
-            "ready"
-            if not parents[node["id"]]
-            else "blocked"
-        )
-        
+        node_id = node["id"]
+        status = "ready" if not parents[node_id] else "blocked"
+        if _is_approval_node(node) and status == "ready":
+            status = "waiting_approval"
         task = models.TaskRecord(
             execution_id=execution.id,
-            node_id=node["id"],
-            agent_name=node.get("name", node["id"]),
-            role_prompt=node.get("role_prompt", ""),
+            node_id=node_id,
+            agent_name=node.get("name", node_id),
+            role_prompt=node.get("role_prompt", node.get("message", "")),
             model=node.get("model", ""),
-            directory_ids=[
-                directory.id for directory in directories_by_agent[node["id"]]
-            ],
+            directory_ids=[directory.id for directory in directories_by_agent.get(node_id, [])],
             status=status,
             input_context="",
         )
         db.add(task)
     execution.status = "running"
     db.flush()
-
 
 
 def device_is_online(device: models.Device) -> bool:
@@ -152,7 +153,7 @@ def claim_next_task(db: Session, device: models.Device) -> models.TaskRecord | N
     for task_id, node_id, directory_ids, model, graph_snapshot in candidate_rows:
         from .transfers import is_cloud_node
         node = next((n for n in (graph_snapshot or {}).get("nodes", []) if n.get("id") == node_id), {})
-        if is_cloud_node(node):
+        if _is_approval_node(node) or is_cloud_node(node):
             continue
         required_device = directory_access.required_device_by_agent(
             graph_snapshot or {}
@@ -234,40 +235,38 @@ def complete_task(
     execution = db.get(models.Execution, task.execution_id)
     graph = execution.graph_snapshot
     tasks = {
-        t.node_id: t
-        for t in db.query(models.TaskRecord)
+        item.node_id: item
+        for item in db.query(models.TaskRecord)
         .filter(models.TaskRecord.execution_id == execution.id)
         .all()
     }
 
     if status == "failed":
-        # MAS 내부 오류 -> 실행 실패 처리 (UC-204 e202)
         execution.status = "failed"
         execution.error = f"{task.agent_name} 작업 실패: {error or '알 수 없는 오류'}"
         execution.finished_at = models.utcnow()
-        for t in tasks.values():
-            if t.status in ("blocked", "ready"):
-                t.status = "failed"
-                t.error = "선행 작업 실패로 취소됨"
+        for item in tasks.values():
+            if item.status in ("blocked", "ready", "waiting_approval"):
+                item.status = "failed"
+                item.error = "선행 작업 실패로 취소됨"
         db.flush()
         return
 
-    # 자식 노드 해제
     parents = dag.parents_of(graph)
-    for node_id, plist in parents.items():
-        t = tasks.get(node_id)
-        if t and t.status == "blocked" and all(
-            tasks[p].status == "done" for p in plist if p in tasks
+    for node_id, parent_ids in parents.items():
+        child = tasks.get(node_id)
+        if child and child.status == "blocked" and all(
+            tasks[parent_id].status == "done" for parent_id in parent_ids if parent_id in tasks
         ):
-            t.status = "ready"
+            child_node = _node_for(graph, node_id)
+            child.status = "waiting_approval" if _is_approval_node(child_node) else "ready"
 
-    # 전부 완료되면 결과 통합 (UC-205)
-    if all(t.status == "done" for t in tasks.values()):
+    if all(item.status == "done" for item in tasks.values()):
         terminals = dag.result_node_ids(graph)
         outputs = [
-            f"## {tasks[nid].agent_name}\n\n{tasks[nid].output or ''}"
-            for nid in terminals
-            if nid in tasks
+            f"## {tasks[node_id].agent_name}\n\n{tasks[node_id].output or ''}"
+            for node_id in terminals
+            if node_id in tasks
         ]
         execution.result = "\n\n---\n\n".join(outputs) if outputs else ""
         execution.status = "completed"
@@ -275,11 +274,75 @@ def complete_task(
     db.flush()
 
 
+def _descendant_node_ids(graph: dict, node_id: str) -> set[str]:
+    children: dict[str, list[str]] = {}
+    for source, target in dag._workflow_pairs(graph):
+        children.setdefault(source, []).append(target)
+    affected = {node_id}
+    pending = [node_id]
+    while pending:
+        for child in children.get(pending.pop(), []):
+            if child not in affected:
+                affected.add(child)
+                pending.append(child)
+    return affected
+
+
+def retry_task(
+    db: Session, execution: models.Execution, task: models.TaskRecord, *, role_prompt: str | None = None, model: str | None = None
+) -> None:
+    graph = execution.graph_snapshot
+    node = _node_for(graph, task.node_id)
+    if _is_approval_node(node):
+        raise ValueError("승인 블록은 선행 작업을 다시 실행해 주세요.")
+    affected_ids = _descendant_node_ids(graph, task.node_id)
+    tasks = {item.node_id: item for item in execution.tasks}
+    if any(tasks[node_id].status == "running" for node_id in affected_ids if node_id in tasks):
+        raise ValueError("선택한 블록 또는 뒤쪽 블록이 실행 중입니다. 완료된 뒤 다시 시도해 주세요.")
+    if any(item.status == "failed" and item.node_id not in affected_ids for item in tasks.values()):
+        raise ValueError("다른 분기에 실패한 작업이 있어 이 블록만 다시 실행할 수 없습니다.")
+
+    if role_prompt is not None:
+        task.role_prompt = role_prompt
+        node["role_prompt"] = role_prompt
+    if model is not None:
+        task.model = model
+        node["model"] = model
+
+    for node_id in affected_ids:
+        affected = tasks.get(node_id)
+        if affected is None:
+            continue
+        affected.status = "blocked"
+        affected.output = None
+        affected.error = None
+        affected.input_context = ""
+        affected.assigned_device_id = None
+        affected.started_at = None
+        affected.finished_at = None
+
+    parents = dag.parents_of(graph)
+    if all(tasks[parent_id].status == "done" for parent_id in parents.get(task.node_id, []) if parent_id in tasks):
+        task.status = "ready"
+    execution.status = "running"
+    execution.result = None
+    execution.error = None
+    execution.finished_at = None
+    db.flush()
+
+
+def approve_task(db: Session, execution: models.Execution, task: models.TaskRecord) -> None:
+    node = _node_for(execution.graph_snapshot, task.node_id)
+    if not _is_approval_node(node) or task.status != "waiting_approval":
+        raise ValueError("승인 대기 중인 검토 블록이 아닙니다.")
+    complete_task(db, task, "done", "사용자가 결과를 승인했습니다.", "")
+
+
 def cancel_execution(db: Session, execution: models.Execution) -> None:
     execution.status = "cancelled"
     execution.finished_at = models.utcnow()
     for t in execution.tasks:
-        if t.status in ("blocked", "ready", "running"):
+        if t.status in ("blocked", "ready", "running", "waiting_approval"):
             t.status = "failed"
             t.error = "사용자가 실행을 중단함"
     db.flush()

@@ -160,6 +160,10 @@ class AgentNode(BaseModel):
     needs_file_hint: bool = False
     final_manual: bool = False
     needs_file_manual: bool = False
+    # 이 블록의 결과를 다음 단계에 넘기기 전에 사용자가 직접 확인한다.
+    # 실행 시점에는 별도 approval 작업으로 펼쳐진다.
+    approval_required: bool = False
+    approval_message: str = ""
     position: dict | None = None
 
 
@@ -333,6 +337,12 @@ class ExecutionPreview(BaseModel):
     input_files: RunInputs = Field(default_factory=RunInputs)
 
 
+class TaskRetry(BaseModel):
+    """완료된 블록을 현재 실행 안에서 다시 실행할 때의 선택 변경."""
+    role_prompt: str | None = None
+    model: str | None = Field(default=None, max_length=64)
+
+
 class ProviderCredentialUpdate(BaseModel):
     api_key: str | None = Field(default=None, min_length=8)
     admin_key: str | None = Field(default=None, min_length=8)
@@ -375,6 +385,9 @@ class TaskOut(BaseModel):
     assigned_device_name: str | None = None
     executor: str = "local"
     provider: str | None = None
+    role_prompt: str = ""
+    model: str = ""
+    approval_source_node_id: str | None = None
 
     model_config = {"from_attributes": True}
 

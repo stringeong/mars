@@ -100,6 +100,7 @@ def preview_execution(
         raise HTTPException(404, "서비스를 찾을 수 없습니다.")
     graph = dag.expand_input_slots(_run_graph(service, body.input_files))
     validation = orchestrator.inspect_graph_for_user(db, user.id, graph, run_prompt=body.run_prompt)
+    graph = dag.materialize_approval_nodes(graph)
     items = transfers.describe_transfers(graph)
     # 오류가 있으면 실행할 수 없으므로 외부 전송 동의 토큰을 발급하지 않는다
     token = (
@@ -142,6 +143,8 @@ def start_execution(
 
     # F2-403: 실행 전 사용 가능한 기기 확인
     _validate_uploaded_files(db, user.id, graph)
+    # 승인 설정은 저장된 서비스 그래프가 아니라 실행 스냅샷에만 사람 검토 작업으로 펼친다.
+    graph = dag.materialize_approval_nodes(graph)
     transfer_items = transfers.describe_transfers(graph)
     if transfer_items and not transfers.consume_consent(db, body.consent_token, user.id, service.id, graph, body.run_prompt):
         raise HTTPException(428, "외부 전송 내용을 확인하고 동의해 주세요.")
@@ -189,8 +192,13 @@ def _to_out(db: Session, execution: models.Execution) -> schemas.ExecutionOut:
         cloud = transfers.is_cloud_node(node)
         task.depth = depth.get(task.node_id)
         task.assigned_device_name = names.get(task.assigned_device_id)
-        task.executor = "cloud" if cloud else "local"
-        task.provider = transfers.provider_for(node) if cloud else None
+        if node.get("type") == "approval":
+            task.executor = "manual"
+            task.provider = None
+            task.approval_source_node_id = node.get("source_node_id")
+        else:
+            task.executor = "cloud" if cloud else "local"
+            task.provider = transfers.provider_for(node) if cloud else None
     return out
 
 
@@ -228,6 +236,78 @@ def get_execution(
         raise HTTPException(404, "실행 이력을 찾을 수 없습니다.")  # UC-206 e401
     # 조회 시점에 끊긴 기기 작업 재할당 처리
     orchestrator.reclaim_stale_tasks(db, user.id)
+    db.commit()
+    db.refresh(execution)
+    return _to_out(db, execution)
+
+
+def _get_owned_execution(execution_id: int, user: models.User, db: Session) -> models.Execution:
+    execution = db.get(models.Execution, execution_id)
+    if execution is None or execution.user_id != user.id:
+        raise HTTPException(404, "실행 이력을 찾을 수 없습니다.")
+    return execution
+
+
+@router.post("/executions/{execution_id}/tasks/{task_id}/retry", response_model=schemas.ExecutionOut)
+def retry_execution_task(
+    execution_id: int, task_id: int, body: schemas.TaskRetry,
+    user: models.User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    execution = _get_owned_execution(execution_id, user, db)
+    if execution.status == "cancelled":
+        raise HTTPException(409, "취소된 실행은 다시 실행할 수 없습니다.")
+    task = next((item for item in execution.tasks if item.id == task_id), None)
+    if task is None:
+        raise HTTPException(404, "작업을 찾을 수 없습니다.")
+    try:
+        orchestrator.retry_task(db, execution, task, role_prompt=body.role_prompt, model=body.model)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    db.commit()
+    db.refresh(execution)
+    return _to_out(db, execution)
+
+
+@router.post("/executions/{execution_id}/approvals/{task_id}/approve", response_model=schemas.ExecutionOut)
+def approve_execution_task(
+    execution_id: int, task_id: int,
+    user: models.User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    execution = _get_owned_execution(execution_id, user, db)
+    task = next((item for item in execution.tasks if item.id == task_id), None)
+    if task is None:
+        raise HTTPException(404, "검토 블록을 찾을 수 없습니다.")
+    try:
+        orchestrator.approve_task(db, execution, task)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    db.commit()
+    db.refresh(execution)
+    return _to_out(db, execution)
+
+
+@router.post("/executions/{execution_id}/approvals/{task_id}/retry-source", response_model=schemas.ExecutionOut)
+def retry_approval_source(
+    execution_id: int, task_id: int, body: schemas.TaskRetry,
+    user: models.User = Depends(get_current_user), db: Session = Depends(get_db),
+):
+    execution = _get_owned_execution(execution_id, user, db)
+    if execution.status == "cancelled":
+        raise HTTPException(409, "취소된 실행은 다시 실행할 수 없습니다.")
+    approval = next((item for item in execution.tasks if item.id == task_id), None)
+    if approval is None:
+        raise HTTPException(404, "검토 블록을 찾을 수 없습니다.")
+    node = next((item for item in (execution.graph_snapshot or {}).get("nodes", []) if item.get("id") == approval.node_id), {})
+    source_id = node.get("source_node_id")
+    source = next((item for item in execution.tasks if item.node_id == source_id), None)
+    if node.get("type") != "approval" or source is None:
+        raise HTTPException(409, "다시 실행할 선행 블록을 찾을 수 없습니다.")
+    if approval.status != "waiting_approval":
+        raise HTTPException(409, "승인 대기 중인 검토 블록만 다시 실행할 수 있습니다.")
+    try:
+        orchestrator.retry_task(db, execution, source, role_prompt=body.role_prompt, model=body.model)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
     db.commit()
     db.refresh(execution)
     return _to_out(db, execution)
