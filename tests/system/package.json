@@ -1,0 +1,8 @@
+{
+  "name": "mars-system-test",
+  "private": true,
+  "description": "M.A.R.S. 시스템 테스트 화면 케이스(ui_checks.js)용 Playwright",
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

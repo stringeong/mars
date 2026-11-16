@@ -45,3 +45,9 @@ htmlcov/
 
 # Local Docker test environment (never commit)
 .mars_test/
+
+# System test run outputs (tests/system). Temp DB, worker settings and logs live in a temp dir per run.
+tests/system/results.json
+tests/system/screenshots/
+tests/system/.last_run
+tests/system/package-lock.json
