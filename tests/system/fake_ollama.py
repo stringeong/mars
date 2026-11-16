@@ -7,6 +7,7 @@
 - Worker의 파일 선별 요청: 미리보기가 붙은 파일 경로 전부(JSON)
 - 역할(system)에 'FAIL_TASK': HTTP 500
 - 역할(system)에 'SLOW': SLOW_SECONDS초 지연 후 입력을 그대로 돌려줌
+- 역할(system)에 'Markdown': 입력 뒤에 Markdown 요약 표를 붙여 돌려줌
 - 그 밖의 작업: 받은 입력(user 메시지)을 그대로 돌려줌
 
 그래서 모델에 실제로 무엇이 전달됐는지 실행 결과에서 확인할 수 있다.
@@ -63,6 +64,8 @@ WORKFLOW = {
     ],
 }
 
+MARKDOWN_SUMMARY = "\n\n## 요약\n\n| 항목 | 값 |\n|---|---|\n| 거래 수 | 3건 |\n| 합계 | 36,950원 |\n"
+
 _installed = list(MODELS)
 _lock = threading.Lock()
 
@@ -94,6 +97,9 @@ def reply_for(body: dict) -> tuple[int, str]:
         return 500, ""
     if "SLOW" in system:
         time.sleep(SLOW_SECONDS)
+    if "Markdown" in system:
+        # Markdown 결과를 쓰라는 블록(리포트 작성)은 입력 뒤에 요약 표를 붙여 렌더링을 확인할 수 있게 한다
+        return 200, user + MARKDOWN_SUMMARY
     return 200, user
 
 

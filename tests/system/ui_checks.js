@@ -58,8 +58,11 @@ async function run(id, page, fn) {
     const headings = await box.locator('h1, h2, h3, h4, h5, h6').count()
     // 렌더링되면 '## 제목'·'|---|' 같은 Markdown 기호가 화면에 그대로 보이지 않는다
     const raw = /(^|\n)#{1,6} |\|\s*-{3,}/.test(await box.innerText())
+    // 결과 상자는 높이가 정해져 스크롤되므로 끝(요약 표)까지 내린 뒤 캡처한다
+    await box.evaluate((el) => { el.scrollTop = el.scrollHeight })
+    await page.locator('.final-result-card').screenshot({ path: path.join(shots, 'STC-T10-003-result.png') })
     return {
-      ok: !raw && headings > 0,
+      ok: !raw && tables > 0 && headings > 0,
       actual: `렌더링된 표 ${tables}개, 제목 요소 ${headings}개, Markdown 기호 원문 표시=${raw}`,
     }
   })
@@ -95,6 +98,13 @@ async function run(id, page, fn) {
     const shown = (await anonymous.locator('.mk-examples').innerText()).includes('회의록')
     return { ok: after < before && after >= 1 && shown, actual: `검색 전 ${before}개 → '회의록' 검색 후 ${after}개` }
   })
+
+  // 결과서에 넣을 참고 화면(판정에는 쓰지 않음): 기기 목록, 실행 결과의 단계 보기, 실행 이력
+  for (const [name, url] of [['devices', '/devices'], ['execution-stages', `/executions/${state.run_id}`], ['history', '/history']]) {
+    await page.goto(`${state.web_url}${url}`)
+    await page.waitForTimeout(1500)
+    await page.screenshot({ path: path.join(shots, `ref-${name}.png`), fullPage: true }).catch(() => {})
+  }
 
   await browser.close()
   fs.writeFileSync(outPath, JSON.stringify(results, null, 2))
