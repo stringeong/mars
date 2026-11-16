@@ -4,6 +4,7 @@ import { Execution, Task } from '../types'
 import { executionStatusLabel, TASK_STATUS, taskWorkerLabel } from '../workflow'
 import ExecutionGantt from './ExecutionGantt'
 import ExecutionStageView from './ExecutionStageView'
+import MarkdownView from './MarkdownView'
 
 // 미리보기는 실제 걸리는 시간보다 빠르게 돌린다
 const SPEED = 6
@@ -174,10 +175,10 @@ export default function RunPreview({ demo, runKey }: { demo: Demo; runKey: numbe
       </section>
 
       {execution.result
-        ? <section className="final-result-card mk-run-final"><div className="result-section-heading"><div><h2>최종 결과</h2></div><button className="btn sm ghost" onClick={downloadResult}>다운로드</button></div><article className="result-box">{execution.result}</article></section>
+        ? <section className="final-result-card mk-run-final"><div className="result-section-heading"><div><h2>최종 결과</h2></div><button className="btn sm ghost" onClick={downloadResult}>다운로드</button></div><article className="result-box"><MarkdownView text={execution.result} /></article></section>
         : <section className="final-result-card mk-run-final-wait"><h2>최종 결과</h2><p>{started ? '마지막 블록이 끝나면 최종 결과가 여기에 나와요.' : '실행을 시작하면 진행 상황이 실시간으로 바뀌어요.'}</p></section>}
 
-      {execution.tasks.some((task) => task.output) && <section className="agent-output-section"><h2>에이전트별 출력</h2>{execution.tasks.filter((task) => task.output).map((task) => <details key={task.id}><summary><span>{task.agent_name}</span><small>{taskWorkerLabel(task)}</small></summary><div className="result-box">{task.output}</div></details>)}</section>}
+      {execution.tasks.some((task) => task.output) && <section className="agent-output-section"><h2>에이전트별 출력</h2>{execution.tasks.filter((task) => task.output).map((task) => <details key={task.id}><summary><span>{task.agent_name}</span><small>{taskWorkerLabel(task)}</small></summary><div className="result-box"><MarkdownView text={task.output!} /></div></details>)}</section>}
     </div>
   </div>
 }

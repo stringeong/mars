@@ -4,6 +4,7 @@ import AppIcon from '../components/AppIcon'
 import { api } from '../api'
 import ExecutionGantt from '../components/ExecutionGantt'
 import ExecutionStageView from '../components/ExecutionStageView'
+import MarkdownView from '../components/MarkdownView'
 import { Execution, ExecutionListItem, Task } from '../types'
 import { executionStatusLabel, generationLabel, shortDateTime, TASK_STATUS, taskWorkerLabel } from '../workflow'
 
@@ -132,7 +133,7 @@ export default function ExecutionPage() {
         return <section className="result-section failure-section" key={approval.id}>
           <span className="eyebrow">USER REVIEW REQUIRED</span><h2>{approval.agent_name}</h2>
           <p>{approval.role_prompt || '이 결과를 확인한 뒤 다음 단계 진행을 선택하세요.'}</p>
-          {sources.map((source) => source.output && <article className="result-box" key={source.id}>{sources.length > 1 && <strong>{source.agent_name}</strong>}{source.output}</article>)}
+          {sources.map((source) => source.output && <article className="result-box" key={source.id}>{sources.length > 1 && <strong>{source.agent_name}</strong>}<MarkdownView text={source.output} /></article>)}
           <div className="result-actions"><button className="btn" disabled={actionBusy} onClick={() => approve(approval)}>승인하고 계속</button><button className="btn ghost" disabled={actionBusy} onClick={() => openRetry(approval)}>수정 후 다시 실행</button></div>
         </section>
       })}
@@ -153,8 +154,8 @@ export default function ExecutionPage() {
       </section>
       {execution.error && <section className="result-section failure-section"><span className="eyebrow">실행 오류</span><h2>실행 중 문제가 생겼어요</h2><p>{execution.error}</p></section>}
       {noticed.length > 0 && <section className="result-section notice-section"><span className="eyebrow">입력 확인</span><h2>입력 일부가 빠진 채 실행됐어요</h2><p>아래 블록은 입력을 끝까지 읽지 못했어요. 결과에 빠진 내용이 있을 수 있어요.</p><ul>{noticed.flatMap((task) => task.notice!.split('\n').map((line, index) => <li key={`${task.id}-${index}`}><strong>{task.agent_name}</strong><span>{line}</span></li>))}</ul></section>}
-      {execution.result && <section className="final-result-card"><div className="result-section-heading"><div><span className="eyebrow">최종 결과</span><h2>최종 결과</h2></div><button className="btn sm ghost" onClick={downloadResult}>다운로드</button></div><article className="result-box">{execution.result}</article></section>}
-      {execution.tasks.some((task) => task.output) && <section className="agent-output-section"><span className="eyebrow">에이전트별 출력</span><h2>에이전트별 출력</h2>{execution.tasks.filter((task) => task.output).map((task) => <details key={task.id}><summary><span>{task.agent_name}</span><small>{taskWorkerLabel(task)}</small></summary>{task.notice && <p className="task-notice">{task.notice}</p>}<div className="result-box">{task.output}</div>{task.executor !== 'manual' && ['done', 'failed'].includes(task.status) && <button className="btn sm ghost" disabled={actionBusy} onClick={() => openRetry(task)}>이 블록 다시 실행</button>}</details>)}</section>}
+      {execution.result && <section className="final-result-card"><div className="result-section-heading"><div><span className="eyebrow">최종 결과</span><h2>최종 결과</h2></div><button className="btn sm ghost" onClick={downloadResult}>다운로드</button></div><article className="result-box"><MarkdownView text={execution.result} /></article></section>}
+      {execution.tasks.some((task) => task.output) && <section className="agent-output-section"><span className="eyebrow">에이전트별 출력</span><h2>에이전트별 출력</h2>{execution.tasks.filter((task) => task.output).map((task) => <details key={task.id}><summary><span>{task.agent_name}</span><small>{taskWorkerLabel(task)}</small></summary>{task.notice && <p className="task-notice">{task.notice}</p>}<div className="result-box"><MarkdownView text={task.output!} /></div>{task.executor !== 'manual' && ['done', 'failed'].includes(task.status) && <button className="btn sm ghost" disabled={actionBusy} onClick={() => openRetry(task)}>이 블록 다시 실행</button>}</details>)}</section>}
       {retryTask && <div className="file-library-modal-backdrop" role="presentation"><section className="file-library-modal" role="dialog" aria-modal="true" aria-labelledby="retry-title"><header><div><span className="eyebrow">RETRY BLOCK</span><h2 id="retry-title">{retryTask.status === 'waiting_approval' ? '선행 블록 다시 실행' : retryTask.agent_name + ' 다시 실행'}</h2></div><button className="modal-close" onClick={() => setRetryTask(null)}>×</button></header><p>선택한 블록과 그 뒤쪽 블록 결과는 새 실행 결과로 덮어써집니다.</p><label>역할 프롬프트</label><textarea rows={5} value={retryPrompt} onChange={(event) => setRetryPrompt(event.target.value)} /><label>모델</label><input value={retryModel} onChange={(event) => setRetryModel(event.target.value)} placeholder="비우면 기존 기본 모델" /><footer><span>다른 병렬 분기는 계속 실행됩니다.</span><div><button className="btn sm ghost" disabled={actionBusy} onClick={() => setRetryTask(null)}>취소</button><button className="btn sm" disabled={actionBusy} onClick={retry}>{actionBusy ? '시작 중…' : '다시 실행'}</button></div></footer></section></div>}
     </main>
   </div>
