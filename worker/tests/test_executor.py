@@ -68,7 +68,7 @@ class TestChat:
         assert calls[0]["json"]["model"] == "qwen3:8b"
         assert calls[0]["json"]["messages"] == messages
         assert calls[0]["json"]["options"]["temperature"] == 0.2
-        assert calls[0]["json"]["options"]["num_predict"] == 16384
+        assert calls[0]["json"]["options"]["num_predict"] == 4096
         assert calls[0]["json"]["stream"] is False
 
 
@@ -197,13 +197,13 @@ class TestContextLength:
     """Ollama 기본 문맥(4096)으로 긴 입력의 앞부분이 잘리지 않도록 요청마다 num_ctx를 정한다."""
 
     def test_short_prompt_gets_the_minimum(self):
-        assert executor.context_tokens([{"role": "user", "content": "짧은 질문"}]) == 9216
+        assert executor.context_tokens([{"role": "user", "content": "짧은 질문"}]) == 8192
 
     def test_long_log_piece_fits_with_room_for_the_answer(self):
         piece = "- 1117838573 2005.06.03 R02-M1-N1-C:J04-U1 RAS KERNEL INFO generating core.1487\n" * 140
         messages = [{"role": "system", "content": "역할"}, {"role": "user", "content": piece}]
         ctx = executor.context_tokens(messages)
-        assert ctx >= len(piece) + 8192 and ctx % 1024 == 0
+        assert ctx >= len(piece) + 4096 and ctx % 1024 == 0
 
     def test_capped_by_setting(self, monkeypatch):
         monkeypatch.setenv("MARS_MAX_CONTEXT", "16384")
@@ -220,7 +220,7 @@ class TestContextLength:
     def test_request_sends_num_ctx(self, fake_ollama):
         calls, state = fake_ollama
         executor._chat(CONFIG, "qwen3:4b", [{"role": "user", "content": "y" * 20_000}], 0.5)
-        assert calls[0]["json"]["options"]["num_ctx"] == 28672
+        assert calls[0]["json"]["options"]["num_ctx"] == 24576
 
 
 class TestModelLimit:
@@ -265,13 +265,13 @@ class TestContextOverflow:
         assert calls[0]["json"]["truncate"] is False
 
     def test_underestimated_prompt_is_resent_with_enough_context(self, fake_ollama):
-        # 글자 수는 적지만 토큰이 많은 입력: 어림한 9216으로는 모자라고 상한 안에서는 들어간다
+        # 글자 수는 적지만 토큰이 많은 입력: 어림한 8192로는 모자라고 상한 안에서는 들어간다
         calls, state = fake_ollama
         state["prompt_tokens"] = 12_000
         notes: list[str] = []
         out = executor._chat(CONFIG, "모델", [{"role": "user", "content": "한" * 900}], 0.5, notes=notes)
         assert out == "응답"
-        assert [call["json"]["options"]["num_ctx"] for call in calls] == [9216, 20480]
+        assert [call["json"]["options"]["num_ctx"] for call in calls] == [8192, 16384]
         assert notes == []
 
     def test_prompt_over_the_limit_runs_cut_and_leaves_a_note(self, fake_ollama):

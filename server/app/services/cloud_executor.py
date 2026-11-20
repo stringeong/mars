@@ -1,14 +1,38 @@
 import os
 from datetime import timedelta
+
 import httpx
 from sqlalchemy.orm import Session
 
 from .. import models
-from ..config import MAX_OUTPUT_TOKENS
+from ..config import CLOUD_MAX_OUTPUT_TOKENS, CLOUD_REQUEST_TIMEOUT_SEC
 from .credentials import decrypt_secret
 from .transfers import is_cloud_node, provider_for
 
-TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+TIMEOUT = httpx.Timeout(float(CLOUD_REQUEST_TIMEOUT_SEC), connect=10.0)
+
+
+class CloudOutputTruncated(RuntimeError):
+    """Raised instead of silently storing a response cut at its token limit."""
+
+
+def cloud_output_tokens(provider: str, model: str) -> int:
+    """Use the selected cloud model's native output ceiling, up to the deployment cap."""
+    name = model.lower()
+    if provider == "openai":
+        native_limit = 32_768 if name.startswith("gpt-4.1") else 128_000
+    elif provider == "anthropic":
+        if "haiku-3-5" in name or "3-5-haiku" in name or "3.5-haiku" in name:
+            native_limit = 8_192
+        elif "opus-4-1" in name or "opus-4.1" in name:
+            native_limit = 32_768
+        elif "sonnet-4-5" in name or "sonnet-4.5" in name:
+            native_limit = 65_536
+        else:
+            native_limit = 128_000
+    else:
+        native_limit = 65_536
+    return min(CLOUD_MAX_OUTPUT_TOKENS, native_limit)
 
 
 def _node_for(execution: models.Execution, node_id: str) -> dict:
@@ -16,19 +40,24 @@ def _node_for(execution: models.Execution, node_id: str) -> dict:
 
 
 def _call(provider: str, key: str, model: str, system: str, user: str, timeout: httpx.Timeout = TIMEOUT) -> tuple[str, dict]:
+    max_output_tokens = cloud_output_tokens(provider, model)
     with httpx.Client(timeout=timeout) as client:
         if provider == "openai":
-            response = client.post("https://api.openai.com/v1/responses", headers={"Authorization": f"Bearer {key}"}, json={"model": model, "instructions": system, "input": user, "max_output_tokens": MAX_OUTPUT_TOKENS})
+            response = client.post("https://api.openai.com/v1/responses", headers={"Authorization": f"Bearer {key}"}, json={"model": model, "instructions": system, "input": user, "max_output_tokens": max_output_tokens})
             response.raise_for_status()
             data = response.json()
+            if data.get("status") == "incomplete" and (data.get("incomplete_details") or {}).get("reason") == "max_output_tokens":
+                raise CloudOutputTruncated("OpenAI 응답이 모델의 최대 출력 토큰에서 끝났습니다.")
             text = data.get("output_text") or "".join(item.get("text", "") for output in data.get("output", []) for item in output.get("content", []) if item.get("type") == "output_text")
             usage = data.get("usage") or {}
             usage["cached_tokens"] = (usage.get("input_tokens_details") or {}).get("cached_tokens", 0)
             return text, usage
         if provider == "anthropic":
-            response = client.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": key, "anthropic-version": "2023-06-01"}, json={"model": model, "max_tokens": MAX_OUTPUT_TOKENS, "system": system, "messages": [{"role": "user", "content": user}]})
+            response = client.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": key, "anthropic-version": "2023-06-01"}, json={"model": model, "max_tokens": max_output_tokens, "system": system, "messages": [{"role": "user", "content": user}]})
             response.raise_for_status()
             data = response.json()
+            if data.get("stop_reason") == "max_tokens":
+                raise CloudOutputTruncated("Anthropic 응답이 모델의 최대 출력 토큰에서 끝났습니다.")
             text = "".join(block.get("text", "") for block in data.get("content", []) if block.get("type") == "text")
             usage = data.get("usage") or {}
             usage["cached_tokens"] = usage.get("cache_read_input_tokens", 0)
@@ -39,11 +68,13 @@ def _call(provider: str, key: str, model: str, system: str, user: str, timeout: 
             json={
                 "systemInstruction": {"parts": [{"text": system}]},
                 "contents": [{"role": "user", "parts": [{"text": user}]}],
-                "generationConfig": {"maxOutputTokens": MAX_OUTPUT_TOKENS},
+                "generationConfig": {"maxOutputTokens": max_output_tokens},
             },
         )
         response.raise_for_status()
         data = response.json()
+        if any(candidate.get("finishReason") == "MAX_TOKENS" for candidate in data.get("candidates", [])):
+            raise CloudOutputTruncated("Gemini 응답이 모델의 최대 출력 토큰에서 끝났습니다.")
         text = "".join(
             part.get("text", "")
             for candidate in data.get("candidates", [])
@@ -57,7 +88,8 @@ def _call(provider: str, key: str, model: str, system: str, user: str, timeout: 
         }
 
 CLOUD_TASK_TIMEOUT_SECONDS = max(
-    180, int(os.getenv("MARS_CLOUD_TASK_TIMEOUT", "300"))
+    CLOUD_REQUEST_TIMEOUT_SEC + 60,
+    int(os.getenv("MARS_CLOUD_TASK_TIMEOUT", str(CLOUD_REQUEST_TIMEOUT_SEC + 60))),
 )
 
 

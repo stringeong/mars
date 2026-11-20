@@ -1,3 +1,5 @@
+import pytest
+
 from app.services import transfers
 from app.services.credentials import decrypt_secret, encrypt_secret
 
@@ -133,3 +135,91 @@ def test_stale_cloud_task_returns_to_ready(db, make_user, make_execution, monkey
     db.refresh(task)
     assert task.status == "ready"
     assert task.started_at is None
+
+
+class _CloudResponse:
+    def __init__(self, data):
+        self._data = data
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._data
+
+
+class _CloudClient:
+    def __init__(self, responses):
+        self.responses = responses
+        self.requests = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return None
+
+    def post(self, url, headers, json):
+        self.requests.append({"url": url, "headers": headers, "json": json})
+        provider = "openai" if "openai.com" in url else "anthropic" if "anthropic.com" in url else "gemini"
+        return _CloudResponse(self.responses[provider])
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "expected"),
+    [
+        ("openai", "gpt-5-mini", 128_000),
+        ("openai", "gpt-4.1", 32_768),
+        ("anthropic", "claude-sonnet-4-5", 65_536),
+        ("anthropic", "claude-opus-4-1", 32_768),
+        ("anthropic", "claude-haiku-3-5", 8_192),
+        ("gemini", "gemini-3.8-flash", 65_536),
+    ],
+)
+def test_cloud_output_tokens_follow_model_native_limit(provider, model, expected, monkeypatch):
+    from app.services import cloud_executor
+
+    monkeypatch.setattr(cloud_executor, "CLOUD_MAX_OUTPUT_TOKENS", 128_000)
+    assert cloud_executor.cloud_output_tokens(provider, model) == expected
+
+
+def test_cloud_requests_send_each_model_native_output_limit(monkeypatch):
+    from app.services import cloud_executor
+
+    client = _CloudClient({
+        "openai": {"status": "completed", "output_text": "ok", "usage": {}},
+        "anthropic": {"stop_reason": "end_turn", "content": [{"type": "text", "text": "ok"}], "usage": {}},
+        "gemini": {"candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "ok"}]}}]},
+    })
+    monkeypatch.setattr(cloud_executor.httpx, "Client", lambda timeout: client)
+
+    cloud_executor._call("openai", "key", "gpt-5-mini", "system", "user")
+    assert client.requests[-1]["json"]["max_output_tokens"] == 128_000
+    cloud_executor._call("anthropic", "key", "claude-sonnet-4-5", "system", "user")
+    assert client.requests[-1]["json"]["max_tokens"] == 65_536
+    cloud_executor._call("gemini", "key", "gemini-3.8-flash", "system", "user")
+    assert client.requests[-1]["json"]["generationConfig"]["maxOutputTokens"] == 65_536
+
+
+@pytest.mark.parametrize(
+    ("provider", "model", "response"),
+    [
+        ("openai", "gpt-5-mini", {"status": "incomplete", "incomplete_details": {"reason": "max_output_tokens"}}),
+        ("anthropic", "claude-sonnet-4-5", {"stop_reason": "max_tokens", "content": []}),
+        ("gemini", "gemini-3.8-flash", {"candidates": [{"finishReason": "MAX_TOKENS"}]}),
+    ],
+)
+def test_cloud_requests_reject_silently_truncated_output(provider, model, response, monkeypatch):
+    from app.services import cloud_executor
+
+    normal = {
+        "openai": {"status": "completed", "output_text": "ok", "usage": {}},
+        "anthropic": {"stop_reason": "end_turn", "content": [], "usage": {}},
+        "gemini": {"candidates": []},
+    }
+    normal[provider] = response
+    client = _CloudClient(normal)
+    monkeypatch.setattr(cloud_executor.httpx, "Client", lambda timeout: client)
+
+    with pytest.raises(cloud_executor.CloudOutputTruncated):
+        cloud_executor._call(provider, "key", model, "system", "user")

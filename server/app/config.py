@@ -48,9 +48,10 @@ def _positive_int_env(name: str, default: int) -> int:
     return value
 
 
-# Provider defaults are often too short for reports and other deliverables.
-# Deployments may lower this to control cost or raise it for longer documents.
-MAX_OUTPUT_TOKENS = _positive_int_env("MARS_MAX_OUTPUT_TOKENS", 16384)
+# Cloud models support substantially longer deliverables than local Workers.
+# The executor still caps each request at the selected model's native limit.
+CLOUD_MAX_OUTPUT_TOKENS = _positive_int_env("MARS_CLOUD_MAX_OUTPUT_TOKENS", 128000)
+CLOUD_REQUEST_TIMEOUT_SEC = _positive_int_env("MARS_CLOUD_REQUEST_TIMEOUT", 1800)
 
 # 이 시간(초) 동안 하트비트가 없으면 기기를 offline으로 간주하고
 # 해당 기기에 할당된 실행 중 작업을 다른 기기로 재할당한다.

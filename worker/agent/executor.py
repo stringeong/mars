@@ -16,11 +16,11 @@ PREVIEW_CHARS = 500  # 파일 선별 시 LLM에게 보여줄 미리보기 길이
 
 
 def _max_output_tokens() -> int:
-    """Use a generous, overridable generation limit for task deliverables."""
+    """Keep local generations bounded so CPU Workers finish in a practical time."""
     try:
-        return max(1, int(os.getenv("MARS_MAX_OUTPUT_TOKENS", "16384")))
+        return max(1, int(os.getenv("MARS_MAX_OUTPUT_TOKENS", "4096")))
     except ValueError:
-        return 16384
+        return 4096
 
 
 def _directory_paths(task: dict) -> list[str]:
@@ -72,8 +72,6 @@ def _cut_texts(name: str, total: int, exact: bool) -> tuple[str, str]:
     )
 
 
-# 답을 쓰는 데 남겨 둘 토큰. reasoning 모델은 생각하는 과정도 여기에 쓴다
-_OUTPUT_RESERVE_TOKENS = 8192
 _MIN_CONTEXT_TOKENS = 8192
 
 
@@ -128,7 +126,8 @@ def context_tokens(messages: list[dict], model_limit: int | None = None) -> int:
     로그·CSV처럼 숫자가 많은 글은 글자 하나가 토큰 하나 가까이 되므로 글자 수를 그대로 토큰 수로 잡는다.
     """
     estimate = sum(len(str(message.get("content") or "")) for message in messages)
-    rounded = _round_up(estimate + _OUTPUT_RESERVE_TOKENS)
+    # num_ctx는 입력과 출력을 함께 담는다. 로컬 출력 상한만큼 답변 공간을 예약한다.
+    rounded = _round_up(estimate + _max_output_tokens())
     limit = _context_limit(model_limit)
     if estimate > limit:
         print(f"  입력이 커서 문맥 상한({limit:,}토큰)을 넘을 수 있습니다: 약 {estimate:,}자")
@@ -163,7 +162,7 @@ def _chat(
         match = _OVERFLOW.search(resp.text)
         tokens = int(match.group(1)) if match else None
         if tokens is not None:
-            num_ctx = min(_round_up(tokens + _OUTPUT_RESERVE_TOKENS), _context_limit(model_limit))
+            num_ctx = min(_round_up(tokens + _max_output_tokens()), _context_limit(model_limit))
             payload["options"]["num_ctx"] = num_ctx
         del payload["truncate"]
         resp = httpx.post(url, json=payload, timeout=300)
