@@ -397,9 +397,9 @@ class TestApprovalAndRetry:
         execution = make_execution(make_user(), dag.materialize_approval_nodes(graph))
         orchestrator.create_tasks_for_execution(db, execution)
         tasks = tasks_by_node(db, execution)
-        tasks["a"].status = "done"
-        tasks["a"].output = "검토할 실제 결과"
-        db.flush()
+        # 승인 작업은 앞 블록이 complete_task로 끝나야 승인 대기(waiting_approval)가 된다
+        tasks["a"].status = "running"
+        orchestrator.complete_task(db, tasks["a"], "done", "검토할 실제 결과", "")
 
         orchestrator.approve_task(db, execution, tasks["a__approval"])
         orchestrator.populate_task_context(db, tasks["c"])
