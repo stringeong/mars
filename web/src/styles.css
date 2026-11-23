@@ -1519,3 +1519,18 @@ body.canvas-fullscreen { overflow: hidden; }
 .markdown-body tr:nth-child(even) td { background: #fafbfe; }
 /* 모델 출력은 줄 단위 텍스트(CSV·로그)가 많아 한 줄 줄바꿈도 그대로 보여준다 */
 .markdown-body p, .markdown-body li, .markdown-body td, .markdown-body th { white-space: pre-line; }
+
+/* 파일 칩의 이름을 누르면 미리보기를 연다 (실행·편집·설정 확인 화면) */
+.source-chip .file-open, .selected-file-chip .file-open { grid-column: 1; grid-row: auto; display: block; max-width: 100%; overflow: hidden; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-size: 12px; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; text-decoration: underline dotted #b9b2d8; text-underline-offset: 3px; }
+.selected-file-chip .file-open { color: #515c73; font-weight: 700; }
+.source-chip .file-open:hover, .selected-file-chip .file-open:hover { color: #5e40c8; }
+.file-preview-modal { width: min(880px, 100%); }
+.file-preview-meta { display: block; margin-top: 4px; color: #858e9f; font-size: 12px; }
+.file-preview-body { min-height: 120px; overflow: auto; margin: 0 22px; border: 1px solid #eceef4; border-radius: 10px; background: #fbfcff; }
+.file-preview-body > p { padding: 16px; }
+.file-preview-text { margin: 0; padding: 14px 16px; color: #3b4458; font-size: 12px; line-height: 1.55; white-space: pre-wrap; word-break: break-word; }
+.file-preview-table { border-collapse: collapse; font-size: 12px; }
+.file-preview-table th, .file-preview-table td { padding: 6px 10px; border-bottom: 1px solid #eceef4; color: #3b4458; text-align: left; white-space: nowrap; }
+.file-preview-table th { position: sticky; top: 0; background: #f3f1fb; color: #4b3a9a; }
+.file-preview-modal > footer { justify-content: flex-start; }
+.file-preview-modal .file-preview-body:last-child { margin-bottom: 22px; }

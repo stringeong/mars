@@ -67,6 +67,14 @@ export const api = {
 }
 
 
+/** 로그인 토큰이 필요한 파일 내려받기 (파일 미리보기·새 탭 열기) */
+export async function fetchFile(path: string): Promise<Blob> {
+  const token = getToken()
+  const resp = await fetch(`${API_URL}${path}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  if (!resp.ok) throw new ApiError(resp.status, resp.status === 404 ? '파일을 찾을 수 없어요.' : '파일을 열지 못했어요.')
+  return resp.blob()
+}
+
 export function getDeviceDirectories(deviceId: number) {
   return api.get<SharedDirectory[]>(
     `/devices/${deviceId}/directories`,

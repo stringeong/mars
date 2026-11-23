@@ -1,6 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
+import { fileLabel, fileMeta, newestFirst, useFilePreview } from '../components/FilePreview'
 import ValidationPanel from '../components/ValidationPanel'
 import { AgentNode, Execution, ExecutionListItem, RunInputRecord, Service, SplitPreview, UploadedFile, ValidationIssue, ValidationResult, WorkflowNode } from '../types'
 import { firstInputSlot, generationLabel, onServiceRenamed, splitPreviewText } from '../workflow'
@@ -44,6 +45,7 @@ export default function WorkflowRunPage() {
   const [acknowledged, setAcknowledged] = useState(false)
   const [uploadTarget, setUploadTarget] = useState<InputEntry | null>(null)
   const uploadRef = useRef<HTMLInputElement>(null)
+  const filePreview = useFilePreview()
 
   const entries = useMemo<InputEntry[]>(() => {
     if (!service) return []
@@ -304,7 +306,7 @@ export default function WorkflowRunPage() {
                 <small>{typeof splitParts[entryKey(entry)] === 'number' ? '워커가 적으면 한 워커가 여러 조각을 차례로 처리해요.' : '사용 가능한 워커 수와 파일 크기로 정해요.'}</small>
               </div>}
               <div className="slot-sources">
-                {current.map((fileId) => <span className="source-chip upload" key={fileId}><span>{fileName(fileId)}</span><small>업로드 · 서버를 거쳐 전달</small><button type="button" aria-label="이번 실행에서 빼기" onClick={() => setSelected(entry, current.filter((value) => value !== fileId))}>×</button></span>)}
+                {current.map((fileId) => { const file = files.find((item) => item.id === fileId); return <span className="source-chip upload" key={fileId}>{file ? <button type="button" className="file-open" title="미리보기" onClick={() => filePreview.open(file)}>{file.original_name}</button> : <span>{fileName(fileId)}</span>}<small>{file && `${fileMeta(file)} · `}업로드 · 서버를 거쳐 전달</small><button type="button" aria-label="이번 실행에서 빼기" onClick={() => setSelected(entry, current.filter((value) => value !== fileId))}>×</button></span> })}
                 {entry.directories.map((directoryId) => <span className="source-chip directory" key={`d${directoryId}`}><span>등록한 폴더 #{directoryId}</span><small>그 PC에서만 읽음</small></span>)}
                 {!current.length && !entry.directories.length && <span className="muted">파일 없음</span>}
               </div>
@@ -313,7 +315,7 @@ export default function WorkflowRunPage() {
                 <button type="button" className="btn sm" disabled={loading} onClick={() => startUpload(entry)}>파일 올리기</button>
                 <select value="" onChange={(event) => event.target.value && setSelected(entry, [...current, Number(event.target.value)])}>
                   <option value="">업로드한 파일에서 추가</option>
-                  {files.filter((file) => !current.includes(file.id)).map((file) => <option key={file.id} value={file.id}>{file.original_name}</option>)}
+                  {newestFirst(files).filter((file) => !current.includes(file.id)).map((file) => <option key={file.id} value={file.id}>{fileLabel(file)}</option>)}
                 </select>
                 {changed && <button type="button" className="text-button" onClick={() => setSelected(entry, entry.defaults)}>기본값으로</button>}
               </div>
@@ -346,6 +348,7 @@ export default function WorkflowRunPage() {
         {validation && (validation.errors.length > 0 || validation.warnings.length > 0) && <><ValidationPanel validation={validation} nodeNames={Object.fromEntries(service.graph.nodes.map((node) => [node.id, node.name]))} showStages={false} />{validation.errors.length > 0 && <Link className="btn sm ghost" to={`/services/${service.id}/setup`}>설정 확인 화면에서 고치기</Link>}{!validation.errors.length && <label className="ack-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} />경고 내용을 확인했고 그대로 실행합니다.</label>}</>}
         <div className="run-card-footer"><button className="generate-button" disabled={loading}>{loading ? '확인 중…' : '실행하기'} <b>→</b></button></div>
         {error && <div className="error">{error}</div>}
+        {filePreview.error && <div className="error">{filePreview.error}</div>}
       </form>
       <aside className="run-summary-panel">
         <span className="eyebrow">워크플로우 요약</span><h2>{service.name}</h2>{service.description && service.description.trim() !== service.name.trim() && <p>{service.description}</p>}
@@ -355,6 +358,7 @@ export default function WorkflowRunPage() {
       </aside>
     </div>
     <input ref={uploadRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.log,.jsonl,.xlsx,.pptx,.json" onChange={onUpload} />
+    {filePreview.modal}
     {preview && <div className="file-library-modal-backdrop" role="presentation"><section className="file-library-modal transfer-consent-modal" role="dialog" aria-modal="true" aria-labelledby="transfer-title"><header><div><span className="eyebrow">외부 전송</span><h2 id="transfer-title">클라우드 전송 내용을 확인해 주세요</h2></div><button className="modal-close" onClick={() => setPreview(null)}>×</button></header><p>API 키는 서버에만 보관되며 아래 입력과 결과만 외부 공급자에 전달됩니다.</p><div className="transfer-list">{preview.transfers.map((item, index) => <div className={`transfer-item ${item.type}`} key={`${item.node_id}-${item.type}-${index}`}><strong>{item.node_name} → {item.provider}</strong><span>{item.type === 'user_input' ? '사용자 실행 요청' : item.type === 'derived_text' ? `로컬 파일에서 파생된 텍스트: ${(item.sources || []).join(', ')}` : `첨부파일에서 추출한 텍스트: ${(item.file_ids || []).map(fileName).join(', ')}`}</span></div>)}</div><footer><span>이번 실행에만 적용됩니다.</span><div><button className="btn sm ghost" onClick={() => setPreview(null)}>취소</button><button className="btn sm" disabled={loading} onClick={() => start(preview.consent_token)}>동의하고 실행</button></div></footer></section></div>}
   </div>
 }

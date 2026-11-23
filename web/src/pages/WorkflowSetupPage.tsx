@@ -1,6 +1,7 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { api, getDeviceDirectories, getDeviceModels } from '../api'
+import { fileLabel, fileMeta, newestFirst, useFilePreview } from '../components/FilePreview'
 import ValidationPanel from '../components/ValidationPanel'
 import { AgentNode, CloudProvider, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, UploadedFile, ValidationResult, WorkflowNode } from '../types'
 import { applyAutoFlags, blockingErrors, generationLabel, issuesByNode, onServiceRenamed, PROVIDER_LABELS } from '../workflow'
@@ -31,6 +32,7 @@ export default function WorkflowSetupPage() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const uploadRef = useRef<HTMLInputElement>(null)
+  const filePreview = useFilePreview()
 
   useEffect(() => {
     async function load() {
@@ -226,6 +228,7 @@ export default function WorkflowSetupPage() {
     </header>
     {message && <div className="setup-message">{message}</div>}
     {error && <div className="error">{error}</div>}
+    {filePreview.error && <div className="error">{filePreview.error}</div>}
 
     <div className="setup-layout">
       <div className="setup-main">
@@ -244,8 +247,8 @@ export default function WorkflowSetupPage() {
               <div className="slot-users"><span>함께 읽는 블록</span>{users.map((user) => <b key={user.id}>{user.name}</b>)}{!users.length && <small className="muted">없음</small>}</div>
               <div className="slot-sources">
                 {slot.file_ids.map((fileId) => <span className="source-chip upload" key={`f${fileId}`}>
-                  <span>업로드 · {fileById.get(fileId)?.original_name ?? `파일 #${fileId}`}</span>
-                  <small>서버를 거쳐 전달</small>
+                  {fileById.get(fileId) ? <button type="button" className="file-open" title="미리보기" onClick={() => filePreview.open(fileById.get(fileId)!)}>업로드 · {fileById.get(fileId)!.original_name}</button> : <span>업로드 · 파일 #{fileId}</span>}
+                  <small>{fileById.get(fileId) && `${fileMeta(fileById.get(fileId)!)} · `}서버를 거쳐 전달</small>
                   <button type="button" aria-label="연결 해제" onClick={() => updateSlotSources(slot.id, 'file_ids', (values) => values.filter((value) => value !== fileId))}>×</button>
                 </span>)}
                 {slot.directory_ids.map((directoryId) => {
@@ -261,7 +264,7 @@ export default function WorkflowSetupPage() {
                 <button type="button" className="btn sm" disabled={busy} onClick={() => startUpload(slot.id)}>{busy && uploadTarget === slot.id ? '올리는 중…' : '파일 올리기'}</button>
                 <select value="" onChange={(event) => event.target.value && updateSlotSources(slot.id, 'file_ids', (values) => [...values, Number(event.target.value)])}>
                   <option value="">기존 업로드 파일 연결</option>
-                  {files.filter((file) => !slot.file_ids.includes(file.id)).map((file) => <option key={file.id} value={file.id}>{file.original_name}</option>)}
+                  {newestFirst(files).filter((file) => !slot.file_ids.includes(file.id)).map((file) => <option key={file.id} value={file.id}>{fileLabel(file)}</option>)}
                 </select>
                 <select value="" onChange={(event) => event.target.value && updateSlotSources(slot.id, 'directory_ids', (values) => [...values, Number(event.target.value)])}>
                   <option value="">등록한 폴더 연결</option>
@@ -353,5 +356,6 @@ export default function WorkflowSetupPage() {
       </aside>
     </div>
     <input ref={uploadRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.log,.jsonl,.xlsx,.pptx,.json" onChange={onUpload} />
+    {filePreview.modal}
   </div>
 }

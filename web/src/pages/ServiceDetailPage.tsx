@@ -6,12 +6,13 @@ import { api, getDeviceDirectories, getDeviceModels } from '../api'
 import AgentBlockNode, { categoryOf } from '../components/AgentBlockNode'
 import AppIcon from '../components/AppIcon'
 import DeletableEdge from '../components/DeletableEdge'
+import { fileMeta, newestFirst, useFilePreview } from '../components/FilePreview'
 import ShareDialog from '../components/ShareDialog'
 import ValidationPanel from '../components/ValidationPanel'
 import { stagePositions } from '../flowLayout'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
 import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, SplitSettings, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { announceServiceRenamed, applyAutoFlags, blockingErrors, DEFAULT_SPLIT, FlagExplanation, firstInputSlot, generationLabel, issuesByNode, moveDirectFilesToSlots, onServiceRenamed, shortDate, shortDateTime, splitPreviewText } from '../workflow'
+import { announceServiceRenamed, applyAutoFlags, blockingErrors, DEFAULT_SPLIT, FlagExplanation, firstInputSlot, generationLabel, issuesByNode, moveDirectFilesToSlots, onServiceRenamed, shortDateTime, splitPreviewText } from '../workflow'
 
 const nodeTypes = { agent: AgentBlockNode }
 const edgeTypes = { deletable: DeletableEdge }
@@ -140,6 +141,7 @@ export default function ServiceDetailPage() {
   // 슬롯이 있는 블록은 파일을 블록이 아니라 첫 번째 슬롯에 붙인다. 실행 화면에는 슬롯마다 칸이 하나만 나온다
   const fileSlot = firstInputSlot(selectedAgent, inputSlots)
   const attachedFileIds = fileSlot ? fileSlot.file_ids : selectedAgent?.uploaded_file_ids ?? []
+  const filePreview = useFilePreview()
   const issueMap = useMemo(() => issuesByNode(validation), [validation])
   const selectedIssues = selected ? issueMap.get(selected) ?? [] : []
   // 파일 나눠서 병렬 실행: 지금 실행하면 몇 조각이 되는지 서버 검사 결과에서 가져온다
@@ -582,6 +584,7 @@ export default function ServiceDetailPage() {
     </header>
     {message && <div style={{ color: 'var(--success)', marginBottom: 8 }}>{message}</div>}
     {error && <div className="error">{error}</div>}
+    {filePreview.error && <div className="error">{filePreview.error}</div>}
     <div className={`builder3 builder-workspace${canvasFull ? ' canvas-full' : ''}`}>
       <aside className="palette">
         <div className="palette-title">에이전트 블록</div><div className="palette-hint">드래그하거나 클릭해 추가</div>
@@ -687,7 +690,7 @@ export default function ServiceDetailPage() {
               ? <>파일 슬롯 <b>{fileSlot.description || '사용자 파일'}</b>에 붙습니다{(selectedAgent.input_slot_ids ?? []).length > 1 && ' (이 블록의 첫 번째 슬롯)'}. 이 슬롯을 읽는 블록: {Object.values(agents).filter((agent) => (agent.input_slot_ids ?? []).includes(fileSlot.id)).map((agent) => agent.name).join(', ')}</>
               : '현재 에이전트가 실행할 때 우선 읽는 파일입니다.'}</small>
             <div className="selected-file-list">
-              {attachedFileIds.map((fileId) => { const file = uploadedFileById.get(fileId); return <div className="selected-file-chip" key={fileId}><span><strong>{file?.original_name ?? '삭제된 파일'}</strong><small>{file ? file.size_bytes.toLocaleString() + ' bytes' : '#' + fileId}</small></span><button type="button" aria-label="첨부 해제" onClick={() => setAttachedFiles(attachedFileIds.filter((id) => id !== fileId))}>×</button></div> })}
+              {attachedFileIds.map((fileId) => { const file = uploadedFileById.get(fileId); return <div className="selected-file-chip" key={fileId}><span>{file ? <button type="button" className="file-open" title="미리보기" onClick={() => filePreview.open(file)}>{file.original_name}</button> : <strong>삭제된 파일</strong>}<small>{file ? fileMeta(file) : '#' + fileId}</small></span><button type="button" aria-label="첨부 해제" onClick={() => setAttachedFiles(attachedFileIds.filter((id) => id !== fileId))}>×</button></div> })}
               {!attachedFileIds.length && <span className="muted">선택된 파일이 없습니다.</span>}
             </div>
           </div>
@@ -725,12 +728,13 @@ export default function ServiceDetailPage() {
       </aside>
     </div>
     {shareOpen && service && <ShareDialog serviceId={service.id} defaultTitle={svcName} defaultDescription={svcDesc} save={save} onClose={() => setShareOpen(false)} />}
+    {filePreview.modal}
     {fileLibraryOpen && <div className="file-library-modal-backdrop" role="presentation" onMouseDown={() => setFileLibraryOpen(false)}>
       <section className="file-library-modal" role="dialog" aria-modal="true" aria-labelledby="file-library-title" onMouseDown={(event) => event.stopPropagation()}>
         <header><div><span className="eyebrow">파일 보관함</span><h2 id="file-library-title">기존 파일 선택</h2></div><button type="button" className="modal-close" aria-label="닫기" onClick={() => setFileLibraryOpen(false)}>×</button></header>
         <p>이 에이전트가 실행할 때 읽을 파일을 선택하세요.</p>
         <div className="modal-file-list">
-          {uploadedFiles.map((file) => <label className="modal-file-item" key={file.id}><input type="checkbox" checked={draftFileIds.includes(file.id)} onChange={(event) => setDraftFileIds((current) => event.target.checked ? [...current, file.id] : current.filter((id) => id !== file.id))} /><span><strong>{file.original_name}</strong><small>{file.size_bytes.toLocaleString()} bytes · {shortDate(file.created_at)}</small></span></label>)}
+          {newestFirst(uploadedFiles).map((file) => <label className="modal-file-item" key={file.id}><input type="checkbox" checked={draftFileIds.includes(file.id)} onChange={(event) => setDraftFileIds((current) => event.target.checked ? [...current, file.id] : current.filter((id) => id !== file.id))} /><span><strong>{file.original_name}</strong><small>{fileMeta(file)}</small></span></label>)}
           {!uploadedFiles.length && <div className="modal-file-empty">업로드된 파일이 없습니다. 먼저 새 파일을 업로드해 주세요.</div>}
         </div>
         <footer><span>{draftFileIds.length}개 선택</span><div><button type="button" className="btn sm ghost" onClick={() => setFileLibraryOpen(false)}>취소</button><button type="button" className="btn sm" onClick={applyFileLibrarySelection}>선택 적용</button></div></footer>
