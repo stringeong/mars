@@ -491,6 +491,10 @@ export default function ServiceDetailPage() {
         return [...byId.values()]
       })
       const uploadedIds = uploaded.map((file) => file.id)
+      // 같은 이름의 파일이 이미 붙어 있으면 옛 파일을 빼고 새 파일로 바꾼다. 이름이 다르면 추가한다
+      const uploadedNames = new Set(uploaded.map((file) => file.original_name))
+      const attached = selectedAgent?.uploaded_file_ids ?? []
+      const replaced = attached.filter((fileId) => uploadedNames.has(uploadedFileById.get(fileId)?.original_name ?? ''))
       setAgents((current) => {
         const agent = current[selected]
         if (!agent) return current
@@ -498,11 +502,11 @@ export default function ServiceDetailPage() {
           ...current,
           [selected]: {
             ...agent,
-            uploaded_file_ids: [...new Set([...(agent.uploaded_file_ids ?? []), ...uploadedIds])],
+            uploaded_file_ids: [...new Set([...(agent.uploaded_file_ids ?? []).filter((fileId) => !replaced.includes(fileId)), ...uploadedIds])],
           },
         }
       })
-      setMessage(String(uploaded.length) + "개 파일을 업로드하고 현재 에이전트에 첨부했습니다. 저장해 주세요.")
+      setMessage(String(uploaded.length) + "개 파일을 업로드하고 현재 에이전트에 첨부했습니다." + (replaced.length ? ` 같은 이름의 이전 파일 ${replaced.length}개는 새 파일로 바꿨습니다.` : "") + " 저장해 주세요.")
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "파일 업로드 실패")
     } finally {

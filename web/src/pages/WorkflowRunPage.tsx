@@ -75,7 +75,12 @@ export default function WorkflowRunPage() {
         // 지정한 실행(다시 실행) 또는 이 워크플로우의 가장 최근 실행 값으로 입력 파일을 미리 채운다
         let previous: { id: number; run_prompt: string; input_files?: RunInputRecord[] | null } | undefined
         if (fromExecution) previous = await api.get<Execution>(`/executions/${fromExecution}`).catch(() => undefined)
-        else previous = (await api.get<ExecutionListItem[]>(`/executions?service_id=${id}`).catch(() => []))[0]
+        else {
+          const latest = (await api.get<ExecutionListItem[]>(`/executions?service_id=${id}`).catch(() => []))[0]
+          // 마지막 실행 뒤에 워크플로우를 고쳤으면(블록 파일 교체 등) 이전 실행 값 대신 지금 블록·슬롯 파일을 쓴다
+          if (latest && Date.parse(loaded.updated_at) > Date.parse(latest.created_at)) setPrefillSource(`워크플로우 기본값(이전 실행 #${latest.id} 뒤에 수정됨)`)
+          else previous = latest
+        }
         const existing = new Set(loadedFiles.map((file) => file.id))
         const next: RunInputs = { slots: {}, nodes: {} }
         let dropped = 0
