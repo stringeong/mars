@@ -946,6 +946,9 @@ body, .layout { background: #fff; color: var(--text); }
 .home-failure p { margin: 0; color: #7f1d1d; font-size: 13px; line-height: 1.5; }
 .home-failure small { color: #7f1d1d; }
 .home-failure-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* 생성 모델 없이 기본 워크플로우로 시작하는 보조 버튼 */
+.home-default-start { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+.home-default-start small { color: var(--muted); font-size: 12px; }
 .home-suggestions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; }
 .home-suggestions button { padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: #3a3a38; font: inherit; font-size: 13px; cursor: pointer; }
 .home-suggestions button:hover { background: #f5f5f4; }
