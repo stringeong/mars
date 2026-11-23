@@ -130,6 +130,22 @@ export default function ServicesPage() {
     }
   }
 
+  // 생성 모델을 거치지 않고 규칙 기반 기본 워크플로우로 바로 시작해 편집 화면으로 간다
+  async function startDefaultWorkflow() {
+    if (loading || prompt.trim().length < 5) return
+    setError('')
+    setGenError(null)
+    setLoading(true)
+    try {
+      const service = await api.post<Service>('/services/generate', { prompt, use_fallback: true, fallback_reason: '사용자가 기본 워크플로우를 선택함' })
+      navigate(`/services/${service.id}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '워크플로우를 만들지 못했어요.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // 칩 밖을 누르면 모델 고르기 창을 닫는다
   useEffect(() => {
     if (!modelOpen) return
@@ -188,6 +204,10 @@ export default function ServicesPage() {
             </button>}
         </div>
       </form>
+      <div className="home-default-start">
+        <button type="button" className="btn sm ghost" disabled={loading || prompt.trim().length < 5} onClick={startDefaultWorkflow}>기본 워크플로우로 시작</button>
+        <small>AI 생성 없이 정보 수집 → 분석 → 정리 3단계로 시작해요.</small>
+      </div>
 
       {workerJob && <p className="home-note" role="status">{workerProgressLabel(workerJob.job, workerJob.seconds)} 멈추려면 ■ 버튼을 누르세요.</p>}
       {loading && !workerJob && <p className="home-note">워크플로우를 만드는 중이에요. 모델에 따라 최대 30초쯤 걸려요.</p>}
