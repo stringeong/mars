@@ -1,5 +1,5 @@
 import { api, ApiError } from './api'
-import { AgentNode, Device, GenerationInfo, RunInputRecord, SplitPreview, SplitSettings, Task, ValidationIssue, ValidationResult } from './types'
+import { AgentNode, Device, GenerationInfo, InputSlot, RunInputRecord, SplitPreview, SplitSettings, Task, ValidationIssue, ValidationResult } from './types'
 
 export type FlagExplanation = { manual: boolean; reason: string }
 export type AutoFlagReasons = { needsFile: FlagExplanation; final: FlagExplanation }
@@ -264,6 +264,23 @@ export function shortDate(value: string) {
 export function shortDateTime(value: string) {
   const date = new Date(value)
   return `${shortDate(value)} ${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+}
+
+/** 블록이 파일을 받는 슬롯: input_slot_ids 중 실제로 있는 첫 번째 슬롯 (서버 저장 규칙과 같다) */
+export function firstInputSlot(agent: AgentNode | null | undefined, slots: InputSlot[]) {
+  return (agent?.input_slot_ids ?? []).map((slotId) => slots.find((slot) => slot.id === slotId)).find((slot): slot is InputSlot => !!slot)
+}
+
+/** 슬롯이 있는 블록에 예전 방식으로 직접 붙은 파일을 그 블록의 첫 번째 슬롯으로 옮긴다 (서버 dag.move_direct_files_to_slots와 같은 규칙) */
+export function moveDirectFilesToSlots(agents: AgentNode[], slots: InputSlot[]) {
+  const moved = slots.map((slot) => ({ ...slot, file_ids: [...slot.file_ids] }))
+  const nextAgents = agents.map((agent) => {
+    const slot = firstInputSlot(agent, moved)
+    if (!slot || !(agent.uploaded_file_ids ?? []).length) return agent
+    slot.file_ids = [...new Set([...slot.file_ids, ...(agent.uploaded_file_ids ?? [])])]
+    return { ...agent, uploaded_file_ids: [] }
+  })
+  return { agents: nextAgents, slots: moved }
 }
 
 export const DEFAULT_SPLIT: SplitSettings = { enabled: false, unit: 'auto', parts: 'auto', overlap_lines: 0, max_chars: 12000 }

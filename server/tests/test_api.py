@@ -516,6 +516,73 @@ class TestRunInputsAndReuse:
         saved = client.get(f"/services/{service['id']}", headers=auth).json()
         assert saved["graph"]["input_slots"][0]["file_ids"] == [october["id"]]
 
+    def test_run_slot_files_drop_old_direct_file_of_slot_block(self, client, db):
+        """예전에 슬롯 블록에 직접 붙은 파일이 남아 있어도, 실행용 슬롯 파일을 바꾸면 그 파일은 빠진다."""
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        old, new = upload(client, auth, "answers.csv"), upload(client, auth, "answers.csv")
+        service = self._slot_service(client, auth, old["id"])
+        # 저장 시 이동이 생기기 전의 워크플로우: 슬롯은 비어 있고 파일은 블록에 직접 붙어 있다
+        stored = db.get(models.Service, service["id"])
+        graph = copy.deepcopy(stored.graph)
+        graph["input_slots"][0]["file_ids"] = []
+        graph["nodes"][0]["uploaded_file_ids"] = [old["id"]]
+        stored.graph = graph
+        db.commit()
+
+        r = client.post(
+            f"/services/{service['id']}/executions",
+            json={"input_files": {"slots": {"slot1": [new["id"]]}}},
+            headers=auth,
+        )
+        assert r.status_code == 201, r.text
+        snapshot = db.get(models.Execution, r.json()["id"]).graph_snapshot
+        assert snapshot["nodes"][0]["uploaded_file_ids"] == [new["id"]]
+        assert [record["kind"] for record in r.json()["input_files"]] == ["slot"]
+        task = client.post("/worker/tasks/next", headers=key).json()
+        assert [f["id"] for f in task["uploaded_files"]] == [new["id"]]
+
+    def test_legacy_block_files_without_slots_are_used(self, client):
+        """슬롯이 없는 옛 워크플로우는 블록에 직접 붙은 파일을 그대로 읽는다."""
+        auth = signup_and_login(client)
+        key = register_device(client, auth)
+        client.post("/worker/heartbeat", headers=key)
+        file, other = upload(client, auth, "카드.csv"), upload(client, auth, "11월.csv")
+        service = create_service(client, auth)
+        graph = editable_graph(service)
+        graph["nodes"][0].update(needs_file=True, uploaded_file_ids=[file["id"]])
+        saved = client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth).json()
+        assert saved["graph"]["nodes"][0]["uploaded_file_ids"] == [file["id"]]
+
+        r = client.post(f"/services/{service['id']}/executions", json={}, headers=auth)
+        assert r.status_code == 201, r.text
+        task = client.post("/worker/tasks/next", headers=key).json()
+        assert [f["id"] for f in task["uploaded_files"]] == [file["id"]]
+
+        r = client.post(
+            f"/services/{service['id']}/executions",
+            json={"input_files": {"nodes": {"a": [other["id"]]}}},
+            headers=auth,
+        )
+        assert r.status_code == 201, r.text
+        assert r.json()["input_files"] == [{
+            "kind": "node", "id": "a", "label": r.json()["input_files"][0]["label"], "node_ids": ["a"],
+            "files": [{"id": other["id"], "name": "11월.csv"}], "directories": [],
+        }]
+
+    def test_save_moves_direct_files_into_slot(self, client):
+        auth = signup_and_login(client)
+        slot_file, direct = upload(client, auth, "rubric.csv"), upload(client, auth, "answers.csv")
+        service = self._slot_service(client, auth, slot_file["id"])
+        graph = client.get(f"/services/{service['id']}", headers=auth).json()["graph"]
+        graph["nodes"][0]["uploaded_file_ids"] = [direct["id"]]
+        r = client.put(f"/services/{service['id']}", json={"graph": graph}, headers=auth)
+        assert r.status_code == 200, r.text
+        saved = r.json()["graph"]
+        assert saved["nodes"][0]["uploaded_file_ids"] == []
+        assert saved["input_slots"][0]["file_ids"] == [slot_file["id"], direct["id"]]
+
     def test_unknown_slot_is_rejected(self, client):
         auth = signup_and_login(client)
         key = register_device(client, auth)

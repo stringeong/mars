@@ -225,7 +225,7 @@ def update_service(
     service = _get_owned(service_id, user, db)
     if body.graph is not None:
         # 연결이 바뀌었을 수 있으므로 직접 지정하지 않은 최종 블록·파일 필요 값을 다시 계산한다
-        graph = dag.apply_auto_flags(body.graph.model_dump())
+        graph = dag.apply_auto_flags(dag.move_direct_files_to_slots(body.graph.model_dump()))
         try:
             dag.validate_graph(graph)  # UC-202 e301 실행 불가 구성 차단
         except dag.DagError as e:

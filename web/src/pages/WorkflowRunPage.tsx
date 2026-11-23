@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, ApiError } from '../api'
 import ValidationPanel from '../components/ValidationPanel'
 import { AgentNode, Execution, ExecutionListItem, RunInputRecord, Service, SplitPreview, UploadedFile, ValidationIssue, ValidationResult, WorkflowNode } from '../types'
-import { generationLabel, onServiceRenamed, splitPreviewText } from '../workflow'
+import { firstInputSlot, generationLabel, onServiceRenamed, splitPreviewText } from '../workflow'
 
 type Transfer = { node_id: string; node_name: string; provider: string; type: 'user_input' | 'derived_text' | 'file_text'; file_ids?: number[]; sources?: string[] }
 type Preview = { requires_consent: boolean; consent_token: string | null; transfers: Transfer[]; validation: ValidationResult }
@@ -48,7 +48,10 @@ export default function WorkflowRunPage() {
   const entries = useMemo<InputEntry[]>(() => {
     if (!service) return []
     const agents = service.graph.nodes.filter(isAgent)
-    const slotEntries = (service.graph.input_slots ?? []).map((slot) => ({
+    const slots = service.graph.input_slots ?? []
+    // 슬롯이 있는 블록에 예전 방식으로 직접 붙은 파일은 따로 칸을 만들지 않고 그 블록의 첫 번째 슬롯 칸 기본값에 합친다
+    const directFiles = (slotId: string) => agents.filter((agent) => firstInputSlot(agent, slots)?.id === slotId).flatMap((agent) => agent.uploaded_file_ids ?? [])
+    const slotEntries = slots.map((slot) => ({
       kind: 'slot' as const,
       id: slot.id,
       label: slot.description || '사용자 파일',
@@ -56,12 +59,12 @@ export default function WorkflowRunPage() {
       blocks: agents.filter((agent) => (agent.input_slot_ids ?? []).includes(slot.id)).map((agent) => agent.name),
       blockIds: agents.filter((agent) => (agent.input_slot_ids ?? []).includes(slot.id)).map((agent) => agent.id),
       directories: slot.directory_ids,
-      defaults: slot.file_ids,
+      defaults: [...new Set([...slot.file_ids, ...directFiles(slot.id)])],
       split: agents.some((agent) => agent.split?.enabled && (agent.input_slot_ids ?? []).includes(slot.id)),
     }))
     // 슬롯 없이 블록에 직접 파일을 붙인 이전 버전 워크플로우
     const nodeEntries = agents
-      .filter((agent) => (agent.uploaded_file_ids ?? []).length || (agent.needs_file && !(agent.input_slot_ids ?? []).length))
+      .filter((agent) => !firstInputSlot(agent, slots) && ((agent.uploaded_file_ids ?? []).length || (agent.needs_file && !(agent.input_slot_ids ?? []).length)))
       .map((agent) => ({ kind: 'node' as const, id: agent.id, label: agent.name, blocks: [agent.name], blockIds: [agent.id], directories: [], defaults: agent.uploaded_file_ids ?? [], split: !!agent.split?.enabled }))
     return [...slotEntries, ...nodeEntries]
   }, [service])
@@ -82,7 +85,9 @@ export default function WorkflowRunPage() {
           else previous = latest
         }
         const existing = new Set(loadedFiles.map((file) => file.id))
+        const loadedAgents = loaded.graph.nodes.filter(isAgent)
         const next: RunInputs = { slots: {}, nodes: {} }
+        const addSlot = (slotId: string, fileIds: number[]) => { next.slots[slotId] = [...new Set([...(next.slots[slotId] ?? []), ...fileIds])] }
         let dropped = 0
         for (const record of previous?.input_files ?? []) {
           // 나눠 실행한 기록은 원본 파일이 슬롯·블록 기록에 이미 들어 있다
@@ -90,7 +95,10 @@ export default function WorkflowRunPage() {
           const ids = record.files.map((file) => file.id)
           const kept = ids.filter((fileId) => existing.has(fileId))
           dropped += ids.length - kept.length
-          if (record.kind === 'slot') next.slots[record.id] = kept
+          // 슬롯이 있는 블록의 직접 파일 기록(예전 실행)은 그 블록의 첫 번째 슬롯 칸에 합친다
+          const slotOfNode = record.kind === 'node' ? firstInputSlot(loadedAgents.find((agent) => agent.id === record.id), loaded.graph.input_slots ?? []) : undefined
+          if (record.kind === 'slot') addSlot(record.id, kept)
+          else if (slotOfNode) addSlot(slotOfNode.id, kept)
           else next.nodes[record.id] = kept
         }
         setInputs(next)

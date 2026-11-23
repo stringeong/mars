@@ -11,7 +11,7 @@ import ValidationPanel from '../components/ValidationPanel'
 import { stagePositions } from '../flowLayout'
 import { BLOCK_PRESETS, BlockPreset } from '../palette'
 import { AgentNode, Device, DeviceModels, Graph, InputSlot, Service, SharedDirectory, SplitSettings, UploadedFile, ValidationResult, WorkflowNode } from '../types'
-import { announceServiceRenamed, applyAutoFlags, blockingErrors, DEFAULT_SPLIT, FlagExplanation, generationLabel, issuesByNode, onServiceRenamed, shortDate, shortDateTime, splitPreviewText } from '../workflow'
+import { announceServiceRenamed, applyAutoFlags, blockingErrors, DEFAULT_SPLIT, FlagExplanation, firstInputSlot, generationLabel, issuesByNode, moveDirectFilesToSlots, onServiceRenamed, shortDate, shortDateTime, splitPreviewText } from '../workflow'
 
 const nodeTypes = { agent: AgentBlockNode }
 const edgeTypes = { deletable: DeletableEdge }
@@ -137,6 +137,9 @@ export default function ServiceDetailPage() {
   const [validation, setValidation] = useState<ValidationResult | null>(null)
 
   const selectedAgent = selected ? agents[selected] : null
+  // 슬롯이 있는 블록은 파일을 블록이 아니라 첫 번째 슬롯에 붙인다. 실행 화면에는 슬롯마다 칸이 하나만 나온다
+  const fileSlot = firstInputSlot(selectedAgent, inputSlots)
+  const attachedFileIds = fileSlot ? fileSlot.file_ids : selectedAgent?.uploaded_file_ids ?? []
   const issueMap = useMemo(() => issuesByNode(validation), [validation])
   const selectedIssues = selected ? issueMap.get(selected) ?? [] : []
   // 파일 나눠서 병렬 실행: 지금 실행하면 몇 조각이 되는지 서버 검사 결과에서 가져온다
@@ -209,8 +212,9 @@ export default function ServiceDetailPage() {
         setDeviceModels(Object.fromEntries(modelGroups.map((item) => [item.device_id, item])))
         setDirectories(directoryGroups.flat())
         setUploadedFiles(files)
-        setInputSlots(loadedService.graph.input_slots ?? [])
-        const loadedAgents = asAgents(loadedService.graph)
+        // 슬롯이 있는 블록에 예전 방식으로 직접 붙은 파일은 그 슬롯으로 옮겨 보여 준다 (저장하면 서버도 같은 규칙으로 옮긴다)
+        const { agents: loadedAgents, slots: loadedSlots } = moveDirectFilesToSlots(asAgents(loadedService.graph), loadedService.graph.input_slots ?? [])
+        setInputSlots(loadedSlots)
         const positions = layout(loadedAgents, loadedService.graph.edges.filter((edge) => !edge.relation || edge.relation === 'workflow'))
         setAgents(Object.fromEntries(loadedAgents.map((agent) => [agent.id, agent])))
         setNodes(loadedAgents.map((agent) => ({ id: agent.id, type: 'agent', position: agent.position ?? positions[agent.id], data: {} })))
@@ -465,13 +469,19 @@ export default function ServiceDetailPage() {
     setSelected(null)
   }
 
+  function setAttachedFiles(fileIds: number[]) {
+    const ids = [...new Set(fileIds)]
+    if (fileSlot) setInputSlots((current) => current.map((slot) => (slot.id === fileSlot.id ? { ...slot, file_ids: ids } : slot)))
+    else if (selectedAgent) setAgents((current) => (current[selectedAgent.id] ? { ...current, [selectedAgent.id]: { ...current[selectedAgent.id], uploaded_file_ids: ids } } : current))
+  }
+
   function openFileLibrary() {
-    setDraftFileIds([...(selectedAgent?.uploaded_file_ids ?? [])])
+    setDraftFileIds([...attachedFileIds])
     setFileLibraryOpen(true)
   }
 
   function applyFileLibrarySelection() {
-    updateAgent({ uploaded_file_ids: draftFileIds })
+    setAttachedFiles(draftFileIds)
     setFileLibraryOpen(false)
   }
 
@@ -493,20 +503,9 @@ export default function ServiceDetailPage() {
       const uploadedIds = uploaded.map((file) => file.id)
       // 같은 이름의 파일이 이미 붙어 있으면 옛 파일을 빼고 새 파일로 바꾼다. 이름이 다르면 추가한다
       const uploadedNames = new Set(uploaded.map((file) => file.original_name))
-      const attached = selectedAgent?.uploaded_file_ids ?? []
-      const replaced = attached.filter((fileId) => uploadedNames.has(uploadedFileById.get(fileId)?.original_name ?? ''))
-      setAgents((current) => {
-        const agent = current[selected]
-        if (!agent) return current
-        return {
-          ...current,
-          [selected]: {
-            ...agent,
-            uploaded_file_ids: [...new Set([...(agent.uploaded_file_ids ?? []).filter((fileId) => !replaced.includes(fileId)), ...uploadedIds])],
-          },
-        }
-      })
-      setMessage(String(uploaded.length) + "개 파일을 업로드하고 현재 에이전트에 첨부했습니다." + (replaced.length ? ` 같은 이름의 이전 파일 ${replaced.length}개는 새 파일로 바꿨습니다.` : "") + " 저장해 주세요.")
+      const replaced = attachedFileIds.filter((fileId) => uploadedNames.has(uploadedFileById.get(fileId)?.original_name ?? ''))
+      setAttachedFiles([...attachedFileIds.filter((fileId) => !replaced.includes(fileId)), ...uploadedIds])
+      setMessage(String(uploaded.length) + (fileSlot ? `개 파일을 업로드하고 파일 슬롯 '${fileSlot.description || '사용자 파일'}'에 첨부했습니다.` : "개 파일을 업로드하고 현재 에이전트에 첨부했습니다.") + (replaced.length ? ` 같은 이름의 이전 파일 ${replaced.length}개는 새 파일로 바꿨습니다.` : "") + " 저장해 주세요.")
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "파일 업로드 실패")
     } finally {
@@ -684,10 +683,12 @@ export default function ServiceDetailPage() {
           </div>
           <div className="uploaded-file-picker">
             <div className="uploaded-file-heading"><strong>첨부 파일</strong><div className="file-picker-actions"><button type="button" className="btn sm ghost" disabled={fileUploading} onClick={() => uploadInputRef.current?.click()}>{fileUploading ? '업로드 중…' : '새 파일 업로드'}</button><button type="button" className="btn sm ghost" onClick={openFileLibrary}>기존 파일 선택</button></div><input ref={uploadInputRef} className="inline-file-input" type="file" multiple accept=".pdf,.docx,.txt,.md,.csv,.log,.jsonl,.xlsx,.pptx,.json" onChange={(event) => uploadForSelectedAgent(event.target.files)} /></div>
-            <small className="file-picker-help">현재 에이전트가 실행할 때 우선 읽는 파일입니다.</small>
+            <small className="file-picker-help">{fileSlot
+              ? <>파일 슬롯 <b>{fileSlot.description || '사용자 파일'}</b>에 붙습니다{(selectedAgent.input_slot_ids ?? []).length > 1 && ' (이 블록의 첫 번째 슬롯)'}. 이 슬롯을 읽는 블록: {Object.values(agents).filter((agent) => (agent.input_slot_ids ?? []).includes(fileSlot.id)).map((agent) => agent.name).join(', ')}</>
+              : '현재 에이전트가 실행할 때 우선 읽는 파일입니다.'}</small>
             <div className="selected-file-list">
-              {(selectedAgent.uploaded_file_ids ?? []).map((fileId) => { const file = uploadedFileById.get(fileId); return <div className="selected-file-chip" key={fileId}><span><strong>{file?.original_name ?? '삭제된 파일'}</strong><small>{file ? file.size_bytes.toLocaleString() + ' bytes' : '#' + fileId}</small></span><button type="button" aria-label="첨부 해제" onClick={() => updateAgent({ uploaded_file_ids: (selectedAgent.uploaded_file_ids ?? []).filter((id) => id !== fileId) })}>×</button></div> })}
-              {!(selectedAgent.uploaded_file_ids ?? []).length && <span className="muted">선택된 파일이 없습니다.</span>}
+              {attachedFileIds.map((fileId) => { const file = uploadedFileById.get(fileId); return <div className="selected-file-chip" key={fileId}><span><strong>{file?.original_name ?? '삭제된 파일'}</strong><small>{file ? file.size_bytes.toLocaleString() + ' bytes' : '#' + fileId}</small></span><button type="button" aria-label="첨부 해제" onClick={() => setAttachedFiles(attachedFileIds.filter((id) => id !== fileId))}>×</button></div> })}
+              {!attachedFileIds.length && <span className="muted">선택된 파일이 없습니다.</span>}
             </div>
           </div>
           <div className="split-setting">

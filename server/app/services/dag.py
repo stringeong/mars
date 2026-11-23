@@ -421,6 +421,11 @@ def apply_run_inputs(
         if slot_id not in slot_map:
             raise DagError(f"존재하지 않는 파일 슬롯입니다: {slot_id}")
         slot_map[slot_id]["file_ids"] = list(dict.fromkeys(file_ids))
+    # 슬롯 값을 이번 실행용으로 바꾼 블록에 예전 방식으로 직접 붙어 있던 파일은 섞지 않는다.
+    # 실행 화면은 그 파일을 슬롯 칸의 기본값에 합쳐 보여 주므로 슬롯 값에 이미 들어 있다.
+    for node in agent_map.values():
+        if any(slot_id in (slots or {}) for slot_id in node.get("input_slot_ids") or []):
+            node["uploaded_file_ids"] = []
     for node_id, file_ids in (nodes or {}).items():
         if node_id not in agent_map:
             raise DagError(f"존재하지 않는 블록입니다: {node_id}")
@@ -467,6 +472,23 @@ def materialize_approval_nodes(graph: dict) -> dict:
         })
     nodes.extend(added)
     return result
+
+
+def move_direct_files_to_slots(graph: dict) -> dict:
+    """슬롯이 있는 블록에 직접 붙은 파일을 그 블록의 첫 번째 슬롯으로 옮긴 복사본(저장할 때 쓴다).
+
+    예전 편집 화면은 슬롯이 있어도 파일을 블록에 붙였다. 그대로 두면 실행 화면에 칸이 두 번 나오고,
+    슬롯 파일을 바꿔도 옛 파일이 같이 들어간다. 슬롯이 없는 블록의 직접 파일은 그대로 둔다.
+    """
+    moved = copy.deepcopy(graph)
+    slots = {slot.get("id"): slot for slot in moved.get("input_slots") or []}
+    for node in _agent_nodes(moved):
+        target = next((slots[slot_id] for slot_id in node.get("input_slot_ids") or [] if slot_id in slots), None)
+        if target is None or not node.get("uploaded_file_ids"):
+            continue
+        target["file_ids"] = list(dict.fromkeys([*(target.get("file_ids") or []), *node["uploaded_file_ids"]]))
+        node["uploaded_file_ids"] = []
+    return moved
 
 
 def expand_input_slots(graph: dict) -> dict:

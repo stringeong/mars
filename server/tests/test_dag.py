@@ -311,6 +311,33 @@ def test_expand_input_slots_copies_slot_sources_into_blocks():
     assert graph["nodes"][0]["uploaded_file_ids"] == [5]
 
 
+def test_run_slot_files_replace_old_direct_files_of_slot_block():
+    """슬롯 값을 이번 실행용으로 바꾸면 같은 블록에 직접 붙어 있던 옛 파일은 들어가지 않는다."""
+    graph = graph_of(["a", "b"], [("a", "b")])
+    graph["input_slots"] = [{"id": "s1", "file_ids": [7]}]
+    graph["nodes"][0].update(input_slot_ids=["s1"], uploaded_file_ids=[5])
+    graph["nodes"][1].update(uploaded_file_ids=[9])
+    expanded = dag.expand_input_slots(dag.apply_run_inputs(graph, slots={"s1": [8]}))
+    assert expanded["nodes"][0]["uploaded_file_ids"] == [8]
+    # 슬롯이 없는 블록의 직접 파일은 그대로다
+    assert expanded["nodes"][1]["uploaded_file_ids"] == [9]
+    # 이번 실행 값을 주지 않으면 지금처럼 직접 파일과 슬롯 파일을 함께 읽는다
+    assert dag.expand_input_slots(dag.apply_run_inputs(graph))["nodes"][0]["uploaded_file_ids"] == [5, 7]
+
+
+def test_move_direct_files_to_first_slot():
+    graph = graph_of(["a", "b"], [("a", "b")])
+    graph["input_slots"] = [{"id": "s1", "file_ids": [7]}, {"id": "s2", "file_ids": []}]
+    graph["nodes"][0].update(input_slot_ids=["s1", "s2"], uploaded_file_ids=[5, 7])
+    graph["nodes"][1].update(uploaded_file_ids=[9])
+    moved = dag.move_direct_files_to_slots(graph)
+    assert moved["input_slots"][0]["file_ids"] == [7, 5]
+    assert moved["input_slots"][1]["file_ids"] == []
+    assert moved["nodes"][0]["uploaded_file_ids"] == []
+    assert moved["nodes"][1]["uploaded_file_ids"] == [9]
+    assert graph["nodes"][0]["uploaded_file_ids"] == [5, 7]
+
+
 class TestApplyAutoFlags:
     """최종 블록·파일 필요 자동 규칙. 직접 지정한 값(*_manual)은 바꾸지 않는다."""
 
